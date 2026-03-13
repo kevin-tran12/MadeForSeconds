@@ -1,0 +1,14 @@
+# ─── Service Account for Cloud Run ────────────────────────────────────────────
+
+resource "google_service_account" "backend" {
+  project      = var.gcp_project_id
+  account_id   = "mfs-backend"
+  display_name = "MadeForSeconds Backend"
+}
+
+# Grant Firestore access
+resource "google_project_iam_member" "backend_firestore" {
+  project = var.gcp_project_id
+  role    = "roles/datastore.user"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+}

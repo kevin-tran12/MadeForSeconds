@@ -1,0 +1,8 @@
+node_modules
+dist
+.env.local
+.git
+*.md
+backend/__pycache__
+backend/.venv
+terraform
