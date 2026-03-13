@@ -1,9 +1,15 @@
 # ─── Cloud Run Service ────────────────────────────────────────────────────────
+# Always-free tier: 2M req/mo · 360K GB-sec · 180K vCPU-sec · 1 GB egress
+# Region MUST be us-central1, us-east1, or us-west1 for free egress.
 
 resource "google_cloud_run_v2_service" "backend" {
   project  = var.gcp_project_id
   name     = "mfs-backend"
   location = var.gcp_region
+
+  deletion_protection = false
+
+  depends_on = [google_project_service.required_apis]
 
   template {
     service_account = google_service_account.backend.email
@@ -34,9 +40,14 @@ resource "google_cloud_run_v2_service" "backend" {
 
       resources {
         limits = {
-          cpu    = "1"
-          memory = "512Mi"
+          # 256Mi: enough for FastAPI (~80-100 MB actual), halves GB-second usage vs 512Mi
+          cpu    = "1000m"
+          memory = "256Mi"
         }
+        # Faster cold starts with no extra cost for scale-to-zero workloads
+        startup_cpu_boost = true
+        # CPU is throttled when not processing a request (free-tier eligible mode)
+        cpu_idle = true
       }
 
       startup_probe {
@@ -47,8 +58,10 @@ resource "google_cloud_run_v2_service" "backend" {
     }
 
     scaling {
+      # Scale to zero = free when idle
       min_instance_count = 0
-      max_instance_count = 5
+      # Cap at 2 to stay within free egress budget
+      max_instance_count = 2
     }
   }
 }

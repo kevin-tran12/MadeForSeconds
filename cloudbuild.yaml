@@ -1,0 +1,33 @@
+steps:
+  # Build the backend Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - -t
+      - '$_IMAGE:$SHORT_SHA'
+      - -t
+      - '$_IMAGE:latest'
+      - ./backend
+
+  # Push both tags
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [push, '$_IMAGE:$SHORT_SHA']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [push, '$_IMAGE:latest']
+
+  # Deploy the new image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - mfs-backend
+      - --image=$_IMAGE:$SHORT_SHA
+      - --region=$LOCATION
+
+options:
+  # e2-standard-2 is the only machine type included in the free tier
+  machineType: 'E2_STANDARD_2'
+  logging: CLOUD_LOGGING_ONLY

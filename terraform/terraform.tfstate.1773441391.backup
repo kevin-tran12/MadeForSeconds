@@ -1,0 +1,714 @@
+{
+  "version": 4,
+  "terraform_version": "1.5.7",
+  "serial": 45,
+  "lineage": "ea209e73-2ce7-32fe-f7cd-c70c48e78375",
+  "outputs": {
+    "artifact_registry_repo": {
+      "value": "us-central1-docker.pkg.dev/made-for-seconds/mfs",
+      "type": "string"
+    },
+    "service_account_email": {
+      "value": "mfs-backend@made-for-seconds.iam.gserviceaccount.com",
+      "type": "string"
+    }
+  },
+  "resources": [
+    {
+      "mode": "data",
+      "type": "google_project",
+      "name": "project",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "auto_create_network": null,
+            "billing_account": null,
+            "deletion_policy": "PREVENT",
+            "effective_labels": {
+              "firebase": "enabled",
+              "firebase-core": "disabled"
+            },
+            "folder_id": null,
+            "id": "projects/made-for-seconds",
+            "labels": {
+              "firebase": "enabled",
+              "firebase-core": "disabled"
+            },
+            "name": "made-for-seconds",
+            "number": "383853756093",
+            "org_id": null,
+            "project_id": "made-for-seconds",
+            "tags": null,
+            "terraform_labels": {
+              "firebase": "enabled",
+              "firebase-core": "disabled"
+            }
+          },
+          "sensitive_attributes": []
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_artifact_registry_repository",
+      "name": "backend",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "cleanup_policies": [
+              {
+                "action": "DELETE",
+                "condition": [
+                  {
+                    "newer_than": "",
+                    "older_than": "86400s",
+                    "package_name_prefixes": [],
+                    "tag_prefixes": [],
+                    "tag_state": "UNTAGGED",
+                    "version_name_prefixes": []
+                  }
+                ],
+                "id": "delete-untagged",
+                "most_recent_versions": []
+              },
+              {
+                "action": "KEEP",
+                "condition": [],
+                "id": "keep-recent-tagged",
+                "most_recent_versions": [
+                  {
+                    "keep_count": 5,
+                    "package_name_prefixes": []
+                  }
+                ]
+              }
+            ],
+            "cleanup_policy_dry_run": false,
+            "create_time": "2026-03-13T22:14:38.875176Z",
+            "description": "MadeForSeconds backend Docker images",
+            "docker_config": [],
+            "effective_labels": {
+              "goog-terraform-provisioned": "true"
+            },
+            "format": "DOCKER",
+            "id": "projects/made-for-seconds/locations/us-central1/repositories/mfs",
+            "kms_key_name": "",
+            "labels": {},
+            "location": "us-central1",
+            "maven_config": [],
+            "mode": "STANDARD_REPOSITORY",
+            "name": "mfs",
+            "project": "made-for-seconds",
+            "remote_repository_config": [],
+            "repository_id": "mfs",
+            "terraform_labels": {
+              "goog-terraform-provisioned": "true"
+            },
+            "timeouts": null,
+            "update_time": "2026-03-13T22:21:55.671308Z",
+            "virtual_repository_config": [],
+            "vulnerability_scanning_config": [
+              {
+                "enablement_config": "",
+                "enablement_state": "SCANNING_DISABLED",
+                "enablement_state_reason": "API containerscanning.googleapis.com is not enabled."
+              }
+            ]
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInVwZGF0ZSI6MTIwMDAwMDAwMDAwMH19",
+          "dependencies": [
+            "google_project_service.required_apis"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_cloud_run_v2_service",
+      "name": "backend",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "status": "tainted",
+          "schema_version": 0,
+          "attributes": {
+            "annotations": {},
+            "binary_authorization": [],
+            "build_config": [],
+            "client": "",
+            "client_version": "",
+            "conditions": [
+              {
+                "execution_reason": "",
+                "last_transition_time": "2026-03-13T22:19:31.089517Z",
+                "message": "Image 'us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest' not found.",
+                "reason": "REVISION_FAILED",
+                "revision_reason": "",
+                "severity": "",
+                "state": "CONDITION_FAILED",
+                "type": "RoutesReady"
+              },
+              {
+                "execution_reason": "",
+                "last_transition_time": "2026-03-13T22:19:30.223954Z",
+                "message": "Image 'us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest' not found.",
+                "reason": "",
+                "revision_reason": "",
+                "severity": "",
+                "state": "CONDITION_FAILED",
+                "type": "ConfigurationsReady"
+              }
+            ],
+            "create_time": "2026-03-13T22:19:29.902996Z",
+            "creator": "kevin.tranCB@gmail.com",
+            "custom_audiences": [],
+            "delete_time": "",
+            "deletion_protection": true,
+            "description": "",
+            "effective_annotations": {},
+            "effective_labels": {
+              "goog-terraform-provisioned": "true"
+            },
+            "etag": "\"CPGa0s0GEKDAyq4D/cHJvamVjdHMvbWFkZS1mb3Itc2Vjb25kcy9sb2NhdGlvbnMvdXMtY2VudHJhbDEvc2VydmljZXMvbWZzLWJhY2tlbmQ\"",
+            "expire_time": "",
+            "generation": "1",
+            "id": "projects/made-for-seconds/locations/us-central1/services/mfs-backend",
+            "ingress": "INGRESS_TRAFFIC_ALL",
+            "invoker_iam_disabled": false,
+            "labels": {},
+            "last_modifier": "kevin.tranCB@gmail.com",
+            "latest_created_revision": "projects/made-for-seconds/locations/us-central1/services/mfs-backend/revisions/mfs-backend-00001-5ph",
+            "latest_ready_revision": "",
+            "launch_stage": "GA",
+            "location": "us-central1",
+            "name": "mfs-backend",
+            "observed_generation": "1",
+            "project": "made-for-seconds",
+            "reconciling": false,
+            "scaling": [
+              {
+                "manual_instance_count": 0,
+                "min_instance_count": 0,
+                "scaling_mode": ""
+              }
+            ],
+            "template": [
+              {
+                "annotations": {},
+                "containers": [
+                  {
+                    "args": [],
+                    "base_image_uri": "",
+                    "build_info": [],
+                    "command": [],
+                    "depends_on": [],
+                    "env": [
+                      {
+                        "name": "ADMIN_EMAILS",
+                        "value": "kevin.trancb@gmail.com",
+                        "value_source": []
+                      },
+                      {
+                        "name": "ALLOWED_ORIGINS",
+                        "value": "http://localhost:5173",
+                        "value_source": []
+                      },
+                      {
+                        "name": "ENVIRONMENT",
+                        "value": "production",
+                        "value_source": []
+                      },
+                      {
+                        "name": "GCP_PROJECT_ID",
+                        "value": "made-for-seconds",
+                        "value_source": []
+                      }
+                    ],
+                    "image": "us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest",
+                    "liveness_probe": [],
+                    "name": "",
+                    "ports": [
+                      {
+                        "container_port": 8000,
+                        "name": "http1"
+                      }
+                    ],
+                    "resources": [
+                      {
+                        "cpu_idle": true,
+                        "limits": {
+                          "cpu": "1000m",
+                          "memory": "256Mi"
+                        },
+                        "startup_cpu_boost": true
+                      }
+                    ],
+                    "startup_probe": [
+                      {
+                        "failure_threshold": 3,
+                        "grpc": [],
+                        "http_get": [
+                          {
+                            "http_headers": [],
+                            "path": "/api/health",
+                            "port": 8000
+                          }
+                        ],
+                        "initial_delay_seconds": 0,
+                        "period_seconds": 10,
+                        "tcp_socket": [],
+                        "timeout_seconds": 1
+                      }
+                    ],
+                    "volume_mounts": [],
+                    "working_dir": ""
+                  }
+                ],
+                "encryption_key": "",
+                "execution_environment": "",
+                "gpu_zonal_redundancy_disabled": false,
+                "labels": {},
+                "max_instance_request_concurrency": 80,
+                "node_selector": [],
+                "revision": "",
+                "scaling": [
+                  {
+                    "max_instance_count": 2,
+                    "min_instance_count": 0
+                  }
+                ],
+                "service_account": "mfs-backend@made-for-seconds.iam.gserviceaccount.com",
+                "session_affinity": false,
+                "timeout": "300s",
+                "volumes": [],
+                "vpc_access": []
+              }
+            ],
+            "terminal_condition": [
+              {
+                "execution_reason": "",
+                "last_transition_time": "2026-03-13T22:19:31.089517Z",
+                "message": "Image 'us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest' not found.",
+                "reason": "REVISION_FAILED",
+                "revision_reason": "",
+                "severity": "",
+                "state": "CONDITION_FAILED",
+                "type": "Ready"
+              }
+            ],
+            "terraform_labels": {
+              "goog-terraform-provisioned": "true"
+            },
+            "timeouts": null,
+            "traffic": [
+              {
+                "percent": 100,
+                "revision": "",
+                "tag": "",
+                "type": "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+              }
+            ],
+            "traffic_statuses": [],
+            "uid": "c68f9ff0-5243-488e-8d12-7951599e187f",
+            "update_time": "2026-03-13T22:19:29.902996Z",
+            "uri": "",
+            "urls": [
+              "https://mfs-backend-383853756093.us-central1.run.app"
+            ]
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInVwZGF0ZSI6MTIwMDAwMDAwMDAwMH19",
+          "dependencies": [
+            "google_project_service.required_apis",
+            "google_service_account.backend"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_cloud_run_v2_service_iam_member",
+      "name": "public",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": []
+    },
+    {
+      "mode": "managed",
+      "type": "google_firestore_database",
+      "name": "default",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "app_engine_integration_mode": "DISABLED",
+            "cmek_config": [],
+            "concurrency_mode": "PESSIMISTIC",
+            "create_time": "",
+            "database_edition": "STANDARD",
+            "delete_protection_state": "DELETE_PROTECTION_DISABLED",
+            "deletion_policy": "ABANDON",
+            "earliest_version_time": "2026-03-13T22:14:30.385957Z",
+            "etag": "IOeM9Nv3nZMDMKWCtIvznZMD",
+            "id": "projects/made-for-seconds/databases/(default)",
+            "key_prefix": "",
+            "location_id": "us-central1",
+            "name": "(default)",
+            "point_in_time_recovery_enablement": "POINT_IN_TIME_RECOVERY_DISABLED",
+            "project": "made-for-seconds",
+            "tags": null,
+            "timeouts": null,
+            "type": "FIRESTORE_NATIVE",
+            "uid": "c2ec3fd2-d243-4244-bc74-24e1cab52775",
+            "update_time": "",
+            "version_retention_period": "3600s"
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInVwZGF0ZSI6MTIwMDAwMDAwMDAwMH19",
+          "dependencies": [
+            "google_project_service.required_apis"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_identity_platform_config",
+      "name": "default",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "authorized_domains": [
+              "made-for-seconds.firebaseapp.com",
+              "made-for-seconds.web.app"
+            ],
+            "autodelete_anonymous_users": false,
+            "blocking_functions": [],
+            "client": [
+              {
+                "api_key": "AIzaSyBBq8BGFebNuclquJwpQWW3njATY3f-EMM",
+                "firebase_subdomain": "made-for-seconds",
+                "permissions": [
+                  {
+                    "disabled_user_deletion": false,
+                    "disabled_user_signup": false
+                  }
+                ]
+              }
+            ],
+            "id": "projects/made-for-seconds/config",
+            "mfa": [
+              {
+                "enabled_providers": [],
+                "provider_configs": [],
+                "state": "DISABLED"
+              }
+            ],
+            "monitoring": [
+              {
+                "request_logging": [
+                  {
+                    "enabled": false
+                  }
+                ]
+              }
+            ],
+            "multi_tenant": [
+              {
+                "allow_tenants": false,
+                "default_tenant_location": ""
+              }
+            ],
+            "name": "projects/383853756093/config",
+            "project": "made-for-seconds",
+            "quota": [],
+            "sign_in": [
+              {
+                "allow_duplicate_emails": false,
+                "anonymous": [],
+                "email": [
+                  {
+                    "enabled": true,
+                    "password_required": true
+                  }
+                ],
+                "hash_config": [
+                  {
+                    "algorithm": "SCRYPT",
+                    "memory_cost": 14,
+                    "rounds": 8,
+                    "salt_separator": "Bw==",
+                    "signer_key": "n+mKTWQ2cbFEWevr7qN1c1XIhRF/enuOyxCX1fQLDsX5d9q3T+DaxaekZAvHrEehX3ORUb59XLSQFm5t6y/F7A=="
+                  }
+                ],
+                "phone_number": [
+                  {
+                    "enabled": false,
+                    "test_phone_numbers": {}
+                  }
+                ]
+              }
+            ],
+            "sms_region_config": [
+              {
+                "allow_by_default": [],
+                "allowlist_only": []
+              }
+            ],
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInVwZGF0ZSI6MTIwMDAwMDAwMDAwMH19",
+          "dependencies": [
+            "google_project_service.required_apis"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_project_iam_member",
+      "name": "backend_firestore",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "condition": [],
+            "etag": "BwZM73ioqRg=",
+            "id": "made-for-seconds/roles/datastore.user/serviceAccount:mfs-backend@made-for-seconds.iam.gserviceaccount.com",
+            "member": "serviceAccount:mfs-backend@made-for-seconds.iam.gserviceaccount.com",
+            "project": "made-for-seconds",
+            "role": "roles/datastore.user"
+          },
+          "sensitive_attributes": [],
+          "private": "bnVsbA==",
+          "dependencies": [
+            "google_project_service.required_apis",
+            "google_service_account.backend"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_project_iam_member",
+      "name": "cloudbuild_artifact_registry",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "condition": [],
+            "etag": "BwZM73ioqRg=",
+            "id": "made-for-seconds/roles/artifactregistry.writer/serviceAccount:383853756093@cloudbuild.gserviceaccount.com",
+            "member": "serviceAccount:383853756093@cloudbuild.gserviceaccount.com",
+            "project": "made-for-seconds",
+            "role": "roles/artifactregistry.writer"
+          },
+          "sensitive_attributes": [],
+          "private": "bnVsbA==",
+          "dependencies": [
+            "data.google_project.project",
+            "google_project_service.required_apis"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_project_iam_member",
+      "name": "cloudbuild_run_developer",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "condition": [],
+            "etag": "BwZM73ioqRg=",
+            "id": "made-for-seconds/roles/run.developer/serviceAccount:383853756093@cloudbuild.gserviceaccount.com",
+            "member": "serviceAccount:383853756093@cloudbuild.gserviceaccount.com",
+            "project": "made-for-seconds",
+            "role": "roles/run.developer"
+          },
+          "sensitive_attributes": [],
+          "private": "bnVsbA==",
+          "dependencies": [
+            "data.google_project.project",
+            "google_project_service.required_apis"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_project_service",
+      "name": "required_apis",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "index_key": "artifactregistry.googleapis.com",
+          "schema_version": 0,
+          "attributes": {
+            "disable_dependent_services": null,
+            "disable_on_destroy": false,
+            "id": "made-for-seconds/artifactregistry.googleapis.com",
+            "project": "made-for-seconds",
+            "service": "artifactregistry.googleapis.com",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInJlYWQiOjYwMDAwMDAwMDAwMCwidXBkYXRlIjoxMjAwMDAwMDAwMDAwfX0="
+        },
+        {
+          "index_key": "cloudbuild.googleapis.com",
+          "schema_version": 0,
+          "attributes": {
+            "disable_dependent_services": null,
+            "disable_on_destroy": false,
+            "id": "made-for-seconds/cloudbuild.googleapis.com",
+            "project": "made-for-seconds",
+            "service": "cloudbuild.googleapis.com",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInJlYWQiOjYwMDAwMDAwMDAwMCwidXBkYXRlIjoxMjAwMDAwMDAwMDAwfX0="
+        },
+        {
+          "index_key": "firestore.googleapis.com",
+          "schema_version": 0,
+          "attributes": {
+            "disable_dependent_services": null,
+            "disable_on_destroy": false,
+            "id": "made-for-seconds/firestore.googleapis.com",
+            "project": "made-for-seconds",
+            "service": "firestore.googleapis.com",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInJlYWQiOjYwMDAwMDAwMDAwMCwidXBkYXRlIjoxMjAwMDAwMDAwMDAwfX0="
+        },
+        {
+          "index_key": "iam.googleapis.com",
+          "schema_version": 0,
+          "attributes": {
+            "disable_dependent_services": null,
+            "disable_on_destroy": false,
+            "id": "made-for-seconds/iam.googleapis.com",
+            "project": "made-for-seconds",
+            "service": "iam.googleapis.com",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInJlYWQiOjYwMDAwMDAwMDAwMCwidXBkYXRlIjoxMjAwMDAwMDAwMDAwfX0="
+        },
+        {
+          "index_key": "identitytoolkit.googleapis.com",
+          "schema_version": 0,
+          "attributes": {
+            "disable_dependent_services": null,
+            "disable_on_destroy": false,
+            "id": "made-for-seconds/identitytoolkit.googleapis.com",
+            "project": "made-for-seconds",
+            "service": "identitytoolkit.googleapis.com",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInJlYWQiOjYwMDAwMDAwMDAwMCwidXBkYXRlIjoxMjAwMDAwMDAwMDAwfX0="
+        },
+        {
+          "index_key": "run.googleapis.com",
+          "schema_version": 0,
+          "attributes": {
+            "disable_dependent_services": null,
+            "disable_on_destroy": false,
+            "id": "made-for-seconds/run.googleapis.com",
+            "project": "made-for-seconds",
+            "service": "run.googleapis.com",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInJlYWQiOjYwMDAwMDAwMDAwMCwidXBkYXRlIjoxMjAwMDAwMDAwMDAwfX0="
+        },
+        {
+          "index_key": "secretmanager.googleapis.com",
+          "schema_version": 0,
+          "attributes": {
+            "disable_dependent_services": null,
+            "disable_on_destroy": false,
+            "id": "made-for-seconds/secretmanager.googleapis.com",
+            "project": "made-for-seconds",
+            "service": "secretmanager.googleapis.com",
+            "timeouts": null
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjoxMjAwMDAwMDAwMDAwLCJkZWxldGUiOjEyMDAwMDAwMDAwMDAsInJlYWQiOjYwMDAwMDAwMDAwMCwidXBkYXRlIjoxMjAwMDAwMDAwMDAwfX0="
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_service_account",
+      "name": "backend",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "account_id": "mfs-backend",
+            "create_ignore_already_exists": null,
+            "description": "",
+            "disabled": false,
+            "display_name": "MadeForSeconds Backend",
+            "email": "mfs-backend@made-for-seconds.iam.gserviceaccount.com",
+            "id": "projects/made-for-seconds/serviceAccounts/mfs-backend@made-for-seconds.iam.gserviceaccount.com",
+            "member": "serviceAccount:mfs-backend@made-for-seconds.iam.gserviceaccount.com",
+            "name": "projects/made-for-seconds/serviceAccounts/mfs-backend@made-for-seconds.iam.gserviceaccount.com",
+            "project": "made-for-seconds",
+            "timeouts": null,
+            "unique_id": "104761386942927811093"
+          },
+          "sensitive_attributes": [],
+          "private": "eyJlMmJmYjczMC1lY2FhLTExZTYtOGY4OC0zNDM2M2JjN2M0YzAiOnsiY3JlYXRlIjozMDAwMDAwMDAwMDB9fQ==",
+          "dependencies": [
+            "google_project_service.required_apis"
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "managed",
+      "type": "google_service_account_iam_member",
+      "name": "cloudbuild_act_as_backend",
+      "provider": "provider[\"registry.terraform.io/hashicorp/google\"]",
+      "instances": [
+        {
+          "schema_version": 0,
+          "attributes": {
+            "condition": [],
+            "etag": "BwZM7zJqq9g=",
+            "id": "projects/made-for-seconds/serviceAccounts/mfs-backend@made-for-seconds.iam.gserviceaccount.com/roles/iam.serviceAccountUser/serviceAccount:383853756093@cloudbuild.gserviceaccount.com",
+            "member": "serviceAccount:383853756093@cloudbuild.gserviceaccount.com",
+            "role": "roles/iam.serviceAccountUser",
+            "service_account_id": "projects/made-for-seconds/serviceAccounts/mfs-backend@made-for-seconds.iam.gserviceaccount.com"
+          },
+          "sensitive_attributes": [],
+          "private": "bnVsbA==",
+          "dependencies": [
+            "data.google_project.project",
+            "google_project_service.required_apis",
+            "google_service_account.backend"
+          ]
+        }
+      ]
+    }
+  ],
+  "check_results": null
+}
