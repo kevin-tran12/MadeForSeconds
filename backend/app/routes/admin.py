@@ -1,0 +1,73 @@
+import re
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from ..auth import require_admin
+from ..firestore import get_db
+from ..models import Recipe, RecipeCreate, RecipeUpdate
+
+router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
+
+
+def _doc_to_recipe(doc) -> Recipe:
+    data = doc.to_dict()
+    data["id"] = doc.id
+    return Recipe(**data)
+
+
+def _generate_slug(title: str) -> str:
+    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", title.lower()))
+
+
+@router.get("/recipes", response_model=list[Recipe])
+async def admin_list_recipes():
+    db = get_db()
+    docs = db.collection("recipes").order_by("created_at", direction="DESCENDING").stream()
+    return [_doc_to_recipe(doc) for doc in docs]
+
+
+@router.post("/recipes", response_model=Recipe, status_code=201)
+async def admin_create_recipe(body: RecipeCreate):
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    data = body.model_dump()
+    data["slug"] = _generate_slug(body.title)
+    data["created_at"] = now
+    data["updated_at"] = now
+
+    doc_ref = db.collection("recipes").document()
+    doc_ref.set(data)
+
+    data["id"] = doc_ref.id
+    return Recipe(**data)
+
+
+@router.put("/recipes/{recipe_id}", response_model=Recipe)
+async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
+    db = get_db()
+    doc_ref = db.collection("recipes").document(recipe_id)
+    doc = doc_ref.get()
+
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    updates = body.model_dump(exclude_none=True)
+    updates["updated_at"] = datetime.now(timezone.utc)
+    doc_ref.update(updates)
+
+    updated = doc_ref.get().to_dict()
+    updated["id"] = recipe_id
+    return Recipe(**updated)
+
+
+@router.delete("/recipes/{recipe_id}", status_code=204)
+async def admin_delete_recipe(recipe_id: str):
+    db = get_db()
+    doc_ref = db.collection("recipes").document(recipe_id)
+    doc = doc_ref.get()
+
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    doc_ref.delete()
