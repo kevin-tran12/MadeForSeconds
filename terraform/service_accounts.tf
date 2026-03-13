@@ -4,6 +4,8 @@ resource "google_service_account" "backend" {
   project      = var.gcp_project_id
   account_id   = "mfs-backend"
   display_name = "MadeForSeconds Backend"
+
+  depends_on = [google_project_service.required_apis]
 }
 
 # Grant Firestore access

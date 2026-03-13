@@ -1,10 +1,12 @@
 # Copy to terraform.tfvars and fill in values
 
 gcp_project_id       = "your-gcp-project-id"
-gcp_region           = "us-central1"
+gcp_region           = "us-central1"  # Keep NA region for Cloud Run free egress
 cloudflare_api_token = "your-cloudflare-api-token"
 cloudflare_zone_id   = "your-cloudflare-zone-id"
 domain               = "madefor.seconds"
 admin_emails         = "admin@yourdomain.com"
 allowed_origins      = "https://yourdomain.com"
 backend_image        = "us-central1-docker.pkg.dev/your-gcp-project-id/mfs/backend:latest"
+github_owner         = "your-github-username"
+github_repo          = "MadeForSeconds"
