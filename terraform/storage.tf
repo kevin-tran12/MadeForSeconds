@@ -11,7 +11,15 @@ resource "google_storage_bucket" "images" {
   cors {
     origin          = split(",", var.allowed_origins)
     method          = ["GET", "HEAD", "OPTIONS"]
-    response_header = ["Content-Type", "Cache-Control"]
+    # Best practice: List specific headers needed for delivery and browser caching
+    response_header = [
+      "Content-Type",
+      "Cache-Control",
+      "Content-Length",
+      "Content-Disposition",
+      "ETag",
+      "Last-Modified"
+    ]
     max_age_seconds = 3600
   }
 }

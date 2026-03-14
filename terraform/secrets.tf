@@ -17,3 +17,8 @@ resource "google_secret_manager_secret" "admin_emails" {
 
   depends_on = [google_project_service.required_apis]
 }
+
+resource "google_secret_manager_secret_version" "admin_emails_initial" {
+  secret      = google_secret_manager_secret.admin_emails.id
+  secret_data = var.admin_emails
+}

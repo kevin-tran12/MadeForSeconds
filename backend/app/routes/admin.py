@@ -101,6 +101,9 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
         
         # Stream upload directly from the file object
         blob.upload_from_file(file.file, content_type=file.content_type)
-        return {"url": blob.public_url}
+        
+        # Construct a reliable public URL
+        url = f"https://storage.googleapis.com/{settings.gcs_bucket_name}/{filename}"
+        return {"url": url}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
