@@ -132,11 +132,14 @@ async def rss_feed():
     def rss_date(dt) -> str:
         return formatdate(dt.timestamp(), usegmt=True)
 
+    def xml_escape(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
+
     items = []
     for r in recipes:
         url = f"{SITE_URL}/recipes/{r.slug}"
-        desc = r.description.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        title = r.title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        desc = xml_escape(r.description)
+        title = xml_escape(r.title)
         item = (
             f"<item>"
             f"<title>{title}</title>"
@@ -147,7 +150,7 @@ async def rss_feed():
             f"</item>"
         )
         if r.image_url:
-            item = item.replace("</item>", f"<enclosure url='{r.image_url}' type='image/jpeg'/></item>")
+            item = item.replace("</item>", f"<enclosure url='{xml_escape(r.image_url)}' type='image/jpeg'/></item>")
         items.append(item)
 
     pub_date = rss_date(recipes[0].created_at) if recipes else formatdate(usegmt=True)
