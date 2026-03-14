@@ -1,5 +1,5 @@
 import { useState, type FormEvent, useRef } from 'react'
-import type { Recipe, RecipeFormData, Difficulty, Nutrition } from '../../lib/types'
+import type { Recipe, RecipeFormData, Difficulty, NutritionEntry } from '../../lib/types'
 import { adminApi } from '../../lib/api'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
@@ -21,20 +21,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   )
 }
 
-function NutritionInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-gray-600">{label}</label>
-      <input
-        type="number"
-        min="0"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="—"
-        className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
-      />
-    </div>
-  )
+type NutritionRow = { label: string; value: string; unit: string }
+
+function initNutritionRows(nutrition: NutritionEntry[] | undefined): NutritionRow[] {
+  if (!nutrition || nutrition.length === 0) return []
+  return nutrition.map((n) => ({ label: n.label, value: String(n.value), unit: n.unit }))
 }
 
 export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) {
@@ -54,13 +45,9 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [instructions, setInstructions] = useState(
     recipe?.instructions ?? [{ step: 1, text: '' }]
   )
-  // Nutrition
-  const n = recipe?.nutrition
-  const [calories, setCalories] = useState(String(n?.calories ?? ''))
-  const [protein, setProtein] = useState(String(n?.protein ?? ''))
-  const [carbs, setCarbs] = useState(String(n?.carbs ?? ''))
-  const [fat, setFat] = useState(String(n?.fat ?? ''))
-  const [fiber, setFiber] = useState(String(n?.fiber ?? ''))
+  const [nutritionRows, setNutritionRows] = useState<NutritionRow[]>(
+    () => initNutritionRows(recipe?.nutrition)
+  )
 
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -94,17 +81,22 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     setCategories(categories.filter((c) => c !== cat))
   }
 
-  function buildNutrition(): Nutrition | null {
-    const vals = { calories, protein, carbs, fat, fiber }
-    const parsed = {
-      calories: calories ? parseInt(calories) : null,
-      protein: protein ? parseInt(protein) : null,
-      carbs: carbs ? parseInt(carbs) : null,
-      fat: fat ? parseInt(fat) : null,
-      fiber: fiber ? parseInt(fiber) : null,
-    }
-    const hasAny = Object.values(vals).some((v) => v !== '')
-    return hasAny ? parsed : null
+  function addNutritionRow() {
+    setNutritionRows((prev) => [...prev, { label: '', value: '', unit: '' }])
+  }
+
+  function removeNutritionRow(i: number) {
+    setNutritionRows((prev) => prev.filter((_, idx) => idx !== i))
+  }
+
+  function updateNutritionRow(i: number, field: keyof NutritionRow, val: string) {
+    setNutritionRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)))
+  }
+
+  function buildNutrition(): NutritionEntry[] {
+    return nutritionRows
+      .filter((r) => r.label.trim() && r.value !== '')
+      .map((r) => ({ label: r.label.trim(), value: parseFloat(r.value) || 0, unit: r.unit.trim() }))
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -260,13 +252,56 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
       </Section>
 
       <Section title="Nutrition (optional)">
-        <p className="text-xs text-gray-400 -mt-2">Per serving. Leave blank to omit from the recipe page.</p>
-        <div className="grid grid-cols-5 gap-3">
-          <NutritionInput label="Calories (kcal)" value={calories} onChange={setCalories} />
-          <NutritionInput label="Protein (g)" value={protein} onChange={setProtein} />
-          <NutritionInput label="Carbs (g)" value={carbs} onChange={setCarbs} />
-          <NutritionInput label="Fat (g)" value={fat} onChange={setFat} />
-          <NutritionInput label="Fiber (g)" value={fiber} onChange={setFiber} />
+        <p className="text-xs text-gray-400 -mt-2">Per serving. Add any nutrients — calories, macros, vitamins, minerals, etc.</p>
+        <div className="flex flex-col gap-2">
+          {nutritionRows.length > 0 && (
+            <div className="grid grid-cols-[1fr_5rem_4rem_2rem] gap-2 px-1">
+              <span className="text-xs font-medium text-gray-500">Nutrient</span>
+              <span className="text-xs font-medium text-gray-500">Amount</span>
+              <span className="text-xs font-medium text-gray-500">Unit</span>
+              <span />
+            </div>
+          )}
+          {nutritionRows.map((row, i) => (
+            <div key={i} className="grid grid-cols-[1fr_5rem_4rem_2rem] items-center gap-2">
+              <input
+                type="text"
+                value={row.label}
+                onChange={(e) => updateNutritionRow(i, 'label', e.target.value)}
+                placeholder="e.g. Calories, Sodium, Vitamin C"
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+              />
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={row.value}
+                onChange={(e) => updateNutritionRow(i, 'value', e.target.value)}
+                placeholder="—"
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+              />
+              <input
+                type="text"
+                value={row.unit}
+                onChange={(e) => updateNutritionRow(i, 'unit', e.target.value)}
+                placeholder="g / mg"
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+              />
+              <button
+                type="button"
+                onClick={() => removeNutritionRow(i)}
+                className="flex items-center justify-center rounded-lg p-1 text-gray-400 hover:text-red-500"
+                aria-label="Remove"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ))}
+          <Button type="button" variant="secondary" size="sm" onClick={addNutritionRow} className="self-start mt-1">
+            + Add item
+          </Button>
         </div>
       </Section>
 

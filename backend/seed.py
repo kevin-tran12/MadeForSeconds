@@ -1,5 +1,6 @@
 """Seed the Firestore emulator with sample recipes."""
 
+import sys
 from datetime import datetime, timezone
 
 from google.cloud.firestore import Client
@@ -32,6 +33,7 @@ RECIPES = [
         "categories": ["pasta", "italian", "quick"],
         "image_url": "https://images.unsplash.com/photo-1612874742237-6526221588e3?w=800&q=80",
         "published": True,
+        "nutrition": [],
     },
     {
         "title": "Fluffy Buttermilk Pancakes",
@@ -50,7 +52,7 @@ RECIPES = [
         "instructions": [
             {"step": 1, "text": "Whisk flour, sugar, baking powder, baking soda, and salt in a large bowl."},
             {"step": 2, "text": "In another bowl, whisk buttermilk, egg, and melted butter together."},
-            {"step": 3, "text": "Fold wet ingredients into dry until just combined \u2014 lumps are fine. Rest for 5 minutes."},
+            {"step": 3, "text": "Fold wet ingredients into dry until just combined — lumps are fine. Rest for 5 minutes."},
             {"step": 4, "text": "Heat a non-stick pan or griddle over medium heat and lightly butter it."},
             {"step": 5, "text": "Pour 1/4 cup batter per pancake. Cook until bubbles form and edges look set, about 2 min."},
             {"step": 6, "text": "Flip and cook 1 more minute until golden. Serve with maple syrup."},
@@ -62,6 +64,7 @@ RECIPES = [
         "categories": ["breakfast", "vegetarian", "quick"],
         "image_url": "https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=800&q=80",
         "published": True,
+        "nutrition": [],
     },
     {
         "title": "Roasted Garlic Hummus",
@@ -90,19 +93,78 @@ RECIPES = [
         "categories": ["snack", "vegetarian", "vegan", "make-ahead"],
         "image_url": "https://images.unsplash.com/photo-1585325701954-b9e08b5cfb71?w=800&q=80",
         "published": True,
+        "nutrition": [],
+    },
+    {
+        "title": "Tonkotsu Ramen",
+        "slug": "tonkotsu-ramen",
+        "description": "A deeply rich, milky pork bone broth with tender chashu pork, marinated soft-boiled eggs, and fresh ramen noodles. This is the real deal — it takes time, but the result is extraordinary.",
+        "ingredients": [
+            {"item": "pork trotters or neck bones", "amount": "1", "unit": "kg", "group": "Broth"},
+            {"item": "water", "amount": "4", "unit": "L", "group": "Broth"},
+            {"item": "ginger, sliced", "amount": "5", "unit": "cm", "group": "Broth"},
+            {"item": "garlic cloves", "amount": "6", "unit": "", "group": "Broth"},
+            {"item": "soy sauce", "amount": "4", "unit": "tbsp", "group": "Tare"},
+            {"item": "mirin", "amount": "2", "unit": "tbsp", "group": "Tare"},
+            {"item": "sake", "amount": "2", "unit": "tbsp", "group": "Tare"},
+            {"item": "pork belly, skin-on", "amount": "500", "unit": "g", "group": "Chashu Pork"},
+            {"item": "soy sauce", "amount": "100", "unit": "ml", "group": "Chashu Pork"},
+            {"item": "mirin", "amount": "50", "unit": "ml", "group": "Chashu Pork"},
+            {"item": "sake", "amount": "50", "unit": "ml", "group": "Chashu Pork"},
+            {"item": "sugar", "amount": "2", "unit": "tbsp", "group": "Chashu Pork"},
+            {"item": "eggs", "amount": "4", "unit": "", "group": "Ramen Eggs"},
+            {"item": "soy sauce", "amount": "3", "unit": "tbsp", "group": "Ramen Eggs"},
+            {"item": "mirin", "amount": "1", "unit": "tbsp", "group": "Ramen Eggs"},
+            {"item": "fresh ramen noodles", "amount": "4", "unit": "portions", "group": "To Serve"},
+            {"item": "green onions, sliced", "amount": "4", "unit": "stalks", "group": "To Serve"},
+            {"item": "nori sheets", "amount": "4", "unit": "", "group": "To Serve"},
+            {"item": "sesame seeds", "amount": "2", "unit": "tsp", "group": "To Serve"},
+            {"item": "toasted sesame oil", "amount": "1", "unit": "tsp", "group": "To Serve"},
+        ],
+        "instructions": [
+            {"step": 1, "text": "Blanch pork bones in boiling water for 10 minutes. Rinse thoroughly under cold water to remove impurities.", "tip": "This step is critical for a clean, white broth. Don't skip it."},
+            {"step": 2, "text": "Place blanched bones in a large pot with 4L cold water, ginger, and garlic. Bring to a rolling boil over high heat."},
+            {"step": 3, "text": "Boil vigorously for 3–4 hours, adding water as needed to keep bones submerged. The aggressive boil emulsifies the fat into the broth, creating the signature milky white color.", "tip": "The broth should look opaque white, like milk. If it's clear, increase the heat."},
+            {"step": 4, "text": "Combine soy sauce, mirin, and sake in a small saucepan. Simmer for 5 minutes to cook off alcohol. This is your tare."},
+            {"step": 5, "text": "Roll pork belly tightly and tie with kitchen twine. Sear in an oven-safe pan until browned on all sides."},
+            {"step": 6, "text": "Add soy sauce, mirin, sake, and sugar to the pan. Add water to come halfway up the pork. Braise at 160°C for 2 hours, turning every 30 minutes.", "tip": "The chashu is done when you can pierce it easily with a chopstick and the edges have a lacquered, deep brown color."},
+            {"step": 7, "text": "Boil eggs for exactly 6.5 minutes, then transfer to ice water. Peel and marinate in soy sauce and mirin mixture for at least 4 hours.", "tip": "The yolk should be jammy — set on the outside but still slightly soft in the center."},
+            {"step": 8, "text": "Strain the broth, discarding solids. Season with tare — start with 2 tbsp per bowl and adjust to taste."},
+            {"step": 9, "text": "Cook noodles per package instructions. Drain and divide into bowls."},
+            {"step": 10, "text": "Ladle hot broth over noodles. Top with sliced chashu, halved ramen egg, nori, green onions, sesame seeds, and a drop of sesame oil."},
+        ],
+        "prep_time_minutes": 60,
+        "cook_time_minutes": 240,
+        "servings": 4,
+        "difficulty": "hard",
+        "categories": ["japanese", "noodles", "pork", "soup"],
+        "image_url": "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?w=800&q=80",
+        "published": True,
+        "nutrition": [
+            {"label": "Calories", "value": 820, "unit": "kcal"},
+            {"label": "Protein", "value": 52, "unit": "g"},
+            {"label": "Carbs", "value": 68, "unit": "g"},
+            {"label": "Fat", "value": 34, "unit": "g"},
+            {"label": "Fiber", "value": 3, "unit": "g"},
+        ],
     },
 ]
 
 
 def main():
+    force = "--force" in sys.argv
     db = Client(project="madefor-seconds-local")
     collection = db.collection("recipes")
 
-    # Check if recipes already exist
     existing = list(collection.limit(1).stream())
-    if existing:
-        print("Recipes already exist, skipping seed.")
+    if existing and not force:
+        print("Recipes already exist. Use --force to reseed.")
         return
+
+    if force:
+        print("Clearing existing recipes...")
+        for doc in collection.stream():
+            doc.reference.delete()
 
     now = datetime.now(timezone.utc)
     for recipe in RECIPES:

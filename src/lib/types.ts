@@ -4,19 +4,19 @@ export interface Ingredient {
   item: string
   amount: string
   unit: string
+  group?: string | null
 }
 
 export interface Instruction {
   step: number
   text: string
+  tip?: string | null
 }
 
-export interface Nutrition {
-  calories: number | null
-  protein: number | null
-  carbs: number | null
-  fat: number | null
-  fiber: number | null
+export interface NutritionEntry {
+  label: string
+  value: number
+  unit: string
 }
 
 export interface Recipe {
@@ -35,7 +35,7 @@ export interface Recipe {
   published: boolean
   created_at: string
   updated_at: string
-  nutrition: Nutrition | null
+  nutrition: NutritionEntry[]
 }
 
 // Omit auto-generated fields when submitting from the form

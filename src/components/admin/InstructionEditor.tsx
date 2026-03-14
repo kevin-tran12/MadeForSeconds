@@ -20,24 +20,63 @@ export function InstructionEditor({ value, onChange }: InstructionEditorProps) {
     onChange(value.map((inst, i) => (i === index ? { ...inst, text } : inst)))
   }
 
+  function updateTip(index: number, tip: string) {
+    onChange(value.map((inst, i) => (i === index ? { ...inst, tip: tip || null } : inst)))
+  }
+
+  function removeTip(index: number) {
+    onChange(value.map((inst, i) => (i === index ? { ...inst, tip: null } : inst)))
+  }
+
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {value.map((inst, i) => (
         <div key={i} className="flex gap-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-bold text-primary-700">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-bold text-primary-700 mt-2">
             {inst.step}
           </span>
-          <textarea
-            value={inst.text}
-            onChange={(e) => updateText(i, e.target.value)}
-            placeholder={`Step ${inst.step}…`}
-            rows={2}
-            className="flex-1 resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
-          />
+          <div className="flex flex-1 flex-col gap-1.5">
+            <textarea
+              value={inst.text}
+              onChange={(e) => updateText(i, e.target.value)}
+              placeholder={`Step ${inst.step}…`}
+              rows={2}
+              className="resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
+            />
+            {inst.tip != null ? (
+              <div className="flex gap-2">
+                <textarea
+                  value={inst.tip}
+                  onChange={(e) => updateTip(i, e.target.value)}
+                  placeholder="Tip or visual cue for this step…"
+                  rows={2}
+                  className="flex-1 resize-none rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeTip(i)}
+                  className="self-start rounded-lg p-1 text-amber-400 hover:text-red-500"
+                  aria-label="Remove tip"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => updateTip(i, '')}
+                className="self-start text-xs text-gray-400 hover:text-amber-600 transition-colors"
+              >
+                + Add tip
+              </button>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => remove(i)}
-            className="self-start rounded-lg p-1 text-gray-400 hover:text-red-500"
+            className="self-start rounded-lg p-1 text-gray-400 hover:text-red-500 mt-2"
             aria-label="Remove step"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

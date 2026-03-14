@@ -71,10 +71,16 @@ export function CookingMode({ recipe, onExit }: CookingModeProps) {
       </div>
 
       {/* Step content */}
-      <div className="flex flex-1 flex-col items-center justify-center px-6 py-8 md:px-16">
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 py-8 md:px-16">
         <p className="max-w-2xl text-center text-2xl font-medium leading-relaxed text-white md:text-4xl md:leading-relaxed">
           {step.text}
         </p>
+        {step.tip && (
+          <div className="flex max-w-2xl items-start gap-3 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-5 py-4">
+            <span className="text-lg leading-none mt-0.5">💡</span>
+            <p className="text-sm leading-relaxed text-amber-200">{step.tip}</p>
+          </div>
+        )}
       </div>
 
       {/* Bottom controls */}

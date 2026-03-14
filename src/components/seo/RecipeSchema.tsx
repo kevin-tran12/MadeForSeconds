@@ -37,14 +37,19 @@ export function RecipeSchema({ recipe }: { recipe: Recipe }) {
 
     if (recipe.image_url) schema.image = recipe.image_url
 
-    if (recipe.nutrition) {
+    if (recipe.nutrition && recipe.nutrition.length > 0) {
+      const cal = recipe.nutrition.find((n) => n.label.toLowerCase().includes('calor'))
+      const protein = recipe.nutrition.find((n) => n.label.toLowerCase().includes('protein'))
+      const carbs = recipe.nutrition.find((n) => n.label.toLowerCase().includes('carb'))
+      const fat = recipe.nutrition.find((n) => n.label.toLowerCase().includes('fat'))
+      const fiber = recipe.nutrition.find((n) => n.label.toLowerCase().includes('fiber'))
       schema.nutrition = {
         '@type': 'NutritionInformation',
-        ...(recipe.nutrition.calories != null && { calories: `${recipe.nutrition.calories} calories` }),
-        ...(recipe.nutrition.protein != null && { proteinContent: `${recipe.nutrition.protein} g` }),
-        ...(recipe.nutrition.carbs != null && { carbohydrateContent: `${recipe.nutrition.carbs} g` }),
-        ...(recipe.nutrition.fat != null && { fatContent: `${recipe.nutrition.fat} g` }),
-        ...(recipe.nutrition.fiber != null && { fiberContent: `${recipe.nutrition.fiber} g` }),
+        ...(cal && { calories: `${cal.value} ${cal.unit || 'kcal'}` }),
+        ...(protein && { proteinContent: `${protein.value} ${protein.unit || 'g'}` }),
+        ...(carbs && { carbohydrateContent: `${carbs.value} ${carbs.unit || 'g'}` }),
+        ...(fat && { fatContent: `${fat.value} ${fat.unit || 'g'}` }),
+        ...(fiber && { fiberContent: `${fiber.value} ${fiber.unit || 'g'}` }),
       }
     }
 

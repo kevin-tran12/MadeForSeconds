@@ -33,3 +33,9 @@ variable "github_repo" {
   description = "GitHub repository name (without owner prefix)"
   type        = string
 }
+
+variable "mcp_api_key" {
+  description = "Bearer token for MCP endpoint authentication (Claude Projects)"
+  type        = string
+  sensitive   = true
+}

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useNavigate, useParams, Link, useLocation } from 'react-router-dom'
 import { adminApi } from '../lib/api'
 import type { Recipe, RecipeFormData } from '../lib/types'
 import { RecipeForm } from '../components/admin/RecipeForm'
@@ -8,7 +8,10 @@ import { LoadingSpinner } from '../components/ui/LoadingSpinner'
 export function AdminRecipeEditPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const isEdit = !!id
+
+  const prefill = (location.state as { prefill?: RecipeFormData } | null)?.prefill
 
   const [recipe, setRecipe] = useState<Recipe | undefined>(undefined)
   const [loadingRecipe, setLoadingRecipe] = useState(isEdit)
@@ -20,7 +23,6 @@ export function AdminRecipeEditPage() {
 
     async function load() {
       try {
-        // Fetch from admin list and find by id (avoids a separate endpoint)
         const all = await adminApi.listRecipes()
         const found = all.find((r) => r.id === id)
         if (!found) setLoadError('Recipe not found')
@@ -74,7 +76,11 @@ export function AdminRecipeEditPage() {
         </h1>
       </div>
 
-      <RecipeForm recipe={recipe} onSubmit={handleSubmit} isSubmitting={isSubmitting} />
+      <RecipeForm
+        recipe={recipe ?? (prefill ? (prefill as unknown as Recipe) : undefined)}
+        onSubmit={handleSubmit}
+        isSubmitting={isSubmitting}
+      />
     </div>
   )
 }

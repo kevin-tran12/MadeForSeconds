@@ -10,7 +10,7 @@ interface PageMeta {
 
 const DEFAULT_TITLE = 'MadeForSeconds'
 const DEFAULT_DESCRIPTION =
-  'High-effort, high-reward. A collection of layered, heavy-hitting Asian classics that prioritize depth over convenience.'
+  'The kitchen\'s a mess. The food\'s good.'
 const SITE_URL = 'https://madeforseconds.com'
 
 function setMeta(name: string, content: string, property = false) {

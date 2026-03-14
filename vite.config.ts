@@ -5,7 +5,10 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    host: true, // needed for Docker container binding
+    host: true,
     port: 5173,
+    watch: {
+      ignored: ['**/terraform/**', '**/google-cloud-sdk/**'],
+    },
   },
 })

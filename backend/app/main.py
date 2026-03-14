@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import logging as cloud_logging
 
 from .config import settings
-from .routes import admin, public
+from .mcp_server import create_mcp_app
+from .routes import admin, parse, public
 
 # Setup Cloud Logging
 if not settings.is_dev:
@@ -17,7 +18,8 @@ else:
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MadeForSeconds API", redirect_slashes=False)
+mcp_inner, mcp_app = create_mcp_app()
+app = FastAPI(title="MadeForSeconds API", redirect_slashes=False, lifespan=mcp_inner.lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +31,10 @@ app.add_middleware(
 
 app.include_router(public.router)
 app.include_router(admin.router)
+app.include_router(parse.router)
+
+# Mount MCP server for Claude Projects integration
+app.mount("/mcp", mcp_app)
 
 
 @app.get("/api/health")

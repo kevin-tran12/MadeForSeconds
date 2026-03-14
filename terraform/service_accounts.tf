@@ -29,3 +29,11 @@ resource "google_secret_manager_secret_iam_member" "backend_secret_access" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
+
+# Grant access to read the MCP API key secret
+resource "google_secret_manager_secret_iam_member" "backend_mcp_key_access" {
+  project   = var.gcp_project_id
+  secret_id = google_secret_manager_secret.mcp_api_key.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
