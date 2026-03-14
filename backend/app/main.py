@@ -17,7 +17,7 @@ else:
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MadeForSeconds API")
+app = FastAPI(title="MadeForSeconds API", redirect_slashes=False)
 
 app.add_middleware(
     CORSMiddleware,
