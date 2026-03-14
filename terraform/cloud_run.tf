@@ -7,7 +7,7 @@ resource "google_cloud_run_v2_service" "backend" {
   name     = "mfs-backend"
   location = var.gcp_region
 
-  deletion_protection = false
+  deletion_protection = true
 
   depends_on = [google_project_service.required_apis]
 
@@ -30,16 +30,23 @@ resource "google_cloud_run_v2_service" "backend" {
         value = "production"
       }
       env {
-        name  = "ADMIN_EMAILS"
-        value = var.admin_emails
-      }
-      env {
         name  = "ALLOWED_ORIGINS"
         value = var.allowed_origins
       }
       env {
         name  = "GCS_BUCKET_NAME"
         value = google_storage_bucket.images.name
+      }
+
+      # ADMIN_EMAILS read from Secret Manager — not passed as plaintext
+      env {
+        name = "ADMIN_EMAILS"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.admin_emails.secret_id
+            version = "latest"
+          }
+        }
       }
 
       resources {
@@ -58,6 +65,14 @@ resource "google_cloud_run_v2_service" "backend" {
         http_get {
           path = "/api/health"
         }
+      }
+
+      liveness_probe {
+        http_get {
+          path = "/api/health"
+        }
+        period_seconds    = 30
+        failure_threshold = 3
       }
     }
 
