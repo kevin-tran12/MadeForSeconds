@@ -11,7 +11,7 @@ resource "google_storage_bucket" "images" {
   # Allow public read access to all objects
   # This makes image URLs directly accessible in the browser
   cors {
-    origin          = [var.allowed_origins]
+    origin          = split(",", var.allowed_origins)
     method          = ["GET", "HEAD", "OPTIONS"]
     response_header = ["*"]
     max_age_seconds = 3600
