@@ -1,4 +1,4 @@
-import { apiFetch } from './api-client'
+import { apiFetch, apiUpload } from './api-client'
 import type { Recipe, RecipeFormData } from './types'
 
 // ─── Public endpoints ───────────────────────────────────────────────────────
@@ -32,4 +32,10 @@ export const adminApi = {
 
   deleteRecipe: (id: string): Promise<void> =>
     apiFetch(`/api/admin/recipes/${id}`, { method: 'DELETE' }),
+
+  uploadImage: (file: File): Promise<{ url: string }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiUpload('/api/admin/upload-image', formData)
+  },
 }

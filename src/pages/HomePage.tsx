@@ -11,32 +11,50 @@ export function HomePage() {
   return (
     <div>
       {/* Hero */}
-      <section className="bg-gradient-to-b from-primary-50 to-surface py-20 text-center">
-        <div className="mx-auto max-w-2xl px-4">
-          <h1 className="font-display text-4xl font-bold text-gray-900 md:text-5xl lg:text-6xl">
+      <section className="relative overflow-hidden bg-white py-20 md:py-32">
+        {/* Decorative background elements */}
+        <div className="absolute -top-24 -right-24 h-96 w-96 rounded-full bg-primary-50/50 blur-3xl" />
+        <div className="absolute -bottom-24 -left-24 h-96 w-96 rounded-full bg-secondary-50/50 blur-3xl" />
+
+        <div className="relative mx-auto max-w-4xl px-4 text-center">
+          <h1 className="font-display text-5xl font-bold tracking-tight text-gray-900 md:text-7xl">
             Made for <span className="text-primary-600">Seconds</span>
           </h1>
-          <p className="mt-4 text-lg text-gray-600">
-            A personal collection of recipes worth making again and again.
+          <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-gray-600 md:text-xl">
+            A personal collection of minimal, reliable recipes worth making again and again. No clutter, just great food.
           </p>
-          <Link
-            to="/recipes"
-            className="mt-8 inline-block rounded-xl bg-primary-600 px-8 py-3 text-base font-semibold text-white shadow-sm transition-colors hover:bg-primary-700"
-          >
-            Browse recipes
-          </Link>
+          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+            <Link
+              to="/recipes"
+              className="rounded-xl bg-primary-600 px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-primary-200 transition-all hover:bg-primary-700 hover:shadow-xl active:scale-95"
+            >
+              Browse recipes
+            </Link>
+            <Link
+              to="/about"
+              className="rounded-xl bg-white border border-gray-200 px-8 py-4 text-lg font-semibold text-gray-700 transition-all hover:bg-gray-50 active:scale-95"
+            >
+              Learn more
+            </Link>
+          </div>
         </div>
       </section>
 
       {/* Category quick-links */}
       {categories.length > 0 && (
-        <section className="mx-auto max-w-6xl px-4 py-8">
-          <div className="flex flex-wrap gap-2">
+        <section className="mx-auto max-w-6xl px-4 py-12">
+          <div className="mb-8 text-center md:text-left">
+            <h2 className="font-display text-xl font-bold tracking-tight text-gray-900 uppercase">
+              Browse by Category
+            </h2>
+            <div className="mt-2 h-1 w-12 bg-primary-500 rounded-full mx-auto md:mx-0" />
+          </div>
+          <div className="flex flex-wrap justify-center md:justify-start gap-3">
             {categories.map((cat) => (
               <Link
                 key={cat}
                 to={`/recipes?category=${encodeURIComponent(cat)}`}
-                className="rounded-full bg-surface-dark px-4 py-1.5 text-sm font-medium capitalize text-gray-700 transition-colors hover:bg-primary-100 hover:text-primary-700"
+                className="group flex items-center gap-2 rounded-2xl bg-surface-dark border border-surface-darker px-6 py-3 text-base font-medium capitalize text-gray-700 transition-all hover:bg-primary-600 hover:text-white hover:shadow-lg hover:shadow-primary-100 active:scale-95"
               >
                 {cat}
               </Link>
@@ -46,11 +64,14 @@ export function HomePage() {
       )}
 
       {/* Featured recipes */}
-      <section className="mx-auto max-w-6xl px-4 pb-16">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="font-display text-2xl font-bold text-gray-900">Latest recipes</h2>
-          <Link to="/recipes" className="text-sm font-medium text-primary-600 hover:text-primary-700">
-            View all →
+      <section className="mx-auto max-w-6xl px-4 pb-24">
+        <div className="mb-8 flex items-center justify-between border-b border-gray-100 pb-4">
+          <h2 className="font-display text-2xl font-bold text-gray-900 md:text-3xl">Latest recipes</h2>
+          <Link to="/recipes" className="group flex items-center gap-1 text-sm font-bold text-primary-600 transition-colors hover:text-primary-700">
+            View all 
+            <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+            </svg>
           </Link>
         </div>
         <RecipeGrid recipes={featured} loading={loading} emptyMessage="No recipes published yet." />
