@@ -27,6 +27,7 @@ class RecipeCreate(BaseModel):
     categories: list[str] = []
     image_url: str | None = None
     published: bool = False
+    rating: int | None = None
 
 
 class RecipeUpdate(BaseModel):
@@ -41,6 +42,7 @@ class RecipeUpdate(BaseModel):
     categories: list[str] | None = None
     image_url: str | None = None
     published: bool | None = None
+    rating: int | None = None
 
 
 class Recipe(BaseModel):
@@ -59,3 +61,4 @@ class Recipe(BaseModel):
     published: bool
     created_at: datetime
     updated_at: datetime
+    rating: int | None = None

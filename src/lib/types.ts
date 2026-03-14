@@ -27,6 +27,7 @@ export interface Recipe {
   published: boolean
   created_at: string
   updated_at: string
+  rating: number | null
 }
 
 // Omit auto-generated fields when submitting from the form
