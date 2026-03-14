@@ -16,7 +16,7 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
   return (
     <Link
       to={`/recipes/${recipe.slug}`}
-      className="group flex flex-col overflow-hidden rounded-xl border border-surface-darker bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-md"
+      className="group flex flex-col overflow-hidden rounded-2xl border border-surface-darker bg-white shadow-sm transition-all hover:-translate-y-2 hover:shadow-xl hover:shadow-primary-100/50"
     >
       {/* Image */}
       <div className="aspect-[4/3] overflow-hidden bg-surface-dark">
@@ -24,27 +24,27 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
           src={recipe.image_url ?? PLACEHOLDER}
           alt={recipe.title}
           onError={(e) => { e.currentTarget.src = PLACEHOLDER }}
-          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
         />
       </div>
 
       {/* Content */}
-      <div className="flex flex-1 flex-col gap-2 p-4">
-        <h3 className="font-display text-lg font-semibold text-gray-900 line-clamp-2 leading-snug">
+      <div className="flex flex-1 flex-col gap-3 p-5">
+        <h3 className="font-display text-xl font-bold text-gray-900 line-clamp-2 leading-tight transition-colors group-hover:text-primary-600">
           {recipe.title}
         </h3>
-        <p className="text-sm text-gray-600 line-clamp-2 flex-1">{recipe.description}</p>
+        <p className="text-sm leading-relaxed text-gray-500 line-clamp-2 flex-1">{recipe.description}</p>
 
         {/* Meta row */}
-        <div className="flex items-center gap-3 text-xs text-gray-500">
-          <span className="flex items-center gap-1">
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="mt-2 flex items-center gap-4 text-xs font-bold uppercase tracking-wider text-gray-400">
+          <span className="flex items-center gap-1.5">
+            <svg className="h-4 w-4 text-primary-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             {totalMins} min
           </span>
-          <span className="flex items-center gap-1">
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <span className="flex items-center gap-1.5">
+            <svg className="h-4 w-4 text-primary-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0" />
             </svg>
             {recipe.servings}
@@ -54,9 +54,9 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
 
         {/* Categories */}
         {recipe.categories.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {recipe.categories.slice(0, 3).map((cat) => (
-              <Badge key={cat} className="capitalize">{cat}</Badge>
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {recipe.categories.slice(0, 2).map((cat) => (
+              <Badge key={cat} variant="primary" className="capitalize px-2.5 py-0.5 text-[10px]">{cat}</Badge>
             ))}
           </div>
         )}

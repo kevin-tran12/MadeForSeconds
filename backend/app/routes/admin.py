@@ -1,9 +1,13 @@
 import re
+import uuid
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from google.cloud import storage
 
 from ..auth import require_admin
+from ..config import settings
 from ..firestore import get_db
 from ..models import Recipe, RecipeCreate, RecipeUpdate
 
@@ -71,3 +75,32 @@ async def admin_delete_recipe(recipe_id: str):
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     doc_ref.delete()
+
+
+@router.post("/upload-image")
+async def admin_upload_image(file: Annotated[UploadFile, File()]):
+    """Uploads an image to GCS (production) or returns a mock URL (dev)."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    # Limit file size to 5MB
+    MAX_SIZE = 5 * 1024 * 1024
+    content = await file.read()
+    if len(content) > MAX_SIZE:
+        raise HTTPException(status_code=400, detail="Image size must be less than 5MB")
+
+    filename = f"{uuid.uuid4()}-{file.filename}"
+
+    if settings.is_dev or not settings.gcs_bucket_name:
+        # In development, we'll just return a mock URL
+        # In a real local dev env, you'd save to a local folder
+        return {"url": f"https://placehold.co/800x400?text={filename}"}
+
+    try:
+        client = storage.Client()
+        bucket = client.bucket(settings.gcs_bucket_name)
+        blob = bucket.blob(filename)
+        blob.upload_from_string(content, content_type=file.content_type)
+        return {"url": blob.public_url}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")

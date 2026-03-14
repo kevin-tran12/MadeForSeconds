@@ -37,6 +37,10 @@ resource "google_cloud_run_v2_service" "backend" {
         name  = "ALLOWED_ORIGINS"
         value = var.allowed_origins
       }
+      env {
+        name  = "GCS_BUCKET_NAME"
+        value = google_storage_bucket.images.name
+      }
 
       resources {
         limits = {
