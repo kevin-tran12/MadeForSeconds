@@ -11,28 +11,30 @@ export function HomePage() {
   return (
     <div>
       {/* Hero */}
-      <section className="relative overflow-hidden bg-white py-20 md:py-32">
-        {/* Decorative background elements */}
-        <div className="absolute -top-24 -right-24 h-96 w-96 rounded-full bg-primary-50/50 blur-3xl" />
-        <div className="absolute -bottom-24 -left-24 h-96 w-96 rounded-full bg-secondary-50/50 blur-3xl" />
+      <section
+        className="relative overflow-hidden bg-cover bg-center py-28 md:py-44"
+        style={{ backgroundImage: "url('/hero-bg.jpg')" }}
+      >
+        {/* Dark overlay */}
+        <div className="absolute inset-0 bg-black/60" />
 
         <div className="relative mx-auto max-w-4xl px-4 text-center">
-          <h1 className="font-display text-5xl font-bold tracking-tight text-gray-900 md:text-7xl">
-            Made for <span className="text-primary-600">Seconds</span>
+          <h1 className="font-display text-5xl font-bold tracking-tight text-white md:text-7xl">
+            Made for <span className="text-primary-300">Seconds</span>
           </h1>
-          <p className="mx-auto mt-6 max-w-xl text-lg leading-relaxed text-gray-600 md:text-xl">
-            A personal collection of minimal, reliable recipes worth making again and again. No clutter, just great food.
+          <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/85 md:text-xl">
+            High-effort, high-reward. A collection of layered, heavy-hitting Asian classics that prioritize depth over convenience.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
               to="/recipes"
-              className="rounded-xl bg-primary-600 px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-primary-200 transition-all hover:bg-primary-700 hover:shadow-xl active:scale-95"
+              className="rounded-xl bg-primary-500 px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-black/30 transition-all hover:bg-primary-400 hover:shadow-xl active:scale-95"
             >
               Browse recipes
             </Link>
             <Link
               to="/about"
-              className="rounded-xl bg-white border border-gray-200 px-8 py-4 text-lg font-semibold text-gray-700 transition-all hover:bg-gray-50 active:scale-95"
+              className="rounded-xl border border-white/50 px-8 py-4 text-lg font-semibold text-white transition-all hover:bg-white/10 active:scale-95"
             >
               Learn more
             </Link>

@@ -3,6 +3,7 @@ import type { Recipe, RecipeFormData, Difficulty } from '../../lib/types'
 import { adminApi } from '../../lib/api'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
+import { StarRating } from '../ui/StarRating'
 import { IngredientEditor } from './IngredientEditor'
 import { InstructionEditor } from './InstructionEditor'
 
@@ -38,6 +39,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [instructions, setInstructions] = useState(
     recipe?.instructions ?? [{ step: 1, text: '' }]
   )
+  const [rating, setRating] = useState<number | null>(recipe?.rating ?? null)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -91,6 +93,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         categories,
         ingredients,
         instructions,
+        rating,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -175,6 +178,11 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
           </div>
           <span className="text-sm font-medium text-gray-700">Published</span>
         </label>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-medium text-gray-700">My rating</span>
+          <StarRating value={rating} onChange={setRating} size="lg" />
+          <p className="text-xs text-gray-400">Personal rating — visible on recipe pages</p>
+        </div>
       </Section>
 
       <Section title="Times & servings">
