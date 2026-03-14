@@ -9,11 +9,6 @@ variable "gcp_region" {
   default     = "us-central1"
 }
 
-variable "admin_emails" {
-  description = "Comma-separated list of admin email addresses"
-  type        = string
-}
-
 variable "allowed_origins" {
   description = "Comma-separated list of allowed CORS origins"
   type        = string

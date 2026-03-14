@@ -8,12 +8,10 @@ resource "google_storage_bucket" "images" {
   force_destroy               = false
   uniform_bucket_level_access = true
 
-  # Allow public read access to all objects
-  # This makes image URLs directly accessible in the browser
   cors {
     origin          = split(",", var.allowed_origins)
     method          = ["GET", "HEAD", "OPTIONS"]
-    response_header = ["*"]
+    response_header = ["Content-Type", "Cache-Control"]
     max_age_seconds = 3600
   }
 }
@@ -23,4 +21,11 @@ resource "google_storage_bucket_iam_member" "public_read" {
   bucket = google_storage_bucket.images.name
   role   = "roles/storage.objectViewer"
   member = "allUsers"
+}
+
+# Grant backend service account upload access — scoped to this bucket only
+resource "google_storage_bucket_iam_member" "backend_upload" {
+  bucket = google_storage_bucket.images.name
+  role   = "roles/storage.objectCreator"
+  member = "serviceAccount:${google_service_account.backend.email}"
 }
