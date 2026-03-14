@@ -1,9 +1,8 @@
 import { useState, type FormEvent, useRef } from 'react'
-import type { Recipe, RecipeFormData, Difficulty } from '../../lib/types'
+import type { Recipe, RecipeFormData, Difficulty, Nutrition } from '../../lib/types'
 import { adminApi } from '../../lib/api'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
-import { StarRating } from '../ui/StarRating'
 import { IngredientEditor } from './IngredientEditor'
 import { InstructionEditor } from './InstructionEditor'
 
@@ -18,6 +17,22 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div className="rounded-xl border border-surface-darker bg-white p-6">
       <h3 className="mb-4 font-display text-lg font-semibold text-gray-900">{title}</h3>
       <div className="flex flex-col gap-4">{children}</div>
+    </div>
+  )
+}
+
+function NutritionInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-gray-600">{label}</label>
+      <input
+        type="number"
+        min="0"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="—"
+        className="rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+      />
     </div>
   )
 }
@@ -39,7 +54,14 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [instructions, setInstructions] = useState(
     recipe?.instructions ?? [{ step: 1, text: '' }]
   )
-  const [rating, setRating] = useState<number | null>(recipe?.rating ?? null)
+  // Nutrition
+  const n = recipe?.nutrition
+  const [calories, setCalories] = useState(String(n?.calories ?? ''))
+  const [protein, setProtein] = useState(String(n?.protein ?? ''))
+  const [carbs, setCarbs] = useState(String(n?.carbs ?? ''))
+  const [fat, setFat] = useState(String(n?.fat ?? ''))
+  const [fiber, setFiber] = useState(String(n?.fiber ?? ''))
+
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -72,6 +94,19 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     setCategories(categories.filter((c) => c !== cat))
   }
 
+  function buildNutrition(): Nutrition | null {
+    const vals = { calories, protein, carbs, fat, fiber }
+    const parsed = {
+      calories: calories ? parseInt(calories) : null,
+      protein: protein ? parseInt(protein) : null,
+      carbs: carbs ? parseInt(carbs) : null,
+      fat: fat ? parseInt(fat) : null,
+      fiber: fiber ? parseInt(fiber) : null,
+    }
+    const hasAny = Object.values(vals).some((v) => v !== '')
+    return hasAny ? parsed : null
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -93,7 +128,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         categories,
         ingredients,
         instructions,
-        rating,
+        nutrition: buildNutrition(),
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -178,11 +213,6 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
           </div>
           <span className="text-sm font-medium text-gray-700">Published</span>
         </label>
-        <div className="flex flex-col gap-1.5">
-          <span className="text-sm font-medium text-gray-700">My rating</span>
-          <StarRating value={rating} onChange={setRating} size="lg" />
-          <p className="text-xs text-gray-400">Personal rating — visible on recipe pages</p>
-        </div>
       </Section>
 
       <Section title="Times & servings">
@@ -227,6 +257,17 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
 
       <Section title="Instructions">
         <InstructionEditor value={instructions} onChange={setInstructions} />
+      </Section>
+
+      <Section title="Nutrition (optional)">
+        <p className="text-xs text-gray-400 -mt-2">Per serving. Leave blank to omit from the recipe page.</p>
+        <div className="grid grid-cols-5 gap-3">
+          <NutritionInput label="Calories (kcal)" value={calories} onChange={setCalories} />
+          <NutritionInput label="Protein (g)" value={protein} onChange={setProtein} />
+          <NutritionInput label="Carbs (g)" value={carbs} onChange={setCarbs} />
+          <NutritionInput label="Fat (g)" value={fat} onChange={setFat} />
+          <NutritionInput label="Fiber (g)" value={fiber} onChange={setFiber} />
+        </div>
       </Section>
 
       <div className="flex gap-3">

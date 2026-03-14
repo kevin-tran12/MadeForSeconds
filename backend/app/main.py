@@ -1,8 +1,21 @@
+import logging
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from google.cloud import logging as cloud_logging
 
 from .config import settings
 from .routes import admin, public
+
+# Setup Cloud Logging
+if not settings.is_dev:
+    client = cloud_logging.Client()
+    client.setup_logging()
+else:
+    logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="MadeForSeconds API")
 
@@ -20,4 +33,5 @@ app.include_router(admin.router)
 
 @app.get("/api/health")
 async def health():
+    logger.info("Health check endpoint called")
     return {"status": "ok"}

@@ -2,6 +2,19 @@ import { Link, useParams } from 'react-router-dom'
 import { useRecipe } from '../hooks/useRecipe'
 import { RecipeDetail } from '../components/recipe/RecipeDetail'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
+import { RecipeSchema } from '../components/seo/RecipeSchema'
+import { usePageMeta } from '../hooks/usePageMeta'
+
+function RecipeDetailMeta({ recipe }: { recipe: { title: string; description: string; image_url: string | null; slug: string } }) {
+  usePageMeta({
+    title: recipe.title,
+    description: recipe.description || undefined,
+    image: recipe.image_url,
+    url: `https://madeforseconds.com/recipes/${recipe.slug}`,
+    type: 'article',
+  })
+  return null
+}
 
 export function RecipeDetailPage() {
   const { slug } = useParams<{ slug: string }>()
@@ -27,5 +40,11 @@ export function RecipeDetailPage() {
     )
   }
 
-  return <RecipeDetail recipe={recipe} />
+  return (
+    <>
+      <RecipeDetailMeta recipe={recipe} />
+      <RecipeSchema recipe={recipe} />
+      <RecipeDetail recipe={recipe} />
+    </>
+  )
 }

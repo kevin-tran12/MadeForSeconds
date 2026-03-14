@@ -44,9 +44,9 @@ resource "google_cloud_run_v2_service" "backend" {
 
       resources {
         limits = {
-          # 256Mi: enough for FastAPI (~80-100 MB actual), halves GB-second usage vs 512Mi
+          # 512Mi: Better buffer for FastAPI + image processing, still well within free tier
           cpu    = "1000m"
-          memory = "256Mi"
+          memory = "512Mi"
         }
         # Faster cold starts with no extra cost for scale-to-zero workloads
         startup_cpu_boost = true

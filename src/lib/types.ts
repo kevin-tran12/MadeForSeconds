@@ -11,6 +11,14 @@ export interface Instruction {
   text: string
 }
 
+export interface Nutrition {
+  calories: number | null
+  protein: number | null
+  carbs: number | null
+  fat: number | null
+  fiber: number | null
+}
+
 export interface Recipe {
   id: string
   title: string
@@ -27,7 +35,7 @@ export interface Recipe {
   published: boolean
   created_at: string
   updated_at: string
-  rating: number | null
+  nutrition: Nutrition | null
 }
 
 // Omit auto-generated fields when submitting from the form
