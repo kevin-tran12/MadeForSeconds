@@ -21,11 +21,11 @@ steps:
     entrypoint: gcloud
     args:
       - run
-      - services
-      - update
+      - deploy
       - mfs-backend
       - --image=$_IMAGE:$SHORT_SHA
       - --region=$LOCATION
+      - --quiet
 
 options:
   # e2-standard-2 is the only machine type included in the free tier
