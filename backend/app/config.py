@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     environment: str = "development"  # "development" | "production"
     admin_emails: str = "dev@local"  # comma-separated list
     allowed_origins: str = "http://localhost:5173"  # comma-separated list
+    gcs_bucket_name: str | None = None
 
     @property
     def admin_email_set(self) -> set[str]:

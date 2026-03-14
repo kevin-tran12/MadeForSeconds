@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, useRef } from 'react'
 import type { Recipe, RecipeFormData, Difficulty } from '../../lib/types'
+import { adminApi } from '../../lib/api'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { IngredientEditor } from './IngredientEditor'
@@ -37,7 +38,25 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [instructions, setInstructions] = useState(
     recipe?.instructions ?? [{ step: 1, text: '' }]
   )
+  const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setError(null)
+    setIsUploading(true)
+    try {
+      const { url } = await adminApi.uploadImage(file)
+      setImageUrl(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setIsUploading(false)
+    }
+  }
 
   function addCategory() {
     const trimmed = categoryInput.trim().toLowerCase()
@@ -98,7 +117,43 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
             className="resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
           />
         </div>
-        <Input id="imageUrl" label="Image URL" type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" />
+
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-medium text-gray-700">Recipe Image</span>
+            <div className="flex items-start gap-4">
+              <div className="group relative h-32 w-48 overflow-hidden rounded-lg border border-gray-300 bg-gray-50">
+                {imageUrl ? (
+                  <img src={imageUrl} alt="Preview" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-gray-400">
+                    No image
+                  </div>
+                )}
+                {isUploading && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-white/50">
+                    <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handleFileUpload}
+                />
+                <Button type="button" variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()} loading={isUploading}>
+                  Upload image
+                </Button>
+                <p className="text-xs text-gray-500">Max 5MB. PNG, JPG, WEBP.</p>
+              </div>
+            </div>
+          </div>
+          <Input id="imageUrl" label="Image URL (fallback)" type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" />
+        </div>
+
         <div className="flex flex-col gap-1">
           <label htmlFor="difficulty" className="text-sm font-medium text-gray-700">Difficulty</label>
           <select

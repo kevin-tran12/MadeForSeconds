@@ -7,7 +7,7 @@ const config: Record<Difficulty, { label: string; variant: 'success' | 'warning'
   hard: { label: 'Hard', variant: 'danger' },
 }
 
-export function DifficultyBadge({ difficulty }: { difficulty: Difficulty }) {
+export function DifficultyBadge({ difficulty, className = '' }: { difficulty: Difficulty; className?: string }) {
   const { label, variant } = config[difficulty]
-  return <Badge variant={variant}>{label}</Badge>
+  return <Badge variant={variant} className={className}>{label}</Badge>
 }

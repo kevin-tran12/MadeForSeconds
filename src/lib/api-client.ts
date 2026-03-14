@@ -43,3 +43,32 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   if (response.status === 204) return undefined as T
   return response.json()
 }
+
+/** Specific helper for multipart/form-data uploads. */
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const headers: Record<string, string> = {}
+
+  if (_getToken) {
+    const token = await _getToken()
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+  }
+
+  if (import.meta.env.DEV && !headers['Authorization']) {
+    headers['X-Dev-Admin'] = 'true'
+  }
+
+  const response = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ detail: 'Upload failed' }))
+    throw new Error((err as { detail: string }).detail || 'Upload failed')
+  }
+
+  return response.json()
+}

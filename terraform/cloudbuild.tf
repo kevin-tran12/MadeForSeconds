@@ -1,10 +1,5 @@
 # ─── Cloud Build ──────────────────────────────────────────────────────────────
 # Always-free tier: 2,500 build-minutes/mo on e2-standard-2
-#
-# PREREQUISITE (2nd Gen):
-# 1. Go to GCP Console -> Cloud Build -> Repositories (2nd Gen)
-# 2. Create a connection named "github-connection"
-# 3. Link your "MadeForSeconds" repository inside that connection.
 
 locals {
   cloudbuild_sa_email = "${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
@@ -47,10 +42,12 @@ resource "google_cloudbuild_trigger" "backend_deploy" {
 
   depends_on = [google_project_service.required_apis]
 
+  # For regional triggers, the service account must be the full resource name
+  service_account = "projects/made-for-seconds/serviceAccounts/${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+
   repository_event_config {
-    # 2nd Gen uses a specific repository resource ID.
-    # Format: projects/PROJECT_ID/locations/REGION/connections/CONNECTION_NAME/repositories/REPO_ID
-    repository = "projects/${var.gcp_project_id}/locations/${var.gcp_region}/connections/github-connection/repositories/${var.github_owner}-${var.github_repo}"
+    # Full absolute path as confirmed via gcloud
+    repository = "projects/made-for-seconds/locations/us-central1/connections/github-connection/repositories/kevin-tran12-MadeForSeconds"
     
     push {
       branch = "^main$"
@@ -60,6 +57,6 @@ resource "google_cloudbuild_trigger" "backend_deploy" {
   filename = "cloudbuild.yaml"
 
   substitutions = {
-    _IMAGE = "${var.gcp_region}-docker.pkg.dev/${var.gcp_project_id}/${google_artifact_registry_repository.backend.repository_id}/backend"
+    _IMAGE = "us-central1-docker.pkg.dev/made-for-seconds/mfs/backend"
   }
 }

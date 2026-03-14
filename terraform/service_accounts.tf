@@ -14,3 +14,10 @@ resource "google_project_iam_member" "backend_firestore" {
   role    = "roles/datastore.user"
   member  = "serviceAccount:${google_service_account.backend.email}"
 }
+
+# Grant GCS access for uploading images
+resource "google_project_iam_member" "backend_storage_upload" {
+  project = var.gcp_project_id
+  role    = "roles/storage.objectCreator"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+}
