@@ -83,9 +83,6 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    # Limit file size to 5MB (checked via SpoolFile size if possible, or just trust client/proxy limits)
-    # Note: For Cloud Run, we rely on the 512Mi limit we set.
-
     filename = f"{uuid.uuid4()}-{file.filename}"
 
     if settings.is_dev or not settings.gcs_bucket_name:
@@ -101,10 +98,6 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
 
         # Construct a reliable public URL
         url = f"https://storage.googleapis.com/{settings.gcs_bucket_name}/{filename}"
-        return {"url": url}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
-
         return {"url": url}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
