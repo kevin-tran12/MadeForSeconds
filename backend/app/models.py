@@ -8,19 +8,19 @@ class Ingredient(BaseModel):
     item: str
     amount: str
     unit: str
+    group: str | None = None
 
 
 class Instruction(BaseModel):
     step: int
     text: str
+    tip: str | None = None
 
 
-class Nutrition(BaseModel):
-    calories: int | None = None
-    protein: int | None = None
-    carbs: int | None = None
-    fat: int | None = None
-    fiber: int | None = None
+class NutritionEntry(BaseModel):
+    label: str
+    value: float
+    unit: str = ""
 
 
 class RecipeCreate(BaseModel):
@@ -35,7 +35,7 @@ class RecipeCreate(BaseModel):
     categories: list[str] = []
     image_url: str | None = None
     published: bool = False
-    nutrition: Nutrition | None = None
+    nutrition: list[NutritionEntry] = []
 
 
 class RecipeUpdate(BaseModel):
@@ -50,7 +50,7 @@ class RecipeUpdate(BaseModel):
     categories: list[str] | None = None
     image_url: str | None = None
     published: bool | None = None
-    nutrition: Nutrition | None = None
+    nutrition: list[NutritionEntry] | None = None
 
 
 class Recipe(BaseModel):
@@ -69,4 +69,4 @@ class Recipe(BaseModel):
     published: bool
     created_at: datetime
     updated_at: datetime
-    nutrition: Nutrition | None = None
+    nutrition: list[NutritionEntry] = []

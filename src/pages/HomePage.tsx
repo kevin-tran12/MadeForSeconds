@@ -23,7 +23,7 @@ export function HomePage() {
             Made for <span className="text-primary-300">Seconds</span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/85 md:text-xl">
-            High-effort, high-reward. A collection of layered, heavy-hitting Asian classics that prioritize depth over convenience.
+            The kitchen's a mess. The food's good.
           </p>
           <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link

@@ -1,6 +1,71 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Recipe } from '../../lib/types'
+
+function IngredientList({
+  ingredients,
+  checked,
+  scale,
+  onToggle,
+}: {
+  ingredients: Recipe['ingredients']
+  checked: Set<number>
+  scale: number
+  onToggle: (i: number) => void
+}) {
+  // Group consecutive ingredients by their group field
+  const groups: { label: string | null; items: { ing: typeof ingredients[0]; index: number }[] }[] = []
+  for (let i = 0; i < ingredients.length; i++) {
+    const ing = ingredients[i]
+    const label = ing.group ?? null
+    const last = groups[groups.length - 1]
+    if (last && last.label === label) {
+      last.items.push({ ing, index: i })
+    } else {
+      groups.push({ label, items: [{ ing, index: i }] })
+    }
+  }
+
+  return (
+    <div className="mt-6 space-y-4">
+      {groups.map((group, gi) => (
+        <div key={gi}>
+          {group.label && (
+            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-gray-400">
+              {group.label}
+            </p>
+          )}
+          <ul className="space-y-1">
+            {group.items.map(({ ing, index: i }) => (
+              <li
+                key={i}
+                onClick={() => onToggle(i)}
+                className="flex cursor-pointer items-start gap-3 rounded-xl px-2 py-3 transition-colors hover:bg-white/60 border-b border-white/40 last:border-0"
+              >
+                <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
+                  checked.has(i)
+                    ? 'border-primary-500 bg-primary-500 text-white'
+                    : 'border-gray-300 bg-white'
+                }`}>
+                  {checked.has(i) && (
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <span className={`leading-tight transition-all ${checked.has(i) ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                  {ing.amount && <strong className={`font-bold ${checked.has(i) ? 'text-gray-400' : 'text-gray-900'}`}>{formatAmount(ing.amount, scale)} </strong>}
+                  {ing.unit && <span className="font-medium">{ing.unit} </span>}
+                  {ing.item}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
 import { DifficultyBadge } from './DifficultyBadge'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
@@ -248,7 +313,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         <section className="rounded-3xl bg-surface-dark p-8">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8">
-              Ingredients
+              Grocery List
             </h2>
             {checked.size > 0 && (
               <button
@@ -259,32 +324,28 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               </button>
             )}
           </div>
-          <ul className="mt-8 space-y-1">
-            {recipe.ingredients.map((ing, i) => (
-              <li
-                key={i}
-                onClick={() => toggleIngredient(i)}
-                className="flex cursor-pointer items-start gap-3 rounded-xl px-2 py-3 transition-colors hover:bg-white/60 border-b border-white/40 last:border-0"
-              >
-                <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
-                  checked.has(i)
-                    ? 'border-primary-500 bg-primary-500 text-white'
-                    : 'border-gray-300 bg-white'
-                }`}>
-                  {checked.has(i) && (
-                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
-                </div>
-                <span className={`leading-tight transition-all ${checked.has(i) ? 'line-through text-gray-400' : 'text-gray-700'}`}>
-                  {ing.amount && <strong className={`font-bold ${checked.has(i) ? 'text-gray-400' : 'text-gray-900'}`}>{formatAmount(ing.amount, scale)} </strong>}
-                  {ing.unit && <span className="font-medium">{ing.unit} </span>}
-                  {ing.item}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {/* Progress */}
+          <div className="mt-4">
+            <div className="flex items-center justify-between text-xs text-gray-400 mb-1.5">
+              <span>
+                {checked.size === recipe.ingredients.length
+                  ? 'All ready to cook!'
+                  : `${checked.size} of ${recipe.ingredients.length} checked`}
+              </span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-white/60">
+              <div
+                className="h-full rounded-full bg-primary-500 transition-all duration-300"
+                style={{ width: `${(checked.size / recipe.ingredients.length) * 100}%` }}
+              />
+            </div>
+          </div>
+          <IngredientList
+            ingredients={recipe.ingredients}
+            checked={checked}
+            scale={scale}
+            onToggle={toggleIngredient}
+          />
         </section>
 
         {/* Instructions */}
@@ -298,13 +359,21 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white border border-gray-100 font-display text-lg font-bold text-primary-600 shadow-sm transition-all group-hover:bg-primary-600 group-hover:text-white">
                   {inst.step}
                 </span>
-                <p className="pt-1.5 text-lg leading-relaxed text-gray-700">{inst.text}</p>
+                <div className="pt-1.5 flex flex-col gap-3">
+                  <p className="text-lg leading-relaxed text-gray-700">{inst.text}</p>
+                  {inst.tip && (
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                      <span className="text-base leading-none mt-0.5">💡</span>
+                      <p className="text-sm leading-relaxed text-amber-800">{inst.tip}</p>
+                    </div>
+                  )}
+                </div>
               </li>
             ))}
           </ol>
         </section>
       </div>
-      {recipe.nutrition && <NutritionCard nutrition={recipe.nutrition} />}
+      <NutritionCard nutrition={recipe.nutrition} />
     </article>
 
     {/* Cooking Mode overlay */}

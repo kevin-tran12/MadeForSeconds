@@ -30,6 +30,8 @@ services:
       ADMIN_EMAILS: dev@local
       ENVIRONMENT: development
       ALLOWED_ORIGINS: http://localhost:5173
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      MCP_API_KEY: dev-mcp-key
     depends_on:
       firestore-emulator:
         condition: service_healthy

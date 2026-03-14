@@ -49,6 +49,17 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
+      # MCP_API_KEY — bearer token for Claude Projects MCP integration
+      env {
+        name = "MCP_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.mcp_api_key.secret_id
+            version = "latest"
+          }
+        }
+      }
+
       resources {
         limits = {
           # 512Mi: Better buffer for FastAPI + image processing, still well within free tier
