@@ -92,15 +92,15 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
     filename = f"{uuid.uuid4()}-{file.filename}"
 
     if settings.is_dev or not settings.gcs_bucket_name:
-        # In development, we'll just return a mock URL
-        # In a real local dev env, you'd save to a local folder
         return {"url": f"https://placehold.co/800x400?text={filename}"}
 
     try:
         client = storage.Client()
         bucket = client.bucket(settings.gcs_bucket_name)
         blob = bucket.blob(filename)
-        blob.upload_from_string(content, content_type=file.content_type)
+        
+        # Stream upload directly from the file object
+        blob.upload_from_file(file.file, content_type=file.content_type)
         return {"url": blob.public_url}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")

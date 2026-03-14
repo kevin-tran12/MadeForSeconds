@@ -13,6 +13,7 @@ locals {
     "secretmanager.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "serviceusage.googleapis.com",
+    "logging.googleapis.com",
   ]
 }
 

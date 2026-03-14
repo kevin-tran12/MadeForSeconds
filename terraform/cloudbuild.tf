@@ -43,11 +43,11 @@ resource "google_cloudbuild_trigger" "backend_deploy" {
   depends_on = [google_project_service.required_apis]
 
   # For regional triggers, the service account must be the full resource name
-  service_account = "projects/made-for-seconds/serviceAccounts/${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
+  service_account = "projects/${var.gcp_project_id}/serviceAccounts/${data.google_project.project.number}@cloudbuild.gserviceaccount.com"
 
   repository_event_config {
     # Full absolute path as confirmed via gcloud
-    repository = "projects/made-for-seconds/locations/us-central1/connections/github-connection/repositories/kevin-tran12-MadeForSeconds"
+    repository = "projects/${var.gcp_project_id}/locations/${var.gcp_region}/connections/github-connection/repositories/${var.github_owner}-${var.github_repo}"
     
     push {
       branch = "^main$"
@@ -57,6 +57,6 @@ resource "google_cloudbuild_trigger" "backend_deploy" {
   filename = "cloudbuild.yaml"
 
   substitutions = {
-    _IMAGE = "us-central1-docker.pkg.dev/made-for-seconds/mfs/backend"
+    _IMAGE = "${var.gcp_region}-docker.pkg.dev/${var.gcp_project_id}/${google_artifact_registry_repository.backend.repository_id}/backend"
   }
 }

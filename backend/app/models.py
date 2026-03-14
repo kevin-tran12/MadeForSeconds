@@ -15,6 +15,14 @@ class Instruction(BaseModel):
     text: str
 
 
+class Nutrition(BaseModel):
+    calories: int | None = None
+    protein: int | None = None
+    carbs: int | None = None
+    fat: int | None = None
+    fiber: int | None = None
+
+
 class RecipeCreate(BaseModel):
     title: str
     description: str = ""
@@ -27,7 +35,7 @@ class RecipeCreate(BaseModel):
     categories: list[str] = []
     image_url: str | None = None
     published: bool = False
-    rating: int | None = None
+    nutrition: Nutrition | None = None
 
 
 class RecipeUpdate(BaseModel):
@@ -42,7 +50,7 @@ class RecipeUpdate(BaseModel):
     categories: list[str] | None = None
     image_url: str | None = None
     published: bool | None = None
-    rating: int | None = None
+    nutrition: Nutrition | None = None
 
 
 class Recipe(BaseModel):
@@ -61,4 +69,4 @@ class Recipe(BaseModel):
     published: bool
     created_at: datetime
     updated_at: datetime
-    rating: int | None = None
+    nutrition: Nutrition | None = None
