@@ -4,6 +4,8 @@ import type { Recipe } from '../../lib/types'
 import { DifficultyBadge } from './DifficultyBadge'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { StarRating } from '../ui/StarRating'
+import { CookingMode } from './CookingMode'
 
 const PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400' viewBox='0 0 800 400'%3E%3Crect width='800' height='400' fill='%23faedcd'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='80' fill='%23e85d04'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E"
@@ -21,7 +23,30 @@ function formatAmount(amount: string, scale: number): string {
 export function RecipeDetail({ recipe }: { recipe: Recipe }) {
   const [servings, setServings] = useState(recipe.servings)
   const [copied, setCopied] = useState(false)
+  const [cookingMode, setCookingMode] = useState(false)
+  const [checked, setChecked] = useState<Set<number>>(() => {
+    try {
+      return new Set<number>(JSON.parse(localStorage.getItem(`grocery-${recipe.slug}`) ?? '[]'))
+    } catch {
+      return new Set<number>()
+    }
+  })
   const scale = servings / recipe.servings
+
+  function toggleIngredient(i: number) {
+    setChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      localStorage.setItem(`grocery-${recipe.slug}`, JSON.stringify([...next]))
+      return next
+    })
+  }
+
+  function clearGroceryList() {
+    setChecked(new Set())
+    localStorage.removeItem(`grocery-${recipe.slug}`)
+  }
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href)
@@ -45,6 +70,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
   }
 
   return (
+    <>
     <article className="mx-auto max-w-4xl px-4 py-8 md:py-12">
       {/* Hero image */}
       <div className="group relative mb-8 overflow-hidden rounded-3xl shadow-2xl">
@@ -76,6 +102,11 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
           <h1 className="font-display text-4xl font-bold tracking-tight text-gray-900 md:text-5xl lg:text-6xl">
             {recipe.title}
           </h1>
+          {recipe.rating !== null && (
+            <div className="mt-3">
+              <StarRating value={recipe.rating} readonly size="md" />
+            </div>
+          )}
           
           <div className="relative mt-6">
             <svg className="absolute -left-4 -top-4 h-8 w-8 text-primary-100" fill="currentColor" viewBox="0 0 24 24">
@@ -155,20 +186,58 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         </div>
       </div>
 
+      {/* Start Cooking button */}
+      <div className="mt-6 flex justify-center md:justify-start">
+        <button
+          onClick={() => setCookingMode(true)}
+          className="inline-flex items-center gap-2 rounded-2xl bg-primary-600 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-primary-200 transition-all hover:bg-primary-700 hover:shadow-xl active:scale-95"
+        >
+          <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Start Cooking
+        </button>
+      </div>
+
       {/* Ingredients + Instructions */}
       <div className="mt-12 grid gap-12 lg:grid-cols-3">
         {/* Ingredients */}
         <section className="rounded-3xl bg-surface-dark p-8">
-          <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8">
-            Ingredients
-          </h2>
-          <ul className="mt-8 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8">
+              Ingredients
+            </h2>
+            {checked.size > 0 && (
+              <button
+                onClick={clearGroceryList}
+                className="text-xs font-medium text-gray-400 hover:text-red-500 transition-colors"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+          <ul className="mt-8 space-y-1">
             {recipe.ingredients.map((ing, i) => (
-              <li key={i} className="flex items-start gap-3 border-b border-white/50 pb-4 last:border-0">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary-500" />
-                <span className="text-gray-700 leading-tight">
-                  {ing.amount && <strong className="font-bold text-gray-900">{formatAmount(ing.amount, scale)} </strong>}
-                  {ing.unit && <span className="text-gray-500 font-medium">{ing.unit} </span>}
+              <li
+                key={i}
+                onClick={() => toggleIngredient(i)}
+                className="flex cursor-pointer items-start gap-3 rounded-xl px-2 py-3 transition-colors hover:bg-white/60 border-b border-white/40 last:border-0"
+              >
+                <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
+                  checked.has(i)
+                    ? 'border-primary-500 bg-primary-500 text-white'
+                    : 'border-gray-300 bg-white'
+                }`}>
+                  {checked.has(i) && (
+                    <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+                <span className={`leading-tight transition-all ${checked.has(i) ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                  {ing.amount && <strong className={`font-bold ${checked.has(i) ? 'text-gray-400' : 'text-gray-900'}`}>{formatAmount(ing.amount, scale)} </strong>}
+                  {ing.unit && <span className="font-medium">{ing.unit} </span>}
                   {ing.item}
                 </span>
               </li>
@@ -194,6 +263,12 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         </section>
       </div>
     </article>
+
+    {/* Cooking Mode overlay */}
+    {cookingMode && (
+      <CookingMode recipe={recipe} onExit={() => setCookingMode(false)} />
+    )}
+  </>
   )
 }
 
