@@ -9,14 +9,22 @@ export function RecipesPage() {
   const [params, setParams] = useSearchParams()
   const search = params.get('q') ?? ''
   const category = params.get('category') ?? ''
+  const searchBy = params.get('search_by') ?? 'all'
 
-  const { recipes, loading, error } = useRecipes({ search, category: category || undefined })
+  const { recipes, loading, error } = useRecipes({ search, category: category || undefined, searchBy })
   const { categories } = useCategories()
 
   function handleSearch(value: string) {
     const next = new URLSearchParams(params)
     if (value) next.set('q', value)
     else next.delete('q')
+    setParams(next, { replace: true })
+  }
+
+  function handleSearchBy(value: string) {
+    const next = new URLSearchParams(params)
+    if (value && value !== 'all') next.set('search_by', value)
+    else next.delete('search_by')
     setParams(next, { replace: true })
   }
 
@@ -33,7 +41,12 @@ export function RecipesPage() {
 
       {/* Filters */}
       <div className="mb-6 flex flex-col gap-3">
-        <RecipeSearch value={search} onChange={handleSearch} />
+        <RecipeSearch
+          value={search}
+          onChange={handleSearch}
+          searchBy={searchBy}
+          onSearchByChange={handleSearchBy}
+        />
         <CategoryFilter
           categories={categories}
           selected={category || null}
