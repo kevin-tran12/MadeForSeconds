@@ -1,10 +1,4 @@
-"""Parse a recipe from a PDF or plain text using Claude.
-
-Production setup (TODO before deploying):
-  1. Create the secret: echo -n "sk-ant-..." | gcloud secrets versions add anthropic-api-key --data-file=-
-  2. In terraform/secrets.tf, add a google_secret_manager_secret resource for "anthropic-api-key"
-  3. In terraform/cloud_run.tf, add an env block referencing it (same pattern as admin-emails)
-"""
+"""Parse a recipe from a PDF or plain text using Claude."""
 
 import base64
 import os
