@@ -19,7 +19,7 @@ else:
 logger = logging.getLogger(__name__)
 
 mcp_inner, mcp_app = create_mcp_app()
-app = FastAPI(title="MadeForSeconds API", redirect_slashes=False, lifespan=mcp_inner.lifespan)
+app = FastAPI(title="MadeForSeconds API", redirect_slashes=False, lifespan=mcp_inner.router.lifespan_context)
 
 app.add_middleware(
     CORSMiddleware,

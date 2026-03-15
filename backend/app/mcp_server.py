@@ -25,7 +25,7 @@ def _generate_slug(title: str) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", title.lower()))
 
 
-@mcp.tool
+@mcp.tool()
 def create_recipe(
     title: str,
     description: str = "",
@@ -108,5 +108,5 @@ def create_mcp_app():
     Returns (inner_app, wrapped_app) — inner_app exposes .lifespan for FastAPI,
     wrapped_app adds bearer token auth and is what gets mounted.
     """
-    inner = mcp.http_app(path="/")
+    inner = mcp.streamable_http_app()
     return inner, _BearerAuthMiddleware(inner)
