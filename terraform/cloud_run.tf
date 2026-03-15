@@ -60,6 +60,20 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
+      # REDIS_URL — read from Secret Manager; only injected when redis_url is provided
+      dynamic "env" {
+        for_each = var.redis_url != "" ? [1] : []
+        content {
+          name = "REDIS_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.redis_url[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       resources {
         limits = {
           # 512Mi: Better buffer for FastAPI + image processing, still well within free tier
