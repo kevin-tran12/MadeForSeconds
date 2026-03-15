@@ -60,6 +60,15 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
+      # REDIS_URL — only injected when redis_url variable is provided
+      dynamic "env" {
+        for_each = var.redis_url != "" ? [var.redis_url] : []
+        content {
+          name  = "REDIS_URL"
+          value = env.value
+        }
+      }
+
       resources {
         limits = {
           # 512Mi: Better buffer for FastAPI + image processing, still well within free tier
