@@ -5,9 +5,10 @@ import type { Recipe } from '../lib/types'
 interface UseRecipesOptions {
   search?: string
   category?: string
+  searchBy?: string
 }
 
-export function useRecipes({ search, category }: UseRecipesOptions = {}) {
+export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {}) {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -20,7 +21,7 @@ export function useRecipes({ search, category }: UseRecipesOptions = {}) {
       setError(null)
 
       try {
-        const data = await listPublicRecipes(search, category)
+        const data = await listPublicRecipes(search, category, searchBy)
         if (!cancelled) setRecipes(data)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load recipes')
@@ -31,7 +32,7 @@ export function useRecipes({ search, category }: UseRecipesOptions = {}) {
 
     load()
     return () => { cancelled = true }
-  }, [search, category])
+  }, [search, category, searchBy])
 
   return { recipes, loading, error }
 }
