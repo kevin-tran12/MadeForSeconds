@@ -1,4 +1,16 @@
 services:
+  # ─── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: mfs-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # ─── Firestore Emulator ──────────────────────────────────────────────────────
   firestore-emulator:
     image: google/cloud-sdk:emulators
@@ -32,8 +44,11 @@ services:
       ALLOWED_ORIGINS: http://localhost:5173
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       MCP_API_KEY: dev-mcp-key
+      REDIS_URL: redis://redis:6379
     depends_on:
       firestore-emulator:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     volumes:
       - ./backend:/app

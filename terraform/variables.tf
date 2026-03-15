@@ -39,3 +39,10 @@ variable "mcp_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "redis_url" {
+  description = "Redis connection URL for shared caching — use Upstash free tier (rediss://default:TOKEN@host.upstash.io:6379)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

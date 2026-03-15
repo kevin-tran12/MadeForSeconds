@@ -8,3 +8,4 @@ google-cloud-logging==3.11.2
 google-auth==2.37.0
 pydantic-settings==2.7.1
 python-multipart==0.0.20
+redis>=5.0.0
