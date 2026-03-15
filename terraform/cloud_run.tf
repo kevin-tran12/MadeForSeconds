@@ -60,12 +60,17 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
-      # REDIS_URL — only injected when redis_url variable is provided
+      # REDIS_URL — read from Secret Manager; only injected when redis_url is provided
       dynamic "env" {
-        for_each = var.redis_url != "" ? [var.redis_url] : []
+        for_each = var.redis_url != "" ? [1] : []
         content {
-          name  = "REDIS_URL"
-          value = env.value
+          name = "REDIS_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.redis_url[0].secret_id
+              version = "latest"
+            }
+          }
         }
       }
 
