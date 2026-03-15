@@ -23,3 +23,7 @@ terraform/terraform.tfvars
 .dev.vars*
 !.dev.vars.example
 !.env.example
+
+# Claude Code
+CLAUDE.md
+.claude/

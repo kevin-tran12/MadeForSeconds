@@ -60,6 +60,17 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
+      # ANTHROPIC_API_KEY — read from Secret Manager
+      env {
+        name = "ANTHROPIC_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.anthropic_api_key.secret_id
+            version = "latest"
+          }
+        }
+      }
+
       # REDIS_URL — read from Secret Manager; only injected when redis_url is provided
       dynamic "env" {
         for_each = var.redis_url != "" ? [1] : []
