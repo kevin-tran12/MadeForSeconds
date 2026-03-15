@@ -37,3 +37,12 @@ resource "google_secret_manager_secret_iam_member" "backend_mcp_key_access" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
+
+# Grant access to read the Redis URL secret (only when redis_url is provided)
+resource "google_secret_manager_secret_iam_member" "backend_redis_url_access" {
+  count     = var.redis_url != "" ? 1 : 0
+  project   = var.gcp_project_id
+  secret_id = google_secret_manager_secret.redis_url[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
