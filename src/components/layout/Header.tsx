@@ -25,40 +25,88 @@ export function Header() {
           MadeForSeconds
         </Link>
 
-        {/* Desktop nav */}
-        <nav className="hidden items-center gap-6 md:flex">
-          {searchOpen ? (
-            <div className="w-80">
-              <SearchWithSuggestions onClose={() => setSearchOpen(false)} />
+        {/* Desktop nav + search */}
+        <div className="hidden md:flex items-center gap-6">
+          {/* Nav links — always visible */}
+          <nav className="flex items-center gap-6">
+            <NavLink to="/" end className={navLinkClass}>
+              Home
+            </NavLink>
+            <NavLink to="/recipes" className={navLinkClass}>
+              Recipes
+            </NavLink>
+            <NavLink to="/about" className={navLinkClass}>
+              About
+            </NavLink>
+            {isAdmin && (
+              <NavLink to="/admin" className={navLinkClass}>
+                Admin
+              </NavLink>
+            )}
+          </nav>
+
+          {/* Animated search bar — expands from right without covering tabs */}
+          <div
+            style={{
+              maxWidth: searchOpen ? '22rem' : '0',
+              opacity: searchOpen ? 1 : 0,
+              pointerEvents: searchOpen ? 'auto' : 'none',
+              // overflow-hidden is required for the width animation but clips
+              // the suggestions dropdown. Switch to visible once open so the
+              // dropdown can render below the bar unobstructed.
+              overflow: searchOpen ? 'visible' : 'hidden',
+            }}
+            className="transition-[max-width,opacity] duration-300 ease-in-out"
+          >
+            <div className="w-[22rem] pl-1">
+              <SearchWithSuggestions
+                autoFocus={searchOpen}
+                onClose={() => setSearchOpen(false)}
+              />
             </div>
-          ) : (
-            <>
-              <NavLink to="/" end className={navLinkClass}>
-                Home
-              </NavLink>
-              <NavLink to="/recipes" className={navLinkClass}>
-                Recipes
-              </NavLink>
-              <NavLink to="/about" className={navLinkClass}>
-                About
-              </NavLink>
-              {isAdmin && (
-                <NavLink to="/admin" className={navLinkClass}>
-                  Admin
-                </NavLink>
-              )}
-              <button
-                onClick={() => setSearchOpen(true)}
-                className="rounded-lg p-1.5 text-gray-500 hover:text-primary-600 transition-colors"
-                aria-label="Search"
+          </div>
+
+          {/* Search / Close toggle button */}
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            className={`rounded-lg p-1.5 transition-all duration-200 ${
+              searchOpen
+                ? 'text-primary-600'
+                : 'text-gray-500 hover:text-primary-600'
+            }`}
+            aria-label={searchOpen ? 'Close search' : 'Open search'}
+          >
+            {searchOpen ? (
+              <svg
+                className="h-5 w-5 transition-transform duration-200 rotate-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                </svg>
-              </button>
-            </>
-          )}
-        </nav>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            ) : (
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"
+                />
+              </svg>
+            )}
+          </button>
+        </div>
 
         {/* Auth button (desktop) */}
         <div className="hidden md:block">

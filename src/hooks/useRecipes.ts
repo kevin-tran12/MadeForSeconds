@@ -17,6 +17,8 @@ export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {
     let cancelled = false
 
     async function load() {
+      // Set loading without clearing recipes so the grid doesn't collapse
+      // to a skeleton on every keystroke — prevents layout shifts.
       setLoading(true)
       setError(null)
 
