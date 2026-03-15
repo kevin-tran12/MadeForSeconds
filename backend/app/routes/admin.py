@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from google.cloud import storage
 
 from ..auth import require_admin
+from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
 from ..models import Recipe, RecipeCreate, RecipeUpdate
@@ -44,6 +45,7 @@ async def admin_create_recipe(body: RecipeCreate):
     doc_ref.set(data)
 
     data["id"] = doc_ref.id
+    cache.clear()
     return Recipe(**data)
 
 
@@ -62,6 +64,7 @@ async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
 
     updated = doc_ref.get().to_dict()
     updated["id"] = recipe_id
+    cache.clear()
     return Recipe(**updated)
 
 
@@ -75,6 +78,7 @@ async def admin_delete_recipe(recipe_id: str):
         raise HTTPException(status_code=404, detail="Recipe not found")
 
     doc_ref.delete()
+    cache.clear()
 
 
 @router.post("/upload-image")

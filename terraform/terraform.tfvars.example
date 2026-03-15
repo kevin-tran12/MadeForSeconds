@@ -10,3 +10,5 @@ allowed_origins      = "https://yourdomain.com"
 backend_image        = "us-central1-docker.pkg.dev/your-gcp-project-id/mfs/backend:latest"
 github_owner         = "your-github-username"
 github_repo          = "MadeForSeconds"
+# Redis URL for shared caching — create a free database at https://upstash.com
+# redis_url            = "rediss://default:TOKEN@your-host.upstash.io:6379"
