@@ -18,6 +18,11 @@ router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 def _doc_to_recipe(doc) -> Recipe:
     data = doc.to_dict()
     data["id"] = doc.id
+    # Migrate legacy nutrition dict {label: value} → list[{label, value, unit}]
+    if isinstance(data.get("nutrition"), dict):
+        data["nutrition"] = [
+            {"label": k, "value": v, "unit": ""} for k, v in data["nutrition"].items()
+        ]
     return Recipe(**data)
 
 
