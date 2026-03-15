@@ -10,3 +10,57 @@ resource "google_firestore_database" "default" {
 
   depends_on = [google_project_service.required_apis]
 }
+
+# ─── Firestore Composite Indexes ──────────────────────────────────────────────
+
+# Default list query: published == True ORDER BY created_at DESC
+resource "google_firestore_index" "recipes_published_created" {
+  project    = var.gcp_project_id
+  collection = "recipes"
+  fields {
+    field_path = "published"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "created_at"
+    order      = "DESCENDING"
+  }
+  query_scope = "COLLECTION"
+  depends_on  = [google_firestore_database.default]
+}
+
+# Category filter query: published == True AND categories ARRAY_CONTAINS x ORDER BY created_at DESC
+resource "google_firestore_index" "recipes_published_categories_created" {
+  project    = var.gcp_project_id
+  collection = "recipes"
+  fields {
+    field_path = "published"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path   = "categories"
+    array_config = "CONTAINS"
+  }
+  fields {
+    field_path = "created_at"
+    order      = "DESCENDING"
+  }
+  query_scope = "COLLECTION"
+  depends_on  = [google_firestore_database.default]
+}
+
+# Single recipe lookup: slug == x AND published == True
+resource "google_firestore_index" "recipes_slug_published" {
+  project    = var.gcp_project_id
+  collection = "recipes"
+  fields {
+    field_path = "slug"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "published"
+    order      = "ASCENDING"
+  }
+  query_scope = "COLLECTION"
+  depends_on  = [google_firestore_database.default]
+}

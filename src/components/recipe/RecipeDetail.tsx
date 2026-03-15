@@ -373,7 +373,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
           </ol>
         </section>
       </div>
-      <NutritionCard nutrition={recipe.nutrition} />
+      <NutritionCard nutrition={recipe.nutrition} scale={scale} />
     </article>
 
     {/* Cooking Mode overlay */}

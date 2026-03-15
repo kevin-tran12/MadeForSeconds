@@ -10,7 +10,7 @@ export function RecipesPage() {
   const search = params.get('q') ?? ''
   const category = params.get('category') ?? ''
 
-  const { recipes, loading } = useRecipes({ search, category: category || undefined })
+  const { recipes, loading, error } = useRecipes({ search, category: category || undefined })
   const { categories } = useCategories()
 
   function handleSearch(value: string) {
@@ -41,8 +41,13 @@ export function RecipesPage() {
         />
       </div>
 
+      {/* Error */}
+      {error && (
+        <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p>
+      )}
+
       {/* Count */}
-      {!loading && (
+      {!loading && !error && (
         <p className="mb-4 text-sm text-gray-500">
           {recipes.length} recipe{recipes.length !== 1 ? 's' : ''} found
         </p>
