@@ -37,6 +37,7 @@ def create_recipe(
     difficulty: str = "easy",
     categories: list[str] = [],
     nutrition: list[dict] = [],
+    image_url: str | None = None,
 ) -> dict:
     """Create a new recipe draft on MadeForSeconds.
 
@@ -46,6 +47,7 @@ def create_recipe(
     Each instruction dict must have: step (int), text (str), and optionally tip (str).
     Each nutrition dict must have: label (str), value (float), unit (str).
     Difficulty must be one of: easy, medium, hard.
+    image_url is optional — a publicly accessible URL to the recipe photo.
     """
     # Validate through Pydantic models
     recipe = RecipeCreate(
@@ -59,6 +61,7 @@ def create_recipe(
         difficulty=difficulty,
         categories=categories,
         nutrition=[NutritionEntry(**n) for n in nutrition],
+        image_url=image_url,
         published=False,
     )
 
