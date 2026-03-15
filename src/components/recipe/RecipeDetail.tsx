@@ -1,28 +1,31 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { Recipe } from '../../lib/types'
+import type { Recipe, RecipeComponent, Ingredient } from '../../lib/types'
 
 function IngredientList({
   ingredients,
   checked,
   scale,
   onToggle,
+  keyPrefix = 'root',
 }: {
-  ingredients: Recipe['ingredients']
-  checked: Set<number>
+  ingredients: Ingredient[]
+  checked: Set<string>
   scale: number
-  onToggle: (i: number) => void
+  onToggle: (key: string) => void
+  keyPrefix?: string
 }) {
   // Group consecutive ingredients by their group field
-  const groups: { label: string | null; items: { ing: typeof ingredients[0]; index: number }[] }[] = []
+  const groups: { label: string | null; items: { ing: Ingredient; key: string }[] }[] = []
   for (let i = 0; i < ingredients.length; i++) {
     const ing = ingredients[i]
     const label = ing.group ?? null
+    const key = `${keyPrefix}-${i}`
     const last = groups[groups.length - 1]
     if (last && last.label === label) {
-      last.items.push({ ing, index: i })
+      last.items.push({ ing, key })
     } else {
-      groups.push({ label, items: [{ ing, index: i }] })
+      groups.push({ label, items: [{ ing, key }] })
     }
   }
 
@@ -36,25 +39,25 @@ function IngredientList({
             </p>
           )}
           <ul className="space-y-1">
-            {group.items.map(({ ing, index: i }) => (
+            {group.items.map(({ ing, key }) => (
               <li
-                key={i}
-                onClick={() => onToggle(i)}
+                key={key}
+                onClick={() => onToggle(key)}
                 className="flex cursor-pointer items-start gap-3 rounded-xl px-2 py-3 transition-colors hover:bg-white/60 border-b border-white/40 last:border-0"
               >
                 <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
-                  checked.has(i)
+                  checked.has(key)
                     ? 'border-primary-500 bg-primary-500 text-white'
                     : 'border-gray-300 bg-white'
                 }`}>
-                  {checked.has(i) && (
+                  {checked.has(key) && (
                     <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                     </svg>
                   )}
                 </div>
-                <span className={`leading-tight transition-all ${checked.has(i) ? 'line-through text-gray-400' : 'text-gray-700'}`}>
-                  {ing.amount && <strong className={`font-bold ${checked.has(i) ? 'text-gray-400' : 'text-gray-900'}`}>{formatAmount(ing.amount, scale)} </strong>}
+                <span className={`leading-tight transition-all ${checked.has(key) ? 'line-through text-gray-400' : 'text-gray-700'}`}>
+                  {ing.amount && <strong className={`font-bold ${checked.has(key) ? 'text-gray-400' : 'text-gray-900'}`}>{formatAmount(ing.amount, scale)} </strong>}
                   {ing.unit && <span className="font-medium">{ing.unit} </span>}
                   {ing.item}
                 </span>
@@ -85,24 +88,135 @@ function formatAmount(amount: string, scale: number): string {
   return Number.isInteger(scaled) ? scaled.toString() : scaled.toFixed(2).replace(/\.?0+$/, '')
 }
 
+// ─── Multi-component helpers ─────────────────────────────────────────────────
+
+function ComponentTimingBar({ comp }: { comp: RecipeComponent }) {
+  const items: { label: string; value: string }[] = []
+  if (comp.prep_time_minutes) items.push({ label: 'Prep', value: `${comp.prep_time_minutes}m` })
+  if (comp.cook_time_minutes) items.push({ label: 'Cook', value: `${comp.cook_time_minutes}m` })
+  if (comp.yield_description) items.push({ label: 'Yield', value: comp.yield_description })
+  if (items.length === 0) return null
+  return (
+    <div className="mb-6 flex flex-wrap gap-4">
+      {items.map((item) => (
+        <div key={item.label} className="flex items-center gap-1.5 rounded-xl bg-surface-dark px-4 py-2">
+          <span className="text-xs font-bold uppercase tracking-widest text-gray-400">{item.label}</span>
+          <span className="text-sm font-bold text-gray-900">{item.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ComponentSection({
+  comp,
+  index,
+  checked,
+  scale,
+  onToggle,
+}: {
+  comp: RecipeComponent
+  index: number
+  checked: Set<string>
+  scale: number
+  onToggle: (key: string) => void
+}) {
+  return (
+    <section id={`comp-${index}`} className="scroll-mt-20">
+      {/* Section divider */}
+      <div className="mb-6 flex items-center gap-4">
+        <div className="h-px flex-1 bg-gray-200" />
+        <h2 className="font-display text-xl font-bold text-gray-800 whitespace-nowrap">{comp.title}</h2>
+        <div className="h-px flex-1 bg-gray-200" />
+      </div>
+
+      {comp.description && (
+        <p className="mb-6 text-gray-600 italic leading-relaxed border-l-4 border-primary-100 pl-4">
+          {comp.description}
+        </p>
+      )}
+
+      <ComponentTimingBar comp={comp} />
+
+      <div className="grid gap-8 lg:grid-cols-3">
+        {/* Ingredients */}
+        {comp.ingredients.length > 0 && (
+          <div className="rounded-3xl bg-surface-dark p-6">
+            <h3 className="font-display text-lg font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8 mb-4">
+              Ingredients
+            </h3>
+            <IngredientList
+              ingredients={comp.ingredients}
+              checked={checked}
+              scale={scale}
+              keyPrefix={`comp-${index}`}
+              onToggle={onToggle}
+            />
+          </div>
+        )}
+
+        {/* Instructions */}
+        {comp.instructions.length > 0 && (
+          <section className={comp.ingredients.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'}>
+            <h3 className="font-display text-lg font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8 mb-6">
+              Instructions
+            </h3>
+            <ol className="space-y-6">
+              {comp.instructions.map((inst) => (
+                <li key={inst.step} className="group flex gap-6">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white border border-gray-100 font-display text-lg font-bold text-primary-600 shadow-sm transition-all group-hover:bg-primary-600 group-hover:text-white">
+                    {inst.step}
+                  </span>
+                  <div className="pt-1.5 flex flex-col gap-3">
+                    <p className="text-lg leading-relaxed text-gray-700">{inst.text}</p>
+                    {inst.tip && (
+                      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                        <span className="text-base leading-none mt-0.5">💡</span>
+                        <p className="text-sm leading-relaxed text-amber-800">{inst.tip}</p>
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+      </div>
+    </section>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function RecipeDetail({ recipe }: { recipe: Recipe }) {
   const [servings, setServings] = useState(recipe.servings)
   const [copied, setCopied] = useState(false)
   const [cookingMode, setCookingMode] = useState(false)
-  const [checked, setChecked] = useState<Set<number>>(() => {
+  const [checked, setChecked] = useState<Set<string>>(() => {
     try {
-      return new Set<number>(JSON.parse(localStorage.getItem(`grocery-${recipe.slug}`) ?? '[]'))
+      return new Set<string>(JSON.parse(localStorage.getItem(`grocery-${recipe.slug}`) ?? '[]'))
     } catch {
-      return new Set<number>()
+      return new Set<string>()
     }
   })
   const scale = servings / recipe.servings
 
-  function toggleIngredient(i: number) {
+  // For multi-component recipes: build aggregated ingredient list with group = component title
+  const isMultiComponent = (recipe.components?.length ?? 0) > 0
+  const aggregatedIngredients: Ingredient[] = isMultiComponent
+    ? recipe.components!.flatMap((comp) =>
+        comp.ingredients.map((ing) => ({ ...ing, group: comp.title }))
+      )
+    : recipe.ingredients
+
+  // Total ingredient count for progress bar
+  const totalIngredients = aggregatedIngredients.length || recipe.ingredients.length
+
+  function toggleIngredient(key: string) {
     setChecked((prev) => {
       const next = new Set(prev)
-      if (next.has(i)) next.delete(i)
-      else next.add(i)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       localStorage.setItem(`grocery-${recipe.slug}`, JSON.stringify([...next]))
       return next
     })
@@ -307,9 +421,23 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         </button>
       </div>
 
-      {/* Ingredients + Instructions */}
+      {/* ── Multi-component: jump nav ─────────────────────────────────────── */}
+      {isMultiComponent && (
+        <nav className="sticky top-16 z-30 mt-8 -mx-4 overflow-x-auto bg-white/90 backdrop-blur-sm border-y border-gray-100 px-4 py-2 flex gap-1">
+          {recipe.components!.map((comp, i) => (
+            <a
+              key={i}
+              href={`#comp-${i}`}
+              className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-primary-50 hover:text-primary-700 transition-colors"
+            >
+              {comp.title}
+            </a>
+          ))}
+        </nav>
+      )}
+
+      {/* ── Grocery list ─────────────────────────────────────────────────── */}
       <div className="mt-12 grid gap-12 lg:grid-cols-3">
-        {/* Ingredients */}
         <section className="rounded-3xl bg-surface-dark p-8">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8">
@@ -328,57 +456,93 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
           <div className="mt-4">
             <div className="flex items-center justify-between text-xs text-gray-400 mb-1.5">
               <span>
-                {checked.size === recipe.ingredients.length
+                {checked.size === totalIngredients
                   ? 'All ready to cook!'
-                  : `${checked.size} of ${recipe.ingredients.length} checked`}
+                  : `${checked.size} of ${totalIngredients} checked`}
               </span>
             </div>
             <div className="h-1.5 w-full rounded-full bg-white/60">
               <div
                 className="h-full rounded-full bg-primary-500 transition-all duration-300"
-                style={{ width: `${(checked.size / recipe.ingredients.length) * 100}%` }}
+                style={{ width: `${totalIngredients > 0 ? (checked.size / totalIngredients) * 100 : 0}%` }}
               />
             </div>
           </div>
           <IngredientList
-            ingredients={recipe.ingredients}
+            ingredients={aggregatedIngredients}
             checked={checked}
             scale={scale}
+            keyPrefix="grocery"
             onToggle={toggleIngredient}
           />
         </section>
 
-        {/* Instructions */}
-        <section className="lg:col-span-2">
-          <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8">
-            Instructions
-          </h2>
-          <ol className="mt-8 space-y-8">
-            {recipe.instructions.map((inst) => (
-              <li key={inst.step} className="group flex gap-6">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white border border-gray-100 font-display text-lg font-bold text-primary-600 shadow-sm transition-all group-hover:bg-primary-600 group-hover:text-white">
-                  {inst.step}
-                </span>
-                <div className="pt-1.5 flex flex-col gap-3">
-                  <p className="text-lg leading-relaxed text-gray-700">{inst.text}</p>
-                  {inst.tip && (
-                    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                      <span className="text-base leading-none mt-0.5">💡</span>
-                      <p className="text-sm leading-relaxed text-amber-800">{inst.tip}</p>
-                    </div>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ol>
-        </section>
+        {/* ── Single-component instructions (shown when no components) ────── */}
+        {!isMultiComponent && (
+          <section className="lg:col-span-2">
+            <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8">
+              Instructions
+            </h2>
+            <ol className="mt-8 space-y-8">
+              {recipe.instructions.map((inst) => (
+                <li key={inst.step} className="group flex gap-6">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white border border-gray-100 font-display text-lg font-bold text-primary-600 shadow-sm transition-all group-hover:bg-primary-600 group-hover:text-white">
+                    {inst.step}
+                  </span>
+                  <div className="pt-1.5 flex flex-col gap-3">
+                    <p className="text-lg leading-relaxed text-gray-700">{inst.text}</p>
+                    {inst.tip && (
+                      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                        <span className="text-base leading-none mt-0.5">💡</span>
+                        <p className="text-sm leading-relaxed text-amber-800">{inst.tip}</p>
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
       </div>
+
+      {/* ── Multi-component sections ─────────────────────────────────────── */}
+      {isMultiComponent && (
+        <div className="mt-12 flex flex-col gap-16">
+          {recipe.components!.map((comp, i) => (
+            <ComponentSection
+              key={i}
+              comp={comp}
+              index={i}
+              checked={checked}
+              scale={scale}
+              onToggle={toggleIngredient}
+            />
+          ))}
+        </div>
+      )}
       <NutritionCard nutrition={recipe.nutrition} scale={scale} />
     </article>
 
-    {/* Cooking Mode overlay */}
+    {/* Cooking Mode overlay — flatten multi-component instructions */}
     {cookingMode && (
-      <CookingMode recipe={recipe} onExit={() => setCookingMode(false)} />
+      <CookingMode
+        recipe={
+          isMultiComponent
+            ? {
+                ...recipe,
+                instructions: recipe.components!.flatMap((comp, ci) =>
+                  comp.instructions.map((inst, ii) => ({
+                    ...inst,
+                    step: recipe.components!.slice(0, ci).reduce((acc, c) => acc + c.instructions.length, 0) + ii + 1,
+                    // Mark the first step of each component as a section break via tip
+                    tip: ii === 0 ? `── ${comp.title} ──${inst.tip ? `\n💡 ${inst.tip}` : ''}` : inst.tip,
+                  }))
+                ),
+              }
+            : recipe
+        }
+        onExit={() => setCookingMode(false)}
+      />
     )}
   </>
   )

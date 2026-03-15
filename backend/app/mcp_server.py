@@ -12,7 +12,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .config import settings
 from .firestore import get_db
-from .models import Ingredient, Instruction, NutritionEntry, RecipeCreate
+from .models import Ingredient, Instruction, NutritionEntry, RecipeComponent, RecipeCreate
 
 
 mcp = FastMCP(
@@ -38,6 +38,7 @@ def create_recipe(
     categories: list[str] = [],
     nutrition: list[dict] = [],
     image_url: str | None = None,
+    components: list[dict] | None = None,
 ) -> dict:
     """Create a new recipe draft on MadeForSeconds.
 
@@ -48,7 +49,31 @@ def create_recipe(
     Each nutrition dict must have: label (str), value (float), unit (str).
     Difficulty must be one of: easy, medium, hard.
     image_url is optional — a publicly accessible URL to the recipe photo.
+
+    For multi-component dishes (e.g. Hainanese Chicken Rice with separate rice, sauces):
+      Pass components as a list of up to 5 dicts, each with:
+        title (str), description (str, optional),
+        ingredients (list[dict]), instructions (list[dict]),
+        prep_time_minutes (int, optional), cook_time_minutes (int, optional),
+        yield_description (str, optional — e.g. "About ½ cup" for sauces).
+      When components is provided, top-level ingredients/instructions should be empty.
     """
+    # Build components if provided
+    parsed_components = None
+    if components:
+        parsed_components = [
+            RecipeComponent(
+                title=c["title"],
+                description=c.get("description"),
+                ingredients=[Ingredient(**ing) for ing in c.get("ingredients", [])],
+                instructions=[Instruction(**inst) for inst in c.get("instructions", [])],
+                prep_time_minutes=c.get("prep_time_minutes"),
+                cook_time_minutes=c.get("cook_time_minutes"),
+                yield_description=c.get("yield_description"),
+            )
+            for c in components[:5]  # cap at 5
+        ]
+
     # Validate through Pydantic models
     recipe = RecipeCreate(
         title=title,
@@ -63,6 +88,7 @@ def create_recipe(
         nutrition=[NutritionEntry(**n) for n in nutrition],
         image_url=image_url,
         published=False,
+        components=parsed_components,
     )
 
     now = datetime.now(timezone.utc)
