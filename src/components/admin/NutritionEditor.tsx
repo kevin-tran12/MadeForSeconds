@@ -9,6 +9,19 @@ interface NutritionEditorProps {
 
 type NutritionRow = { label: string; value: string; unit: string }
 
+const STANDARD_FIELDS: NutritionRow[] = [
+  { label: 'Calories',           value: '', unit: 'kcal' },
+  { label: 'Total Fat',          value: '', unit: 'g' },
+  { label: 'Saturated Fat',      value: '', unit: 'g' },
+  { label: 'Trans Fat',          value: '', unit: 'g' },
+  { label: 'Cholesterol',        value: '', unit: 'mg' },
+  { label: 'Sodium',             value: '', unit: 'mg' },
+  { label: 'Total Carbohydrate', value: '', unit: 'g' },
+  { label: 'Dietary Fiber',      value: '', unit: 'g' },
+  { label: 'Total Sugars',       value: '', unit: 'g' },
+  { label: 'Protein',            value: '', unit: 'g' },
+]
+
 function toRows(nutrition: NutritionEntry[]): NutritionRow[] {
   return nutrition.map((n) => ({ label: n.label, value: String(n.value), unit: n.unit }))
 }
@@ -31,6 +44,14 @@ export function NutritionEditor({ value, onChange }: NutritionEditorProps) {
   function add() {
     const next = [...rows, { label: '', value: '', unit: '' }]
     setRows(next)
+  }
+
+  function fillStandard() {
+    const existingLabels = new Set(rows.map((r) => r.label.toLowerCase()))
+    const toAdd = STANDARD_FIELDS.filter((f) => !existingLabels.has(f.label.toLowerCase()))
+    const next = [...rows, ...toAdd]
+    setRows(next)
+    onChange(toEntries(next))
   }
 
   function remove(i: number) {
@@ -86,9 +107,14 @@ export function NutritionEditor({ value, onChange }: NutritionEditorProps) {
           </button>
         </div>
       ))}
-      <Button type="button" variant="secondary" size="sm" onClick={add} className="self-start mt-1">
-        + Add item
-      </Button>
+      <div className="mt-1 flex gap-2">
+        <Button type="button" variant="secondary" size="sm" onClick={add}>
+          + Add item
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={fillStandard}>
+          Fill standard fields
+        </Button>
+      </div>
     </div>
   )
 }

@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 from google.cloud.firestore_v1.base_query import FieldFilter
 
+from ..cache import categories_cache, recipes_cache
 from ..firestore import get_db
 from ..models import Recipe
 
@@ -21,6 +22,11 @@ def _doc_to_recipe(doc) -> Recipe:
 
 @router.get("/recipes", response_model=list[Recipe])
 async def list_recipes(search: str | None = None, category: str | None = None):
+    cache_key = f"recipes:{search or ''}:{category or ''}"
+    cached = recipes_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     db = get_db()
     query = db.collection("recipes").where(filter=FieldFilter("published", "==", True))
 
@@ -38,11 +44,17 @@ async def list_recipes(search: str | None = None, category: str | None = None):
         pattern = re.compile(re.escape(search), re.IGNORECASE)
         recipes = [r for r in recipes if pattern.search(r.title) or pattern.search(r.description)]
 
+    recipes_cache.set(cache_key, recipes)
     return recipes
 
 
 @router.get("/recipes/{slug}", response_model=Recipe)
 async def get_recipe(slug: str):
+    cache_key = f"recipe:{slug}"
+    cached = recipes_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     db = get_db()
     docs = (
         db.collection("recipes")
@@ -54,11 +66,17 @@ async def get_recipe(slug: str):
     doc = next(docs, None)
     if doc is None:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    return _doc_to_recipe(doc)
+    recipe = _doc_to_recipe(doc)
+    recipes_cache.set(cache_key, recipe)
+    return recipe
 
 
 @router.get("/categories", response_model=list[str])
 async def list_categories():
+    cached = categories_cache.get("categories")
+    if cached is not None:
+        return cached
+
     db = get_db()
     # Only fetch categories field and limit to 100 most recent recipes
     # This is a heuristic to keep memory low while catching most categories
@@ -74,7 +92,9 @@ async def list_categories():
     for doc in docs:
         cats = doc.to_dict().get("categories", [])
         all_cats.update(cats)
-    return sorted(all_cats)
+    result = sorted(all_cats)
+    categories_cache.set("categories", result)
+    return result
 
 
 @router.get("/sitemap.xml")
