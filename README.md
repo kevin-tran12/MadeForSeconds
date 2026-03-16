@@ -158,7 +158,7 @@ The backend runs on Cloud Run. Changes to anything in `backend/` need a new Dock
 gcloud auth configure-docker us-central1-docker.pkg.dev
 
 # 2. Build and push the new image
-docker build -t us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest ./backend
+docker build --platform linux/amd64 -t us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest ./backend
 docker push us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest
 
 # 3. Deploy the new image to Cloud Run
