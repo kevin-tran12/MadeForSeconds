@@ -80,7 +80,7 @@ Either push to `main` to trigger Cloud Build automatically, or do it manually:
 gcloud auth configure-docker us-central1-docker.pkg.dev
 
 # Build and push from the project root
-docker build -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mfs/backend:latest ./backend
+docker build --platform linux/amd64 -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mfs/backend:latest ./backend
 docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mfs/backend:latest
 
 # Deploy to Cloud Run
@@ -140,7 +140,7 @@ Any change inside `backend/` requires a new Docker image. Run these after mergin
 gcloud auth configure-docker us-central1-docker.pkg.dev
 
 # 2. Build and push the updated image
-docker build -t us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest ./backend
+docker build --platform linux/amd64 -t us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest ./backend
 docker push us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest
 
 # 3. Deploy — rolling update, ~30–60 seconds, zero downtime
