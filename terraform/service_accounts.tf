@@ -46,6 +46,14 @@ resource "google_secret_manager_secret_iam_member" "backend_anthropic_key_access
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Allow Cloud Build (running as mfs-backend SA) to deploy Cloud Run services
+# that also run as mfs-backend SA — requires actAs permission on itself
+resource "google_service_account_iam_member" "backend_act_as_self" {
+  service_account_id = google_service_account.backend.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Grant access to read the Redis URL secret (only when redis_url is provided)
 resource "google_secret_manager_secret_iam_member" "backend_redis_url_access" {
   count     = var.redis_url != "" ? 1 : 0
