@@ -13,12 +13,12 @@ A personal recipe collection — built to be fast, minimal, and run entirely on 
 | Backend hosting | GCP Cloud Run (scale to zero) |
 | Frontend hosting | Cloudflare Pages |
 | DNS / CDN | Cloudflare |
-| CI/CD | Cloud Build |
+| CI/CD | Cloud Build (backend) / Cloudflare Pages (frontend) |
 | Infrastructure | Terraform |
 
 All GCP services stay within the always-free tier for personal/low-traffic use.
 
-> **Deploying to production?** See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+> **First-time production setup?** See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ---
 
@@ -48,19 +48,16 @@ All GCP services stay within the always-free tier for personal/low-traffic use.
 │   ├── components/          UI, recipe, layout, admin components
 │   └── pages/               Route page components
 ├── terraform/               GCP + Cloudflare infrastructure
-│   ├── apis.tf              Enable required GCP APIs
 │   ├── cloud_run.tf         Cloud Run service (free-tier optimized)
 │   ├── firestore.tf         Firestore database
 │   ├── artifact_registry.tf Docker image registry + cleanup policy
-│   ├── identity_platform.tf Auth config
 │   ├── cloudbuild.tf        CI/CD trigger + IAM
-│   ├── service_accounts.tf  Cloud Run service account
-│   └── cloudflare.tf        DNS records
+│   └── ...
 ├── docs/
-│   └── DEPLOYMENT.md        Production deployment guide
+│   └── DEPLOYMENT.md        Full production setup guide
+├── vitest.config.ts         Unit test config (separate from vite.config.ts)
 ├── cloudbuild.yaml          Cloud Build steps (build + push + deploy)
 ├── docker-compose.yml       Local dev environment
-├── Dockerfile.dev           Vite dev container
 └── .env.local.example       Local env var template
 ```
 
@@ -113,10 +110,10 @@ Go to `http://localhost:5173`. To access the admin panel:
 ### Useful dev commands
 
 ```bash
-# Tail backend logs only
+# Tail backend logs
 docker compose logs -f backend
 
-# Restart just the backend (after changing Python code)
+# Restart just the backend after changing Python code
 docker compose restart backend
 
 # Open a shell in the backend container
@@ -124,7 +121,66 @@ docker compose exec backend bash
 
 # Stop everything
 docker compose down
+
+# TypeScript check + production build
+npm run build
+
+# Run unit tests
+npm run test:unit
+
+# Run e2e tests (requires a running local stack)
+npm run test:e2e
 ```
+
+---
+
+## Branching & deployment workflow
+
+### Frontend (automatic via Cloudflare Pages)
+
+Every push triggers a build automatically:
+
+| Branch | Deployment |
+|--------|-----------|
+| `main` | Production — `madeforseconds.pages.dev` (and your custom domain) |
+| Any other branch | Preview — `<branch-name>.madeforseconds.pages.dev` |
+
+Frontend changes never need a manual step — just push and Cloudflare builds it.
+
+> All `*.madeforseconds.pages.dev` preview URLs are pre-approved in the backend's CORS config, so previews can talk to the production API without any extra setup.
+
+### Backend (manual push required)
+
+The backend runs on Cloud Run. Changes to anything in `backend/` need a new Docker image to take effect. Run these commands after merging backend changes to `main`:
+
+```bash
+# 1. Authenticate Docker with Artifact Registry (one-time per machine)
+gcloud auth configure-docker us-central1-docker.pkg.dev
+
+# 2. Build and push the new image
+docker build -t us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest ./backend
+docker push us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest
+
+# 3. Deploy the new image to Cloud Run
+gcloud run services update mfs-backend \
+  --region us-central1 \
+  --image us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest \
+  --project made-for-seconds
+```
+
+Step 3 takes about 30–60 seconds. Cloud Run performs a rolling deploy with zero downtime.
+
+**Alternatively**, push to `main` — Cloud Build will build and deploy automatically if the trigger is configured (see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
+
+### When does the backend need a redeploy?
+
+| Change | Needs backend redeploy? |
+|--------|------------------------|
+| Frontend (`.tsx`, `.ts`, `.css`) | No — Cloudflare handles it |
+| `backend/app/*.py` | **Yes** |
+| `backend/requirements.txt` | **Yes** |
+| Terraform (`.tf` files) | Run `terraform apply` instead |
+| `ALLOWED_ORIGINS` / env vars | Run `terraform apply` instead |
 
 ---
 
