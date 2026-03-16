@@ -116,18 +116,27 @@ class _BearerAuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http" and settings.mcp_api_key:
-            headers = dict(scope.get("headers", []))
-            auth = headers.get(b"authorization", b"").decode()
-            if auth != f"Bearer {settings.mcp_api_key}":
-                response = b'{"error": "Unauthorized"}'
-                await send({
-                    "type": "http.response.start",
-                    "status": 401,
-                    "headers": [(b"content-type", b"application/json")],
-                })
-                await send({"type": "http.response.body", "body": response})
-                return
+        if scope["type"] == "http":
+            # Rewrite Host header to localhost — MCP SDK blocks non-localhost hosts
+            server = scope.get("server") or ("localhost", 8000)
+            host_value = f"localhost:{server[1]}".encode()
+            headers = [
+                (b"host", host_value) if k == b"host" else (k, v)
+                for k, v in scope.get("headers", [])
+            ]
+            scope = {**scope, "headers": headers}
+
+            if settings.mcp_api_key:
+                auth = dict(headers).get(b"authorization", b"").decode()
+                if auth != f"Bearer {settings.mcp_api_key}":
+                    response = b'{"error": "Unauthorized"}'
+                    await send({
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [(b"content-type", b"application/json")],
+                    })
+                    await send({"type": "http.response.body", "body": response})
+                    return
         await self.app(scope, receive, send)
 
 

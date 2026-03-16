@@ -35,11 +35,13 @@ app.include_router(public.router)
 app.include_router(admin.router)
 app.include_router(parse.router)
 
-# Mount MCP server for Claude Projects integration
-app.mount("/mcp", mcp_app)
-
 
 @app.get("/api/health")
 async def health():
     logger.info("Health check endpoint called")
     return {"status": "ok"}
+
+
+# Mount MCP server last — mounts at "/" so its internal /mcp route is reachable at /mcp
+# Must come after all other routes since Mount("/") acts as a catch-all
+app.mount("/", mcp_app)
