@@ -3,10 +3,11 @@ import type { Recipe, RecipeFormData } from './types'
 
 // ─── Public endpoints ───────────────────────────────────────────────────────
 
-export async function listPublicRecipes(search?: string, category?: string): Promise<Recipe[]> {
+export async function listPublicRecipes(search?: string, category?: string, searchBy?: string): Promise<Recipe[]> {
   const params = new URLSearchParams()
   if (search) params.set('search', search)
   if (category) params.set('category', category)
+  if (searchBy && searchBy !== 'all') params.set('search_by', searchBy)
   const qs = params.toString()
   return apiFetch<Recipe[]>(`/api/recipes${qs ? `?${qs}` : ''}`)
 }

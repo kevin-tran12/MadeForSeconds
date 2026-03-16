@@ -1,11 +1,12 @@
 import { useState, type FormEvent, useRef } from 'react'
-import type { Recipe, RecipeFormData, Difficulty, NutritionEntry } from '../../lib/types'
+import type { Recipe, RecipeFormData, Difficulty, NutritionEntry, RecipeComponent } from '../../lib/types'
 import { adminApi } from '../../lib/api'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { IngredientEditor } from './IngredientEditor'
 import { InstructionEditor } from './InstructionEditor'
 import { NutritionEditor } from './NutritionEditor'
+import { ComponentEditor } from './ComponentEditor'
 
 interface RecipeFormProps {
   recipe?: Recipe
@@ -20,6 +21,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <div className="flex flex-col gap-4">{children}</div>
     </div>
   )
+}
+
+function defaultComponent(): RecipeComponent {
+  return {
+    title: '',
+    description: null,
+    ingredients: [{ amount: '', unit: '', item: '' }],
+    instructions: [{ step: 1, text: '' }],
+    prep_time_minutes: null,
+    cook_time_minutes: null,
+    yield_description: null,
+  }
 }
 
 export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) {
@@ -40,6 +53,13 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     recipe?.instructions ?? [{ step: 1, text: '' }]
   )
   const [nutrition, setNutrition] = useState<NutritionEntry[]>(recipe?.nutrition ?? [])
+
+  // Multi-component mode
+  const hasExistingComponents = (recipe?.components?.length ?? 0) > 0
+  const [multiComponent, setMultiComponent] = useState(hasExistingComponents)
+  const [components, setComponents] = useState<RecipeComponent[]>(
+    hasExistingComponents ? recipe!.components! : [defaultComponent()]
+  )
 
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -78,8 +98,18 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     setError(null)
 
     if (!title.trim()) return setError('Title is required')
-    if (ingredients.length === 0 || !ingredients[0].item) return setError('At least one ingredient is required')
-    if (instructions.length === 0 || !instructions[0].text) return setError('At least one instruction step is required')
+
+    if (multiComponent) {
+      if (components.length === 0) return setError('At least one component is required')
+      if (!components[0].title.trim()) return setError('First component needs a title')
+      if (components[0].ingredients.length === 0 || !components[0].ingredients[0].item)
+        return setError('First component needs at least one ingredient')
+      if (components[0].instructions.length === 0 || !components[0].instructions[0].text)
+        return setError('First component needs at least one instruction step')
+    } else {
+      if (ingredients.length === 0 || !ingredients[0].item) return setError('At least one ingredient is required')
+      if (instructions.length === 0 || !instructions[0].text) return setError('At least one instruction step is required')
+    }
 
     try {
       await onSubmit({
@@ -92,9 +122,10 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         servings: parseInt(servings) || 1,
         published,
         categories,
-        ingredients,
-        instructions,
+        ingredients: multiComponent ? [] : ingredients,
+        instructions: multiComponent ? [] : instructions,
         nutrition,
+        components: multiComponent ? components : null,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -179,6 +210,28 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
           </div>
           <span className="text-sm font-medium text-gray-700">Published</span>
         </label>
+
+        {/* Multi-component toggle */}
+        <div className="rounded-lg border border-primary-100 bg-primary-50/40 px-4 py-3">
+          <label className="flex cursor-pointer items-start gap-3">
+            <div className="relative mt-0.5 shrink-0">
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={multiComponent}
+                onChange={(e) => setMultiComponent(e.target.checked)}
+              />
+              <div className={`h-6 w-11 rounded-full transition-colors ${multiComponent ? 'bg-primary-600' : 'bg-gray-300'}`} />
+              <div className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${multiComponent ? 'translate-x-5' : 'translate-x-0.5'}`} />
+            </div>
+            <div>
+              <span className="text-sm font-semibold text-gray-800">Multi-component recipe</span>
+              <p className="mt-0.5 text-xs text-gray-500">
+                For dishes made of separate parts — e.g. Hainanese Chicken Rice with poached chicken, rice, chili sauce, and ginger sauce. Up to 5 components.
+              </p>
+            </div>
+          </label>
+        </div>
       </Section>
 
       <Section title="Times & servings">
@@ -187,6 +240,11 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
           <Input id="cookTime" label="Cook (min)" type="number" min="0" value={cookTime} onChange={(e) => setCookTime(e.target.value)} />
           <Input id="servings" label="Servings" type="number" min="1" value={servings} onChange={(e) => setServings(e.target.value)} />
         </div>
+        {multiComponent && (
+          <p className="text-xs text-gray-400">
+            These are the overall totals shown in the recipe header. Each component has its own prep/cook times below.
+          </p>
+        )}
       </Section>
 
       <Section title="Categories">
@@ -217,13 +275,24 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         )}
       </Section>
 
-      <Section title="Ingredients">
-        <IngredientEditor value={ingredients} onChange={setIngredients} />
-      </Section>
+      {multiComponent ? (
+        <Section title="Components">
+          <p className="text-xs text-gray-400 -mt-2">
+            Each component is a self-contained sub-recipe with its own ingredients and steps.
+          </p>
+          <ComponentEditor value={components} onChange={setComponents} />
+        </Section>
+      ) : (
+        <>
+          <Section title="Ingredients">
+            <IngredientEditor value={ingredients} onChange={setIngredients} />
+          </Section>
 
-      <Section title="Instructions">
-        <InstructionEditor value={instructions} onChange={setInstructions} />
-      </Section>
+          <Section title="Instructions">
+            <InstructionEditor value={instructions} onChange={setInstructions} />
+          </Section>
+        </>
+      )}
 
       <Section title="Nutrition (optional)">
         <p className="text-xs text-gray-400 -mt-2">Per serving. Add any nutrients — calories, macros, vitamins, minerals, etc.</p>
