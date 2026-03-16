@@ -1,51 +1,18 @@
-import { useRef, useState } from 'react'
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, NavLink } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { Button } from '../ui/Button'
+import { SearchWithSuggestions } from '../search/SearchWithSuggestions'
 
 export function Header() {
   const { isAdmin, logout } = useAuth()
-  const navigate = useNavigate()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [searchValue, setSearchValue] = useState('')
-  const searchInputRef = useRef<HTMLInputElement>(null)
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `text-sm font-medium transition-colors ${
       isActive ? 'text-primary-600' : 'text-gray-700 hover:text-primary-600'
     }`
-
-  function openSearch() {
-    setSearchOpen(true)
-    setTimeout(() => searchInputRef.current?.focus(), 50)
-  }
-
-  function closeSearch() {
-    setSearchOpen(false)
-    setSearchValue('')
-  }
-
-  function handleSearchSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const q = searchValue.trim()
-    closeSearch()
-    if (q) navigate(`/recipes?q=${encodeURIComponent(q)}`)
-    else navigate('/recipes')
-  }
-
-  function handleSearchKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Escape') closeSearch()
-  }
-
-  function handleMobileSearchSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const q = searchValue.trim()
-    setMobileOpen(false)
-    setSearchValue('')
-    if (q) navigate(`/recipes?q=${encodeURIComponent(q)}`)
-    else navigate('/recipes')
-  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-surface-darker bg-surface/95 backdrop-blur-sm">
@@ -58,69 +25,88 @@ export function Header() {
           MadeForSeconds
         </Link>
 
-        {/* Desktop nav */}
-        <nav className="hidden items-center gap-6 md:flex">
-          {searchOpen ? (
-            <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
-              <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 shadow-sm ring-2 ring-primary-100 focus-within:ring-primary-300">
-                <svg className="h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                </svg>
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchValue}
-                  onChange={(e) => setSearchValue(e.target.value)}
-                  onKeyDown={handleSearchKeyDown}
-                  placeholder="Search recipes…"
-                  className="w-48 bg-transparent text-sm text-gray-900 placeholder-gray-400 outline-none"
+        {/* Desktop nav + search */}
+        <div className="hidden md:flex items-center gap-6">
+          {/* Nav links — always visible */}
+          <nav className="flex items-center gap-6">
+            <NavLink to="/" end className={navLinkClass}>
+              Home
+            </NavLink>
+            <NavLink to="/recipes" className={navLinkClass}>
+              Recipes
+            </NavLink>
+            <NavLink to="/about" className={navLinkClass}>
+              About
+            </NavLink>
+            {isAdmin && (
+              <NavLink to="/admin" className={navLinkClass}>
+                Admin
+              </NavLink>
+            )}
+          </nav>
+
+          {/* Animated search bar — expands from right without covering tabs */}
+          <div
+            style={{
+              maxWidth: searchOpen ? '22rem' : '0',
+              opacity: searchOpen ? 1 : 0,
+              pointerEvents: searchOpen ? 'auto' : 'none',
+              // overflow-hidden is required for the width animation but clips
+              // the suggestions dropdown. Switch to visible once open so the
+              // dropdown can render below the bar unobstructed.
+              overflow: searchOpen ? 'visible' : 'hidden',
+            }}
+            className="transition-[max-width,opacity] duration-300 ease-in-out"
+          >
+            <div className="w-[22rem] pl-1">
+              <SearchWithSuggestions
+                autoFocus={searchOpen}
+                onClose={() => setSearchOpen(false)}
+              />
+            </div>
+          </div>
+
+          {/* Search / Close toggle button */}
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            className={`rounded-lg p-1.5 transition-all duration-200 ${
+              searchOpen
+                ? 'text-primary-600'
+                : 'text-gray-500 hover:text-primary-600'
+            }`}
+            aria-label={searchOpen ? 'Close search' : 'Open search'}
+          >
+            {searchOpen ? (
+              <svg
+                className="h-5 w-5 transition-transform duration-200 rotate-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
                 />
-              </div>
-              <button
-                type="submit"
-                className="rounded-lg bg-primary-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-primary-400 active:scale-95 transition-all"
+              </svg>
+            ) : (
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
               >
-                Go
-              </button>
-              <button
-                type="button"
-                onClick={closeSearch}
-                className="rounded-lg p-1.5 text-gray-400 hover:text-gray-600"
-                aria-label="Close search"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </form>
-          ) : (
-            <>
-              <NavLink to="/" end className={navLinkClass}>
-                Home
-              </NavLink>
-              <NavLink to="/recipes" className={navLinkClass}>
-                Recipes
-              </NavLink>
-              <NavLink to="/about" className={navLinkClass}>
-                About
-              </NavLink>
-              {isAdmin && (
-                <NavLink to="/admin" className={navLinkClass}>
-                  Admin
-                </NavLink>
-              )}
-              <button
-                onClick={openSearch}
-                className="rounded-lg p-1.5 text-gray-500 hover:text-primary-600 transition-colors"
-                aria-label="Search"
-              >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                </svg>
-              </button>
-            </>
-          )}
-        </nav>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"
+                />
+              </svg>
+            )}
+          </button>
+        </div>
 
         {/* Auth button (desktop) */}
         <div className="hidden md:block">
@@ -151,18 +137,9 @@ export function Header() {
       {mobileOpen && (
         <div className="border-t border-surface-darker bg-surface px-4 py-3 md:hidden">
           {/* Mobile search */}
-          <form onSubmit={handleMobileSearchSubmit} className="mb-3 flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
-            <svg className="h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-            </svg>
-            <input
-              type="text"
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              placeholder="Search recipes…"
-              className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 outline-none"
-            />
-          </form>
+          <div className="mb-3">
+            <SearchWithSuggestions onClose={() => setMobileOpen(false)} />
+          </div>
 
           <nav className="flex flex-col gap-3">
             <NavLink to="/" end className={navLinkClass} onClick={() => setMobileOpen(false)}>

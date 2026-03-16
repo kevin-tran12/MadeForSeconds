@@ -23,6 +23,17 @@ class NutritionEntry(BaseModel):
     unit: str = ""
 
 
+class RecipeComponent(BaseModel):
+    """A sub-recipe within a multi-component dish (e.g. the rice in Hainanese Chicken Rice)."""
+    title: str
+    description: str | None = None
+    ingredients: list[Ingredient] = []
+    instructions: list[Instruction] = []
+    prep_time_minutes: int | None = None
+    cook_time_minutes: int | None = None
+    yield_description: str | None = None  # e.g. "About ½–¾ cup" for sauces
+
+
 class RecipeCreate(BaseModel):
     title: str
     description: str = ""
@@ -36,6 +47,7 @@ class RecipeCreate(BaseModel):
     image_url: str | None = None
     published: bool = False
     nutrition: list[NutritionEntry] = []
+    components: list[RecipeComponent] | None = None
 
 
 class RecipeUpdate(BaseModel):
@@ -51,6 +63,7 @@ class RecipeUpdate(BaseModel):
     image_url: str | None = None
     published: bool | None = None
     nutrition: list[NutritionEntry] | None = None
+    components: list[RecipeComponent] | None = None
 
 
 class Recipe(BaseModel):
@@ -70,3 +83,4 @@ class Recipe(BaseModel):
     created_at: datetime
     updated_at: datetime
     nutrition: list[NutritionEntry] = []
+    components: list[RecipeComponent] | None = None

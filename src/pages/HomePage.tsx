@@ -1,22 +1,13 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useRecipes } from '../hooks/useRecipes'
 import { useCategories } from '../hooks/useCategories'
 import { RecipeGrid } from '../components/recipe/RecipeGrid'
+import { SearchWithSuggestions } from '../components/search/SearchWithSuggestions'
 
 export function HomePage() {
   const { recipes, loading, error } = useRecipes()
   const { categories } = useCategories()
   const featured = recipes.slice(0, 6)
-  const navigate = useNavigate()
-  const [heroSearch, setHeroSearch] = useState('')
-
-  function handleHeroSearch(e: React.FormEvent) {
-    e.preventDefault()
-    const q = heroSearch.trim()
-    if (q) navigate(`/recipes?q=${encodeURIComponent(q)}`)
-    else navigate('/recipes')
-  }
 
   return (
     <div>
@@ -37,26 +28,9 @@ export function HomePage() {
           </p>
 
           {/* Hero search */}
-          <form onSubmit={handleHeroSearch} className="mx-auto mt-8 flex w-full max-w-xl items-center gap-2 rounded-2xl bg-white/10 p-1.5 ring-1 ring-white/20 backdrop-blur-sm">
-            <div className="flex flex-1 items-center gap-2 rounded-xl bg-white px-4 py-2.5">
-              <svg className="h-5 w-5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-              </svg>
-              <input
-                type="text"
-                value={heroSearch}
-                onChange={(e) => setHeroSearch(e.target.value)}
-                placeholder="Search recipes…"
-                className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 outline-none"
-              />
-            </div>
-            <button
-              type="submit"
-              className="rounded-xl bg-primary-500 px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-primary-400 active:scale-95"
-            >
-              Search
-            </button>
-          </form>
+          <div className="mx-auto mt-8 w-full max-w-xl rounded-2xl bg-white/10 p-1.5 ring-1 ring-white/20 backdrop-blur-sm">
+            <SearchWithSuggestions />
+          </div>
 
           <div className="mt-6 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link

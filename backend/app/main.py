@@ -24,6 +24,8 @@ app = FastAPI(title="MadeForSeconds API", redirect_slashes=False, lifespan=mcp_i
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
+    # Allow all Cloudflare Pages preview deployments automatically
+    allow_origin_regex=r"https://.*\.madeforseconds\.pages\.dev",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

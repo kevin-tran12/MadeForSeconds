@@ -26,8 +26,12 @@ def _doc_to_recipe(doc) -> Recipe:
 
 
 @router.get("/recipes", response_model=list[Recipe])
-async def list_recipes(search: str | None = None, category: str | None = None):
-    cache_key = f"recipes:{search or ''}:{category or ''}"
+async def list_recipes(
+    search: str | None = None,
+    category: str | None = None,
+    search_by: str = "all",
+):
+    cache_key = f"recipes:{search or ''}:{category or ''}:{search_by}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -44,10 +48,21 @@ async def list_recipes(search: str | None = None, category: str | None = None):
 
     recipes = [_doc_to_recipe(doc) for doc in docs]
 
-    # Firestore doesn't support ILIKE, so filter in Python for search
+    # Firestore doesn't support ILIKE, so filter in Python.
+    # search_by: "all" | "name" | "ingredient"
     if search:
         pattern = re.compile(re.escape(search), re.IGNORECASE)
-        recipes = [r for r in recipes if pattern.search(r.title) or pattern.search(r.description)]
+
+        def matches(r) -> bool:
+            if search_by in ("all", "name"):
+                if pattern.search(r.title) or pattern.search(r.description):
+                    return True
+            if search_by in ("all", "ingredient"):
+                if any(pattern.search(ing.item) for ing in r.ingredients):
+                    return True
+            return False
+
+        recipes = [r for r in recipes if matches(r)]
 
     cache.set(cache_key, recipes)
     return recipes
