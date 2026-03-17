@@ -22,6 +22,9 @@ def _doc_to_recipe(doc) -> Recipe:
         data["nutrition"] = [
             {"label": k, "value": v, "unit": ""} for k, v in data["nutrition"].items()
         ]
+    # Strip any leftover premium_content from Firestore docs
+    data.pop("premium_content", None)
+    data.pop("has_premium_content", None)
     return Recipe(**data)
 
 

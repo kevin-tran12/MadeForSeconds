@@ -32,6 +32,9 @@ def test_admin_list_recipes(authenticated_client, mock_db):
 
 def test_admin_create_recipe(authenticated_client, mock_db):
     """Verifies that the admin can create a new recipe."""
+    # doc_ref.id must be a real string so Pydantic's Recipe model can validate it
+    mock_db.collection.return_value.document.return_value.id = "new-test-id"
+
     payload = {
         "title": "New Recipe",
         "description": "New Desc",
@@ -46,10 +49,11 @@ def test_admin_create_recipe(authenticated_client, mock_db):
         "published": True,
         "rating": None
     }
-    
+
     response = authenticated_client.post("/api/admin/recipes", json=payload)
     assert response.status_code == 201
     assert response.json()["title"] == "New Recipe"
+    assert response.json()["id"] == "new-test-id"
     assert "slug" in response.json()
 
 def test_admin_delete_recipe(authenticated_client, mock_db):
