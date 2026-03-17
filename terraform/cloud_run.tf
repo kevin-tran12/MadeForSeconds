@@ -85,6 +85,77 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
+      # STRIPE_SECRET_KEY — only injected when provided
+      dynamic "env" {
+        for_each = var.stripe_secret_key != "" ? [1] : []
+        content {
+          name = "STRIPE_SECRET_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.stripe_secret_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      # STRIPE_WEBHOOK_SECRET — only injected when provided
+      dynamic "env" {
+        for_each = var.stripe_webhook_secret != "" ? [1] : []
+        content {
+          name = "STRIPE_WEBHOOK_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.stripe_webhook_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      # STRIPE_PRODUCT_ID — not sensitive, plain value
+      dynamic "env" {
+        for_each = var.stripe_product_id != "" ? [1] : []
+        content {
+          name  = "STRIPE_PRODUCT_ID"
+          value = var.stripe_product_id
+        }
+      }
+
+      # SUBSCRIBER_JWT_SECRET — only injected when provided
+      dynamic "env" {
+        for_each = var.subscriber_jwt_secret != "" ? [1] : []
+        content {
+          name = "SUBSCRIBER_JWT_SECRET"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.subscriber_jwt_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      # RESEND_API_KEY — only injected when provided
+      dynamic "env" {
+        for_each = var.resend_api_key != "" ? [1] : []
+        content {
+          name = "RESEND_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.resend_api_key[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
+      # FRONTEND_URL — for building links in emails
+      env {
+        name  = "FRONTEND_URL"
+        value = var.frontend_url
+      }
+
       resources {
         limits = {
           # 512Mi: Better buffer for FastAPI + image processing, still well within free tier

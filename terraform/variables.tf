@@ -52,3 +52,43 @@ variable "redis_url" {
   sensitive   = true
   default     = ""
 }
+
+variable "stripe_secret_key" {
+  description = "Stripe secret API key (sk_live_...)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "stripe_webhook_secret" {
+  description = "Stripe webhook signing secret (whsec_...)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "stripe_product_id" {
+  description = "Stripe Product ID for the support subscription (prod_...)"
+  type        = string
+  default     = ""
+}
+
+variable "subscriber_jwt_secret" {
+  description = "Secret key for signing subscriber JWT tokens (min 32 chars)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "resend_api_key" {
+  description = "Resend API key for sending cancellation confirmation emails"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "frontend_url" {
+  description = "Frontend URL for building links in emails (e.g., https://madeforseconds.com)"
+  type        = string
+  default     = "https://madeforseconds.com"
+}

@@ -189,6 +189,37 @@ RECIPES = [
 ]
 
 
+SUPPORTERS = [
+    {
+        "email": "alice@example.com",
+        "status": "active",
+        "display_name": "Alice",
+        "note": "Love the carbonara recipe!",
+        "note_is_public": True,
+        "total_donated_cents": 1000,
+        "profile_set_at": True,
+    },
+    {
+        "email": "bob@example.com",
+        "status": "active",
+        "display_name": "Bob",
+        "note": None,
+        "note_is_public": False,
+        "total_donated_cents": 500,
+        "profile_set_at": True,
+    },
+    {
+        "email": "carol@example.com",
+        "status": "active",
+        "display_name": "Carol 🍝",
+        "note": "Keep the recipes coming!",
+        "note_is_public": True,
+        "total_donated_cents": 2500,
+        "profile_set_at": True,
+    },
+]
+
+
 def main():
     force = "--force" in sys.argv
     db = Client(project="madefor-seconds-local")
@@ -203,6 +234,9 @@ def main():
         print("Clearing existing recipes...")
         for doc in collection.stream():
             doc.reference.delete()
+        print("Clearing existing supporters...")
+        for doc in db.collection("subscribers").stream():
+            doc.reference.delete()
 
     now = datetime.now(timezone.utc)
     for recipe in RECIPES:
@@ -213,6 +247,15 @@ def main():
         print(f"  Created: {recipe['title']}")
 
     print(f"\nSeeded {len(RECIPES)} recipes.")
+
+    # Seed sample supporters
+    existing_supporters = list(db.collection("subscribers").limit(1).stream())
+    if not existing_supporters or force:
+        for supporter in SUPPORTERS:
+            data = {**supporter, "created_at": now, "updated_at": now}
+            db.collection("subscribers").document().set(data)
+            print(f"  Created supporter: {supporter['display_name']}")
+        print(f"Seeded {len(SUPPORTERS)} supporters.")
 
 
 if __name__ == "__main__":
