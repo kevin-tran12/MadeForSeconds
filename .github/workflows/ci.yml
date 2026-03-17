@@ -57,6 +57,7 @@ jobs:
         working-directory: backend
         run: pytest --cov=app --cov-report=term-missing
         env:
+          PYTHONPATH: .
           ENVIRONMENT: development
           SUBSCRIBER_JWT_SECRET: ci-test-secret-placeholder-value-32ch
 
