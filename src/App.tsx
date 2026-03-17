@@ -7,6 +7,8 @@ import { RecipesPage } from './pages/RecipesPage'
 import { RecipeDetailPage } from './pages/RecipeDetailPage'
 import { AdminDashboardPage } from './pages/AdminDashboardPage'
 import { AdminRecipeEditPage } from './pages/AdminRecipeEditPage'
+import { AdminExpensesPage } from './pages/AdminExpensesPage'
+import { AdminExpenseEditPage } from './pages/AdminExpenseEditPage'
 import { AboutPage } from './pages/AboutPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { SupportPage } from './pages/SupportPage'
@@ -33,6 +35,9 @@ const router = createBrowserRouter([
           { index: true, element: <AdminDashboardPage /> },
           { path: 'new', element: <AdminRecipeEditPage /> },
           { path: 'edit/:id', element: <AdminRecipeEditPage /> },
+          { path: 'expenses', element: <AdminExpensesPage /> },
+          { path: 'expenses/new', element: <AdminExpenseEditPage /> },
+          { path: 'expenses/:id', element: <AdminExpenseEditPage /> },
         ],
       },
     ],

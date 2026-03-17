@@ -1,8 +1,9 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app'
 import {
   getAuth,
+  GoogleAuthProvider,
   onAuthStateChanged as firebaseOnAuthStateChanged,
-  signInWithEmailAndPassword,
+  signInWithPopup,
   signOut,
   type Auth,
   type User,
@@ -35,9 +36,10 @@ export function onAuthChange(callback: (user: User | null) => void): () => void 
   return firebaseOnAuthStateChanged(auth, callback)
 }
 
-export async function login(email: string, password: string): Promise<User> {
+export async function loginWithGoogle(): Promise<User> {
   const auth = getFirebaseAuth()
-  const cred = await signInWithEmailAndPassword(auth, email, password)
+  const provider = new GoogleAuthProvider()
+  const cred = await signInWithPopup(auth, provider)
   return cred.user
 }
 
