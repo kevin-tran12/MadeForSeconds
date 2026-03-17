@@ -6,6 +6,7 @@ import type { ExpenseItem, ExpenseCreate } from '../lib/types-expense'
 import { EXPENSE_CATEGORIES, formatCents, recalcProjectAmounts } from '../lib/types-expense'
 import type { ExpenseCategory } from '../lib/types-expense'
 import { ExpenseItemEditor } from '../components/admin/ExpenseItemEditor'
+import { ReceiptItemizer } from '../components/admin/ReceiptItemizer'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
@@ -33,6 +34,8 @@ export function AdminExpenseEditPage() {
   const [receiptFilename, setReceiptFilename] = useState<string | null>(null)
   const [receiptContentType, setReceiptContentType] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [aiParsed, setAiParsed] = useState(false)
 
   // Recipes list for linking
   const [recipes, setRecipes] = useState<Recipe[]>([])
@@ -67,6 +70,7 @@ export function AdminExpenseEditPage() {
         setReceiptUrl(exp.receipt_url)
         setReceiptFilename(exp.receipt_filename)
         setReceiptContentType(exp.receipt_content_type)
+        setAiParsed(exp.ai_parsed)
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'))
       .finally(() => setLoading(false))
@@ -91,6 +95,30 @@ export function AdminExpenseEditPage() {
     } finally {
       setUploading(false)
     }
+  }
+
+  async function handleScanReceipt(file: File) {
+    setScanning(true)
+    setError(null)
+    try {
+      const parsed = await adminExpenseApi.parseReceipt(file)
+      if (parsed.vendor) setVendor(parsed.vendor)
+      if (parsed.date) setDate(parsed.date.slice(0, 10))
+      if (parsed.items?.length) setItems(parsed.items)
+      if (parsed.raw_subtotal) setRawSubtotal(parsed.raw_subtotal)
+      if (parsed.raw_tax) setRawTax(parsed.raw_tax)
+      if (parsed.raw_total) setRawTotal(parsed.raw_total)
+      setAiParsed(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Receipt scan failed')
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  async function handleReceiptFileSelected(file: File) {
+    // Upload and scan in parallel
+    await Promise.all([handleReceiptUpload(file), handleScanReceipt(file)])
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -118,7 +146,7 @@ export function AdminExpenseEditPage() {
 
       let saved
       if (isNew) {
-        saved = await adminExpenseApi.create(data)
+        saved = await adminExpenseApi.create({ ...data, ai_parsed: aiParsed } as never)
       } else {
         saved = await adminExpenseApi.update(id!, data)
       }
@@ -260,7 +288,7 @@ export function AdminExpenseEditPage() {
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
-                  if (f) handleReceiptUpload(f)
+                  if (f) handleReceiptFileSelected(f)
                 }}
               />
               <button
@@ -271,14 +299,15 @@ export function AdminExpenseEditPage() {
               >
                 {uploading ? (
                   <>
-                    <LoadingSpinner size="sm" /> Uploading...
+                    <LoadingSpinner size="sm" />
+                    {scanning ? 'Scanning with AI…' : 'Uploading…'}
                   </>
                 ) : (
                   <>
                     <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 16v-8m0 0l-3 3m3-3l3 3M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
                     </svg>
-                    Click to upload receipt (image or PDF)
+                    Click to upload receipt — AI will extract items automatically
                   </>
                 )}
               </button>
@@ -288,11 +317,30 @@ export function AdminExpenseEditPage() {
 
         {/* Line items */}
         <section className="rounded-xl border border-surface-darker bg-white p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900">Line Items</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Line Items</h2>
+            {aiParsed && (
+              <span className="flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 border border-green-200">
+                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                AI extracted
+              </span>
+            )}
+          </div>
           <p className="text-sm text-gray-500">
             Uncheck items that aren't project-related. Tax is recalculated proportionally.
           </p>
-          <ExpenseItemEditor value={items} onChange={setItems} />
+          {aiParsed && items.length > 0 ? (
+            <ReceiptItemizer
+              items={items}
+              rawTax={rawTax}
+              rawSubtotal={rawSubtotal}
+              onChange={setItems}
+            />
+          ) : (
+            <ExpenseItemEditor value={items} onChange={setItems} />
+          )}
         </section>
 
         {/* Totals */}

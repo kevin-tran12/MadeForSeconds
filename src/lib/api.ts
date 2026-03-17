@@ -119,6 +119,20 @@ export const adminExpenseApi = {
 
   getReceiptUrl: (id: string) =>
     apiFetch<{ url: string; filename: string; content_type?: string }>(`/api/admin/expenses/${id}/receipt`),
+
+  parseReceipt: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiUpload<{
+      vendor: string
+      date: string
+      items: import('./types-expense').ExpenseItem[]
+      raw_subtotal: number
+      raw_tax: number
+      raw_total: number
+      currency: string
+    }>('/api/admin/expenses/parse-receipt', formData)
+  },
 }
 
 // ─── Supporter endpoints ────────────────────────────────────────────────────
