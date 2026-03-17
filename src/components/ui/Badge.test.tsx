@@ -13,9 +13,9 @@ describe('Badge', () => {
     expect(container.firstChild).toHaveClass('bg-primary-100');
   });
 
-  it('applies secondary variant classes', () => {
-    const { container } = render(<Badge variant="secondary">Secondary</Badge>);
-    expect(container.firstChild).toHaveClass('bg-secondary-100');
+  it('applies success variant classes', () => {
+    const { container } = render(<Badge variant="success">Success</Badge>);
+    expect(container.firstChild).toHaveClass('bg-green-100');
   });
 
   it('applies custom className', () => {
