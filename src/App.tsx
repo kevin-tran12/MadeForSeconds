@@ -9,6 +9,7 @@ import { AdminDashboardPage } from './pages/AdminDashboardPage'
 import { AdminRecipeEditPage } from './pages/AdminRecipeEditPage'
 import { AdminExpensesPage } from './pages/AdminExpensesPage'
 import { AdminExpenseEditPage } from './pages/AdminExpenseEditPage'
+import { AdminReportsPage } from './pages/AdminReportsPage'
 import { AboutPage } from './pages/AboutPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { SupportPage } from './pages/SupportPage'
@@ -37,6 +38,7 @@ const router = createBrowserRouter([
           { path: 'edit/:id', element: <AdminRecipeEditPage /> },
           { path: 'expenses', element: <AdminExpensesPage /> },
           { path: 'expenses/new', element: <AdminExpenseEditPage /> },
+          { path: 'expenses/reports', element: <AdminReportsPage /> },
           { path: 'expenses/:id', element: <AdminExpenseEditPage /> },
         ],
       },
