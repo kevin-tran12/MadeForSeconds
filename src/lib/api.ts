@@ -1,5 +1,6 @@
 import { apiFetch, apiUpload } from './api-client'
 import type { Recipe, RecipeFormData } from './types'
+import type { Expense, ExpenseCreate, ExpenseSummary } from './types-expense'
 
 // ─── Public endpoints ───────────────────────────────────────────────────────
 
@@ -84,6 +85,40 @@ export const adminSupporterApi = {
     apiFetch<{ note_enabled: boolean }>(`/api/admin/supporters/${collection}/${id}/toggle-note`, { method: 'POST' }),
   toggleName: (collection: string, id: string) =>
     apiFetch<{ name_enabled: boolean }>(`/api/admin/supporters/${collection}/${id}/toggle-name`, { method: 'POST' }),
+}
+
+// ─── Expense ledger endpoints ───────────────────────────────────────────────
+
+export const adminExpenseApi = {
+  list: (year: number, month?: number, category?: string, status = 'active') => {
+    const params = new URLSearchParams({ year: String(year), status })
+    if (month) params.set('month', String(month))
+    if (category) params.set('category', category)
+    return apiFetch<ExpenseSummary[]>(`/api/admin/expenses?${params}`)
+  },
+
+  get: (id: string) => apiFetch<Expense>(`/api/admin/expenses/${id}`),
+
+  create: (data: ExpenseCreate) =>
+    apiFetch<Expense>('/api/admin/expenses', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id: string, data: Partial<ExpenseCreate>) =>
+    apiFetch<Expense>(`/api/admin/expenses/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  void: (id: string, reason = '') =>
+    apiFetch<{ voided: boolean }>(`/api/admin/expenses/${id}/void?reason=${encodeURIComponent(reason)}`, { method: 'POST' }),
+
+  uploadReceipt: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiUpload<{ receipt_url: string; receipt_filename: string; receipt_content_type: string }>(
+      '/api/admin/expenses/upload-receipt',
+      formData
+    )
+  },
+
+  getReceiptUrl: (id: string) =>
+    apiFetch<{ url: string; filename: string; content_type?: string }>(`/api/admin/expenses/${id}/receipt`),
 }
 
 // ─── Supporter endpoints ────────────────────────────────────────────────────

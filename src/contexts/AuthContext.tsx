@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { initAuth, onAuthChange, login as authLogin, logout as authLogout, getToken, type AuthUser } from '../lib/auth'
+import { initAuth, onAuthChange, loginWithGoogle, logout as authLogout, getToken, type AuthUser } from '../lib/auth'
 import { setTokenGetter } from '../lib/api-client'
 
 const DEV_USER_KEY = 'mfs_dev_admin'
@@ -7,7 +7,7 @@ const DEV_USER_KEY = 'mfs_dev_admin'
 interface AuthContextType {
   user: AuthUser | null
   isAdmin: boolean
-  login: (email: string, password: string) => Promise<void>
+  loginGoogle: () => Promise<void>
   logout: () => void
   devLogin: (password: string) => boolean
 }
@@ -36,9 +36,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsubscribe
   }, [])
 
-  async function login(email: string, password: string) {
+  async function loginGoogle() {
     if (import.meta.env.DEV) return
-    await authLogin(email, password)
+    await loginWithGoogle()
   }
 
   function logout() {
@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value: AuthContextType = {
     user,
     isAdmin: !!user,
-    login,
+    loginGoogle,
     logout,
     devLogin,
   }

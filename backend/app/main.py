@@ -7,7 +7,7 @@ from google.cloud import logging as cloud_logging
 
 from .config import settings
 from .mcp_server import create_mcp_app
-from .routes import admin, parse, public, subscriptions
+from .routes import admin, expenses, parse, public, subscriptions
 
 # Fail fast in production if the JWT secret is the known-weak placeholder or too short
 if not settings.is_dev:
@@ -46,6 +46,7 @@ app.include_router(public.router)
 app.include_router(admin.router)
 app.include_router(parse.router)
 app.include_router(subscriptions.router)
+app.include_router(expenses.router)
 
 
 
