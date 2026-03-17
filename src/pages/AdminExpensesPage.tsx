@@ -78,9 +78,14 @@ export function AdminExpensesPage() {
           </Link>
           <h1 className="text-2xl font-bold text-gray-900 font-display">Expense Ledger</h1>
         </div>
-        <Link to="/admin/expenses/new">
-          <Button>+ New Expense</Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link to="/admin/expenses/reports">
+            <Button variant="secondary">Reports</Button>
+          </Link>
+          <Link to="/admin/expenses/new">
+            <Button>+ New Expense</Button>
+          </Link>
+        </div>
       </div>
 
       {/* Summary cards */}

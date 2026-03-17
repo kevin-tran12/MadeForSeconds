@@ -135,6 +135,38 @@ export const adminExpenseApi = {
   },
 }
 
+// ─── Report endpoints ───────────────────────────────────────────────────────
+
+export interface ReportSummary {
+  period: string
+  total_expenses: number
+  total_tax: number
+  total_raw: number
+  expense_count: number
+  by_category: Record<string, { count: number; total: number; tax: number }>
+  by_month: { month: number; total: number; tax: number; count: number }[]
+}
+
+export const adminReportsApi = {
+  getSummary: (year: number, month?: number) => {
+    const params = new URLSearchParams({ year: String(year) })
+    if (month) params.set('month', String(month))
+    return apiFetch<ReportSummary>(`/api/admin/reports/summary?${params}`)
+  },
+
+  downloadCsv: (year: number, month?: number) => {
+    const params = new URLSearchParams({ year: String(year) })
+    if (month) params.set('month', String(month))
+    return `${import.meta.env.VITE_API_URL}/api/admin/reports/export/csv?${params}`
+  },
+
+  downloadPdf: (year: number, month?: number) => {
+    const params = new URLSearchParams({ year: String(year) })
+    if (month) params.set('month', String(month))
+    return `${import.meta.env.VITE_API_URL}/api/admin/reports/export/pdf?${params}`
+  },
+}
+
 // ─── Supporter endpoints ────────────────────────────────────────────────────
 
 export const subscriberApi = {
