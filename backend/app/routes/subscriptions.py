@@ -3,7 +3,6 @@ import re
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from __future__ import annotations
 
 import httpx
 import stripe
