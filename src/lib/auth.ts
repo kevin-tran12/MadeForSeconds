@@ -1,10 +1,8 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app'
 import {
   getAuth,
-  GoogleAuthProvider,
   onAuthStateChanged as firebaseOnAuthStateChanged,
   signInWithEmailAndPassword,
-  signInWithPopup,
   signOut,
   type Auth,
   type User,
@@ -55,21 +53,3 @@ export async function getToken(): Promise<string | null> {
   return user.getIdToken()
 }
 
-/**
- * Sign in with Google popup and return the user's email.
- * Used for supporter login — we only need the email to look up the subscription.
- */
-export async function signInWithGoogle(): Promise<string> {
-  const auth = getFirebaseAuth()
-  const provider = new GoogleAuthProvider()
-  const result = await signInWithPopup(auth, provider)
-  const email = result.user.email
-  if (!email) throw new Error('No email returned from Google')
-  // Sign out of Firebase immediately — we don't need the Firebase session for supporters
-  await signOut(auth)
-  return email
-}
-
-export function isFirebaseConfigured(): boolean {
-  return !!(import.meta.env.VITE_FIREBASE_API_KEY)
-}

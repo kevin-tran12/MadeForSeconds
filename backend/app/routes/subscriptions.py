@@ -3,7 +3,7 @@ import re
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
+from __future__ import annotations
 
 import httpx
 import stripe
@@ -17,8 +17,12 @@ from ..subscriber_auth import create_cancel_token, verify_cancel_token
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/subscribe")
 
-# Simple in-memory rate limiter
+# Configure Stripe once at import time (thread-safe, no per-request mutation)
+stripe.api_key = settings.stripe_secret_key
+
+# Simple in-memory rate limiter (best-effort; use Redis for multi-instance enforcement)
 _rate_attempts: dict[str, list[float]] = defaultdict(list)
+_RATE_MAX_KEYS = 10_000  # evict all keys when exceeded to prevent memory leak
 CANCEL_RATE_LIMIT = 3  # max attempts
 CANCEL_RATE_WINDOW = 600  # 10 minutes
 
@@ -36,15 +40,13 @@ def _sanitize(text: str, max_len: int) -> str:
 
 def _check_rate_limit(ip: str, limit: int = CANCEL_RATE_LIMIT, window: int = CANCEL_RATE_WINDOW) -> None:
     now = time.time()
+    # Evict all keys if the dict grows too large (prevents memory leak from unique IPs)
+    if len(_rate_attempts) > _RATE_MAX_KEYS:
+        _rate_attempts.clear()
     _rate_attempts[ip] = [t for t in _rate_attempts[ip] if now - t < window]
     if len(_rate_attempts[ip]) >= limit:
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
     _rate_attempts[ip].append(now)
-
-
-def _get_stripe() -> None:
-    """Configure stripe with the secret key."""
-    stripe.api_key = settings.stripe_secret_key
 
 
 # ── Request/Response models ──────────────────────────────────────────────────
@@ -95,16 +97,25 @@ class Supporter(BaseModel):
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
+def _validate_redirect_url(url: str) -> None:
+    """Ensure redirect URLs point to our frontend — prevents open-redirect attacks."""
+    allowed = settings.frontend_url.rstrip("/")
+    if not url.startswith(allowed + "/") and url != allowed:
+        raise HTTPException(status_code=400, detail="Invalid redirect URL")
+
+
 @router.post("/checkout", response_model=CheckoutResponse)
 async def create_checkout(body: CheckoutRequest):
     """Create a Stripe Checkout session for a subscription or one-time donation."""
-    _get_stripe()
 
     if not settings.stripe_secret_key or not settings.stripe_product_id:
         raise HTTPException(status_code=503, detail="Subscriptions not configured")
 
     if body.amount_cents < 100 or body.amount_cents > 50000:
         raise HTTPException(status_code=400, detail="Amount must be between $1 and $500")
+
+    _validate_redirect_url(body.success_url)
+    _validate_redirect_url(body.cancel_url)
 
     if body.one_time:
         # One-time payment
@@ -144,8 +155,6 @@ async def create_checkout(body: CheckoutRequest):
 @router.post("/webhook")
 async def stripe_webhook(request: Request):
     """Handle Stripe webhook events for subscriptions and donations."""
-    _get_stripe()
-
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
@@ -157,6 +166,15 @@ async def stripe_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid payload")
     except stripe.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
+
+    # Idempotency: skip events we've already processed
+    event_id = event.get("id", "")
+    db = get_db()
+    if event_id:
+        existing = db.collection("processed_events").document(event_id).get()
+        if existing.exists:
+            logger.info(f"Skipping already-processed event: {event_id}")
+            return {"status": "ok"}
 
     event_type = event["type"]
     data = event["data"]["object"]
@@ -179,14 +197,19 @@ async def stripe_webhook(request: Request):
     elif event_type == "invoice.payment_succeeded":
         await _handle_payment_succeeded(data)
 
+    # Mark event as processed for idempotency
+    if event_id:
+        db.collection("processed_events").document(event_id).set({
+            "type": event_type,
+            "processed_at": datetime.now(timezone.utc),
+        })
+
     return {"status": "ok"}
 
 
 @router.get("/session-info", response_model=SessionInfoResponse)
 async def get_session_info(session_id: str):
     """Get info about a completed Stripe checkout session (no auth required — session_id is the proof)."""
-    _get_stripe()
-
     try:
         session = stripe.checkout.Session.retrieve(session_id)
     except stripe.InvalidRequestError:
@@ -228,8 +251,6 @@ async def get_session_info(session_id: str):
 @router.post("/setup-profile", response_model=SetupProfileResponse)
 async def setup_profile(body: SetupProfileRequest):
     """Set display name and note after payment. Uses Stripe session_id as proof — no login needed."""
-    _get_stripe()
-
     # Verify the session with Stripe
     try:
         session = stripe.checkout.Session.retrieve(body.session_id)
@@ -382,7 +403,7 @@ async def cancel_confirm(body: CancelConfirmRequest):
     subscription_id = data.get("stripe_subscription_id")
 
     if subscription_id:
-        _get_stripe()
+    
         try:
             stripe.Subscription.cancel(subscription_id)
         except stripe.InvalidRequestError:
@@ -398,7 +419,7 @@ async def cancel_confirm(body: CancelConfirmRequest):
 
 
 @router.get("/supporters", response_model=list[Supporter])
-async def list_supporters(limit: Optional[int] = None):
+async def list_supporters(limit: int | None = None):
     """Return display names and public notes of supporters, sorted by total donated."""
     db = get_db()
     supporters = []
@@ -555,11 +576,21 @@ async def _handle_payment_failed(data: dict) -> None:
 
 
 async def _handle_payment_succeeded(data: dict) -> None:
-    """Handle invoice.payment_succeeded — increment total_donated_cents for recurring payments."""
+    """Handle invoice.payment_succeeded — increment total_donated_cents for recurring payments.
+
+    Skips the initial subscription invoice (billing_reason=subscription_create) because
+    that amount is already recorded by _handle_subscription_checkout.
+    """
     subscription_id = data.get("subscription")
     amount_paid = data.get("amount_paid", 0)  # in cents
+    billing_reason = data.get("billing_reason", "")
 
     if not subscription_id or not amount_paid:
+        return
+
+    # The first invoice is already counted in _handle_subscription_checkout
+    if billing_reason == "subscription_create":
+        logger.info(f"Skipping initial invoice for subscription {subscription_id} (already counted at checkout)")
         return
 
     db = get_db()

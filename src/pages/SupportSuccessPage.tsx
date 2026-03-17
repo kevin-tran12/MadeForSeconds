@@ -20,6 +20,7 @@ export function SupportSuccessPage() {
   const [noteIsPublic, setNoteIsPublic] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [skipped, setSkipped] = useState(false)
 
   useEffect(() => {
@@ -46,6 +47,7 @@ export function SupportSuccessPage() {
     e.preventDefault()
     if (!sessionId) return
     setSaving(true)
+    setSaveError(null)
     try {
       await subscriberApi.setupProfile({
         session_id: sessionId,
@@ -55,8 +57,7 @@ export function SupportSuccessPage() {
       })
       setSaved(true)
     } catch {
-      // If profile setup fails, still show success — payment went through
-      setSaved(true)
+      setSaveError('Could not save your profile, but your payment went through. You can try again later.')
     } finally {
       setSaving(false)
     }
@@ -160,6 +161,9 @@ export function SupportSuccessPage() {
                 Skip
               </button>
             </div>
+            {saveError && (
+              <p className="mt-2 text-sm text-red-600">{saveError}</p>
+            )}
           </form>
         </div>
       ) : saved ? (
