@@ -9,6 +9,9 @@ import { AdminDashboardPage } from './pages/AdminDashboardPage'
 import { AdminRecipeEditPage } from './pages/AdminRecipeEditPage'
 import { AboutPage } from './pages/AboutPage'
 import { NotFoundPage } from './pages/NotFoundPage'
+import { SupportPage } from './pages/SupportPage'
+import { SupportSuccessPage } from './pages/SupportSuccessPage'
+import { SupportCancelPage } from './pages/SupportCancelPage'
 
 const router = createBrowserRouter([
   {
@@ -20,6 +23,9 @@ const router = createBrowserRouter([
       { path: 'recipes', element: <RecipesPage /> },
       { path: 'recipes/:slug', element: <RecipeDetailPage /> },
       { path: 'about', element: <AboutPage /> },
+      { path: 'support', element: <SupportPage /> },
+      { path: 'support/success', element: <SupportSuccessPage /> },
+      { path: 'support/cancel', element: <SupportCancelPage /> },
       {
         path: 'admin',
         element: <AdminRoute />,

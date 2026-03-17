@@ -15,6 +15,7 @@ export function Header() {
     }`
 
   return (
+    <>
     <header className="sticky top-0 z-40 border-b border-surface-darker bg-surface/95 backdrop-blur-sm">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
         {/* Logo */}
@@ -51,9 +52,6 @@ export function Header() {
               maxWidth: searchOpen ? '22rem' : '0',
               opacity: searchOpen ? 1 : 0,
               pointerEvents: searchOpen ? 'auto' : 'none',
-              // overflow-hidden is required for the width animation but clips
-              // the suggestions dropdown. Switch to visible once open so the
-              // dropdown can render below the bar unobstructed.
               overflow: searchOpen ? 'visible' : 'hidden',
             }}
             className="transition-[max-width,opacity] duration-300 ease-in-out"
@@ -108,8 +106,14 @@ export function Header() {
           </button>
         </div>
 
-        {/* Auth button (desktop) */}
-        <div className="hidden md:block">
+        {/* Auth area (desktop) */}
+        <div className="hidden md:flex items-center gap-2">
+          <Link
+            to="/support"
+            className="rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
+          >
+            Support us
+          </Link>
           {isAdmin && (
             <Button variant="ghost" size="sm" onClick={logout}>
               Log out
@@ -156,16 +160,24 @@ export function Header() {
                 Admin
               </NavLink>
             )}
-            {isAdmin && (
-              <div className="pt-2">
+            <div className="border-t border-surface-darker pt-3 mt-1 flex flex-col gap-2">
+              <Link
+                to="/support"
+                onClick={() => setMobileOpen(false)}
+                className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white text-center hover:bg-amber-600 transition-colors"
+              >
+                Support us
+              </Link>
+              {isAdmin && (
                 <Button variant="ghost" size="sm" onClick={logout}>
                   Log out
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
           </nav>
         </div>
       )}
     </header>
+    </>
   )
 }

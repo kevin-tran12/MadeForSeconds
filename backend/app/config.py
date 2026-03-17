@@ -9,6 +9,12 @@ class Settings(BaseSettings):
     gcs_bucket_name: str | None = None
     mcp_api_key: str = ""  # Bearer token for MCP endpoint auth
     redis_url: str | None = None  # e.g. rediss://default:TOKEN@host.upstash.io:6379
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_product_id: str = ""  # Stripe Product ID for support subscription
+    subscriber_jwt_secret: str = "dev-subscriber-secret-change-in-prod"
+    resend_api_key: str = ""  # Resend API key for sending cancellation emails
+    frontend_url: str = "http://localhost:5173"  # Frontend URL for building links in emails
 
     @property
     def admin_email_set(self) -> set[str]:

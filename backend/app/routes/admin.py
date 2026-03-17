@@ -110,3 +110,143 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
         return {"url": url}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
+
+
+# ── Supporter note moderation ─────────────────────────────────────────────────
+
+@router.get("/supporters/pending")
+async def list_pending_notes():
+    """List all supporters with pending (unapproved) notes for admin review."""
+    db = get_db()
+    pending = []
+
+    for collection in ("subscribers", "donations"):
+        docs = db.collection(collection).stream()
+        for doc in docs:
+            data = doc.to_dict()
+            if data.get("note_pending"):
+                pending.append({
+                    "id": doc.id,
+                    "collection": collection,
+                    "email": data.get("email", ""),
+                    "display_name": data.get("display_name", ""),
+                    "note_pending": data.get("note_pending"),
+                    "note_pending_public": data.get("note_pending_public", False),
+                })
+    return pending
+
+
+@router.post("/supporters/{collection}/{doc_id}/approve-note")
+async def approve_note(collection: str, doc_id: str):
+    """Approve a pending note — moves it to the live note field."""
+    if collection not in ("subscribers", "donations"):
+        raise HTTPException(status_code=400, detail="Invalid collection")
+
+    db = get_db()
+    doc_ref = db.collection(collection).document(doc_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Supporter not found")
+
+    data = doc.to_dict()
+    note = data.get("note_pending")
+    if not note:
+        raise HTTPException(status_code=400, detail="No pending note")
+
+    doc_ref.update({
+        "note": note,
+        "note_is_public": data.get("note_pending_public", False),
+        "note_pending": None,
+        "note_pending_public": None,
+        "updated_at": datetime.now(timezone.utc),
+    })
+    return {"approved": True, "note": note}
+
+
+@router.post("/supporters/{collection}/{doc_id}/reject-note")
+async def reject_note(collection: str, doc_id: str):
+    """Reject a pending note — clears it without publishing."""
+    if collection not in ("subscribers", "donations"):
+        raise HTTPException(status_code=400, detail="Invalid collection")
+
+    db = get_db()
+    doc_ref = db.collection(collection).document(doc_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Supporter not found")
+
+    doc_ref.update({
+        "note_pending": None,
+        "note_pending_public": None,
+        "updated_at": datetime.now(timezone.utc),
+    })
+    return {"rejected": True}
+
+
+@router.get("/supporters/all")
+async def list_all_supporters():
+    """List all supporters who have a display name set, for admin management."""
+    db = get_db()
+    results = []
+
+    for collection in ("subscribers", "donations"):
+        docs = db.collection(collection).stream()
+        for doc in docs:
+            data = doc.to_dict()
+            if data.get("display_name"):
+                results.append({
+                    "id": doc.id,
+                    "collection": collection,
+                    "email": data.get("email", ""),
+                    "display_name": data.get("display_name"),
+                    "name_enabled": data.get("name_enabled", True),
+                    "note": data.get("note"),
+                    "note_is_public": data.get("note_is_public", False),
+                    "note_enabled": data.get("note_enabled", True),
+                    "note_pending": data.get("note_pending"),
+                    "total_donated_cents": data.get("total_donated_cents", data.get("amount_cents", 0)),
+                    "status": data.get("status", "one_time"),
+                })
+
+    results.sort(key=lambda r: r.get("total_donated_cents", 0), reverse=True)
+    return results
+
+
+@router.post("/supporters/{collection}/{doc_id}/toggle-note")
+async def toggle_note(collection: str, doc_id: str):
+    """Toggle visibility of a supporter's live note."""
+    if collection not in ("subscribers", "donations"):
+        raise HTTPException(status_code=400, detail="Invalid collection")
+
+    db = get_db()
+    doc_ref = db.collection(collection).document(doc_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Supporter not found")
+
+    current = doc.to_dict().get("note_enabled", True)
+    doc_ref.update({
+        "note_enabled": not current,
+        "updated_at": datetime.now(timezone.utc),
+    })
+    return {"note_enabled": not current}
+
+
+@router.post("/supporters/{collection}/{doc_id}/toggle-name")
+async def toggle_name(collection: str, doc_id: str):
+    """Toggle visibility of a supporter's display name (and note)."""
+    if collection not in ("subscribers", "donations"):
+        raise HTTPException(status_code=400, detail="Invalid collection")
+
+    db = get_db()
+    doc_ref = db.collection(collection).document(doc_id)
+    doc = doc_ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Supporter not found")
+
+    current = doc.to_dict().get("name_enabled", True)
+    doc_ref.update({
+        "name_enabled": not current,
+        "updated_at": datetime.now(timezone.utc),
+    })
+    return {"name_enabled": not current}
