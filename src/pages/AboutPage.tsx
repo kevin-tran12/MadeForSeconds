@@ -1,9 +1,22 @@
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { subscriberApi } from '../lib/api'
+
 export function AboutPage() {
+  const [supporters, setSupporters] = useState<{ display_name: string; note?: string }[]>([])
+
+  useEffect(() => {
+    subscriberApi.listSupporters().then((list) => setSupporters(list.slice(0, 50))).catch(() => {})
+  }, [])
+
   return (
     <article className="mx-auto max-w-4xl px-4 py-12 md:py-20">
       <div className="flex flex-col gap-12 md:flex-row md:items-start md:gap-16">
-        {/* Social Section */}
-        <div className="shrink-0 space-y-8 md:w-1/3">
+
+        {/* Left column: socials + supporters */}
+        <div className="shrink-0 space-y-10 md:w-1/3">
+
+          {/* Follow */}
           <div className="space-y-4">
             <h2 className="font-display text-xl font-bold text-gray-900">Follow the Journey</h2>
             <div className="flex flex-col gap-3">
@@ -34,9 +47,49 @@ export function AboutPage() {
             </div>
           </div>
 
+          {/* Supporters */}
+          <div id="supporters" className="space-y-4">
+            <h2 className="font-display text-xl font-bold text-gray-900">Supporters</h2>
+            {supporters.length > 0 ? (
+              <>
+                <p className="text-sm text-gray-500">
+                  Thank you to everyone who has supported this site. You help keep it going.
+                </p>
+                <div className="space-y-3">
+                  {supporters.map((s, i) => (
+                    <div key={i}>
+                      <p className="text-sm font-semibold text-gray-800">{s.display_name}</p>
+                      {s.note && (
+                        <p className="text-xs italic text-gray-500 mt-0.5">&ldquo;{s.note}&rdquo;</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <Link
+                  to="/support"
+                  className="inline-flex rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
+                >
+                  Join them
+                </Link>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-500">
+                  Be the first to support MadeForSeconds.
+                </p>
+                <Link
+                  to="/support"
+                  className="inline-flex rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
+                >
+                  Support us
+                </Link>
+              </>
+            )}
+          </div>
+
         </div>
 
-        {/* Content Section */}
+        {/* Right column: main content */}
         <div className="flex-1 space-y-8">
           <header>
             <h1 className="font-display text-4xl font-bold text-gray-900 md:text-5xl lg:text-6xl">
@@ -100,6 +153,7 @@ export function AboutPage() {
             </div>
           </div>
         </div>
+
       </div>
     </article>
   )

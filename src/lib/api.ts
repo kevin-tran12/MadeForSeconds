@@ -47,3 +47,77 @@ export const adminApi = {
     return apiUpload('/api/admin/parse-recipe', formData)
   },
 }
+
+// ─── Admin supporter moderation ─────────────────────────────────────────────
+
+export interface PendingSupporter {
+  id: string
+  collection: 'subscribers' | 'donations'
+  email: string
+  display_name: string
+  note_pending: string
+  note_pending_public: boolean
+}
+
+export interface AdminSupporter {
+  id: string
+  collection: 'subscribers' | 'donations'
+  email: string
+  display_name: string
+  name_enabled: boolean
+  note: string | null
+  note_is_public: boolean
+  note_enabled: boolean
+  note_pending: string | null
+  total_donated_cents: number
+  status: string
+}
+
+export const adminSupporterApi = {
+  listPending: () => apiFetch<PendingSupporter[]>('/api/admin/supporters/pending'),
+  listAll: () => apiFetch<AdminSupporter[]>('/api/admin/supporters/all'),
+  approveNote: (collection: string, id: string) =>
+    apiFetch<{ approved: boolean }>(`/api/admin/supporters/${collection}/${id}/approve-note`, { method: 'POST' }),
+  rejectNote: (collection: string, id: string) =>
+    apiFetch<{ rejected: boolean }>(`/api/admin/supporters/${collection}/${id}/reject-note`, { method: 'POST' }),
+  toggleNote: (collection: string, id: string) =>
+    apiFetch<{ note_enabled: boolean }>(`/api/admin/supporters/${collection}/${id}/toggle-note`, { method: 'POST' }),
+  toggleName: (collection: string, id: string) =>
+    apiFetch<{ name_enabled: boolean }>(`/api/admin/supporters/${collection}/${id}/toggle-name`, { method: 'POST' }),
+}
+
+// ─── Supporter endpoints ────────────────────────────────────────────────────
+
+export const subscriberApi = {
+  createCheckout: (amountCents: number, successUrl: string, cancelUrl: string, oneTime = false) =>
+    apiFetch<{ checkout_url: string }>('/api/subscribe/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ amount_cents: amountCents, success_url: successUrl, cancel_url: cancelUrl, one_time: oneTime }),
+    }),
+
+  getSessionInfo: (sessionId: string) =>
+    apiFetch<{ email: string; payment_type: string; amount_cents: number; already_set_up: boolean }>(
+      `/api/subscribe/session-info?session_id=${encodeURIComponent(sessionId)}`
+    ),
+
+  setupProfile: (data: { session_id: string; display_name: string; note: string; note_is_public: boolean }) =>
+    apiFetch<{ display_name: string | null; note: string | null; note_is_public: boolean }>(
+      '/api/subscribe/setup-profile',
+      { method: 'POST', body: JSON.stringify(data) }
+    ),
+
+  requestCancel: (email: string) =>
+    apiFetch<{ message: string }>('/api/subscribe/cancel-request', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  confirmCancel: (token: string) =>
+    apiFetch<{ message: string }>('/api/subscribe/cancel-confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
+  listSupporters: () =>
+    apiFetch<{ display_name: string; note?: string }[]>('/api/subscribe/supporters'),
+}

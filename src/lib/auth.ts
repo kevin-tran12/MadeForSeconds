@@ -52,3 +52,4 @@ export async function getToken(): Promise<string | null> {
   if (!user) return null
   return user.getIdToken()
 }
+

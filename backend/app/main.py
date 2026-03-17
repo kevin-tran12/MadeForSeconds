@@ -7,7 +7,18 @@ from google.cloud import logging as cloud_logging
 
 from .config import settings
 from .mcp_server import create_mcp_app
-from .routes import admin, parse, public
+from .routes import admin, parse, public, subscriptions
+
+# Fail fast in production if the JWT secret is the known-weak placeholder or too short
+if not settings.is_dev:
+    _secret = settings.subscriber_jwt_secret
+    if _secret == "dev-subscriber-secret-change-in-prod":
+        raise RuntimeError(
+            "SUBSCRIBER_JWT_SECRET must be set to a cryptographically random value in production. "
+            'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+        )
+    if len(_secret) < 32:
+        raise RuntimeError("SUBSCRIBER_JWT_SECRET must be at least 32 characters in production")
 
 # Setup Cloud Logging
 if not settings.is_dev:
@@ -34,6 +45,8 @@ app.add_middleware(
 app.include_router(public.router)
 app.include_router(admin.router)
 app.include_router(parse.router)
+app.include_router(subscriptions.router)
+
 
 
 @app.get("/api/health")
