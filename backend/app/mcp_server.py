@@ -353,7 +353,11 @@ class _BearerAuthMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
-            # Rewrite Host header to localhost — MCP SDK blocks non-localhost hosts
+            # The MCP SDK validates that requests arrive on localhost and rejects
+            # anything else (e.g. the Cloud Run service hostname or a Cloudflare
+            # proxy host).  Rewriting the Host header here satisfies that check
+            # without changing the actual network path.  If the SDK removes this
+            # restriction in a future release, this rewrite can be dropped.
             server = scope.get("server") or ("localhost", 8000)
             host_value = f"localhost:{server[1]}".encode()
             headers = [

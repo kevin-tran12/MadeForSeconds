@@ -67,7 +67,10 @@ async def list_recipes(
 
         recipes = [r for r in recipes if matches(r)]
 
-    if recipes:
+    # Skip caching only when the unfiltered list is empty — that indicates
+    # Firestore wasn't ready at startup, not a legitimate "no results" case.
+    # Filtered searches that genuinely return nothing are safe to cache.
+    if recipes or search or category:
         cache.set(cache_key, recipes)
     return recipes
 
