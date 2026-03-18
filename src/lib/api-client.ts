@@ -56,6 +56,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   })
 
   if (!response.ok) {
+    // If the TOTP session expired, clear the stored token and signal TotpGate
+    // to drop back to the verify screen instead of showing a cryptic 403 error.
+    if (response.status === 403 && getTotpToken()) {
+      clearTotpToken()
+      window.dispatchEvent(new Event('totp-session-expired'))
+    }
     const err = await response.json().catch(() => ({ detail: 'Request failed' }))
     throw new Error((err as { detail: string }).detail || 'Request failed')
   }

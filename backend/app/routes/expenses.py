@@ -93,7 +93,7 @@ async def create_expense(body: ExpenseCreate, request: Request):
     data["id"] = doc_ref.id
 
     # Write first revision
-    admin_email = getattr(request.state, "admin_email", "unknown")
+    admin_email = request.state.admin_email  # always set by require_admin
     _write_revision(db, doc_ref.id, 1, data, admin_email, "Created")
 
     return Expense(**data)
@@ -178,7 +178,7 @@ async def update_expense(expense_id: str, body: ExpenseUpdate, request: Request)
     updates["revision"] = new_revision
 
     # Write revision BEFORE applying update (immutable audit trail)
-    admin_email = getattr(request.state, "admin_email", "unknown")
+    admin_email = request.state.admin_email  # always set by require_admin
     _write_revision(
         db, expense_id, new_revision, {**existing, "id": expense_id}, admin_email, "Updated"
     )
@@ -206,7 +206,7 @@ async def void_expense(expense_id: str, request: Request, reason: str = ""):
     now = datetime.now(timezone.utc)
     new_revision = existing.get("revision", 1) + 1
 
-    admin_email = getattr(request.state, "admin_email", "unknown")
+    admin_email = request.state.admin_email  # always set by require_admin
     _write_revision(
         db, expense_id, new_revision, {**existing, "id": expense_id}, admin_email, "Voided"
     )

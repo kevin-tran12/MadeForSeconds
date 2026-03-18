@@ -25,6 +25,14 @@ function TotpGateInner() {
     checkStatus()
   }, [])
 
+  // When the 12h session JWT expires, apiFetch clears the token and fires this
+  // event. Drop back to the verify screen instead of letting 403s bubble up.
+  useEffect(() => {
+    const handler = () => setState('verify')
+    window.addEventListener('totp-session-expired', handler)
+    return () => window.removeEventListener('totp-session-expired', handler)
+  }, [])
+
   async function checkStatus() {
     // If we already have a valid session token, try using it
     if (getTotpToken()) {
