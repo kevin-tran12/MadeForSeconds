@@ -1,5 +1,6 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from datetime import datetime
 
 def test_admin_list_recipes(authenticated_client, mock_db):
     """Verifies that the admin can list all recipes."""
@@ -19,9 +20,8 @@ def test_admin_list_recipes(authenticated_client, mock_db):
         "categories": [],
         "image_url": None,
         "published": True,
-        "created_at": "2026-03-14T00:00:00Z",
-        "updated_at": "2026-03-14T00:00:00Z",
-        "rating": None
+        "created_at": datetime(2026, 3, 14),
+        "updated_at": datetime(2026, 3, 14),
     }
     mock_query.return_value = iter([mock_doc])
     
@@ -32,13 +32,12 @@ def test_admin_list_recipes(authenticated_client, mock_db):
 
 def test_admin_create_recipe(authenticated_client, mock_db):
     """Verifies that the admin can create a new recipe."""
-    # doc_ref.id must be a real string so Pydantic's Recipe model can validate it
     mock_db.collection.return_value.document.return_value.id = "new-test-id"
 
     payload = {
         "title": "New Recipe",
         "description": "New Desc",
-        "ingredients": [{"item": "Water", "amount": "1", "unit": "cup"}],
+        "ingredients": [{"item": "Water", "amount": "1", "unit": "cup", "group": "main"}],
         "instructions": [{"step": 1, "text": "Boil"}],
         "prep_time_minutes": 5,
         "cook_time_minutes": 5,
@@ -47,14 +46,36 @@ def test_admin_create_recipe(authenticated_client, mock_db):
         "categories": ["test"],
         "image_url": None,
         "published": True,
-        "rating": None
     }
 
     response = authenticated_client.post("/api/admin/recipes", json=payload)
     assert response.status_code == 201
     assert response.json()["title"] == "New Recipe"
     assert response.json()["id"] == "new-test-id"
-    assert "slug" in response.json()
+    assert response.json()["slug"] == "new-recipe"
+
+def test_admin_update_recipe(authenticated_client, mock_db, sample_recipe_doc):
+    """Verifies that the admin can update an existing recipe."""
+    mock_doc = sample_recipe_doc(id="test-id", title="Old Title")
+    updated_doc = sample_recipe_doc(id="test-id", title="New Title")
+    
+    # Mocking doc_ref.get() which is called twice in the route
+    mock_db.collection.return_value.document.return_value.get.side_effect = [mock_doc, updated_doc]
+    
+    payload = {"title": "New Title"}
+    response = authenticated_client.put("/api/admin/recipes/test-id", json=payload)
+    
+    assert response.status_code == 200
+    assert response.json()["title"] == "New Title"
+
+def test_admin_update_recipe_not_found(authenticated_client, mock_db):
+    """Verifies 404 for nonexistent ID."""
+    mock_doc = MagicMock()
+    mock_doc.exists = False
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+    
+    response = authenticated_client.put("/api/admin/recipes/ghost", json={"title": "New"})
+    assert response.status_code == 404
 
 def test_admin_delete_recipe(authenticated_client, mock_db):
     """Verifies that the admin can delete a recipe."""
@@ -71,3 +92,17 @@ def test_admin_delete_recipe_not_found(authenticated_client, mock_db):
     
     response = authenticated_client.delete("/api/admin/recipes/invalid-id")
     assert response.status_code == 404
+
+def test_admin_unauthenticated_returns_401(client):
+    """Verifies that requests without auth fail with 401."""
+    response = client.get("/api/admin/recipes")
+    assert response.status_code == 401
+
+def test_admin_upload_image_dev_mode(authenticated_client):
+    """Verifies mock URL returned in dev mode."""
+    with patch("app.routes.admin.settings") as mock_settings:
+        mock_settings.is_dev = True
+        file_data = {"file": ("test.jpg", b"fake-image-content", "image/jpeg")}
+        response = authenticated_client.post("/api/admin/upload-image", files=file_data)
+        assert response.status_code == 200
+        assert "placehold.co" in response.json()["url"]
