@@ -98,9 +98,12 @@ class Supporter(BaseModel):
 
 def _validate_redirect_url(url: str) -> None:
     """Ensure redirect URLs point to our frontend — prevents open-redirect attacks."""
-    allowed = settings.frontend_url.rstrip("/")
-    if not url.startswith(allowed + "/") and url != allowed:
-        raise HTTPException(status_code=400, detail="Invalid redirect URL")
+    # Check against all allowed origins (supports multiple frontends: custom domain + pages.dev)
+    for origin in settings.cors_origins:
+        allowed = origin.rstrip("/")
+        if url.startswith(allowed + "/") or url == allowed:
+            return
+    raise HTTPException(status_code=400, detail="Invalid redirect URL")
 
 
 @router.post("/checkout", response_model=CheckoutResponse)

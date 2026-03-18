@@ -11,6 +11,20 @@ export function setTokenGetter(fn: () => Promise<string | null>) {
   _getToken = fn
 }
 
+const TOTP_SESSION_KEY = 'mfs_totp_session'
+
+export function setTotpToken(token: string) {
+  sessionStorage.setItem(TOTP_SESSION_KEY, token)
+}
+
+export function getTotpToken(): string | null {
+  return sessionStorage.getItem(TOTP_SESSION_KEY)
+}
+
+export function clearTotpToken() {
+  sessionStorage.removeItem(TOTP_SESSION_KEY)
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -30,12 +44,24 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     headers['X-Dev-Admin'] = 'true'
   }
 
+  // Attach TOTP session token if available
+  const totpToken = getTotpToken()
+  if (totpToken) {
+    headers['X-TOTP-Session'] = totpToken
+  }
+
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers,
   })
 
   if (!response.ok) {
+    // If the TOTP session expired, clear the stored token and signal TotpGate
+    // to drop back to the verify screen instead of showing a cryptic 403 error.
+    if (response.status === 403 && getTotpToken()) {
+      clearTotpToken()
+      window.dispatchEvent(new Event('totp-session-expired'))
+    }
     const err = await response.json().catch(() => ({ detail: 'Request failed' }))
     throw new Error((err as { detail: string }).detail || 'Request failed')
   }
@@ -57,6 +83,11 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
 
   if (import.meta.env.DEV && !headers['Authorization']) {
     headers['X-Dev-Admin'] = 'true'
+  }
+
+  const totpToken = getTotpToken()
+  if (totpToken) {
+    headers['X-TOTP-Session'] = totpToken
   }
 
   const response = await fetch(`${API_URL}${path}`, {
