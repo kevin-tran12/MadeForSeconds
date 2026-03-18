@@ -94,15 +94,16 @@ def test_totp_session_middleware_no_setup():
 def test_totp_session_middleware_valid_token():
     """Passes with valid JWT in header."""
     from app.totp import require_totp_session
-    token = create_session_token("admin@test.com")
     mock_request = MagicMock()
-    mock_request.headers = {"X-TOTP-Session": token}
-    
+
     with patch("app.totp.settings") as mock_settings, \
          patch("app.totp.get_totp_config", return_value={"enabled": True}):
         mock_settings.is_dev = False
-        # subscriber_jwt_secret is used both in create and verify
         mock_settings.subscriber_jwt_secret = "dev-subscriber-secret-change-in-prod"
-        
+
+        # Create the token inside the patch so sign and verify use the same secret
+        token = create_session_token("admin@test.com")
+        mock_request.headers = {"X-TOTP-Session": token}
+
         result = require_totp_session(mock_request)
         assert result == "admin@test.com"

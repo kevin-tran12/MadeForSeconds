@@ -4,14 +4,6 @@ import { apiFetch, setTokenGetter, setTotpToken } from '../api-client'
 // Mock global fetch
 global.fetch = vi.fn()
 
-// Mock import.meta.env
-vi.mock('../../lib/api-client', async (importOriginal) => {
-  const actual = await importOriginal<any>()
-  return {
-    ...actual,
-  }
-})
-
 describe('api-client', () => {
   beforeEach(() => {
     vi.clearAllMocks()
