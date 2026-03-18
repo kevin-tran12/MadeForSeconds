@@ -10,8 +10,12 @@ from fastapi.responses import StreamingResponse
 from ..auth import require_admin
 from ..firestore import get_db
 from ..models_expense import EXPENSE_CATEGORIES
+from ..totp import require_totp_session
 
-router = APIRouter(prefix="/api/admin/reports", dependencies=[Depends(require_admin)])
+router = APIRouter(
+    prefix="/api/admin/reports",
+    dependencies=[Depends(require_admin), Depends(require_totp_session)],
+)
 
 
 def _date_range(year: int, month: int | None):
@@ -120,7 +124,14 @@ async def export_csv(year: int, month: int | None = None):
         else:
             date_str = str(date)[:10]
 
-        for_field = e.get("purpose") or e.get("recipe_id") or ""
+        # Derive "for" from expense-level recipe names + per-item recipe names, falling back to purpose
+        names: set[str] = set(e.get("recipe_names", []))
+        names.update(
+            i.get("recipe_name", "")
+            for i in e.get("items", [])
+            if i.get("recipe_name")
+        )
+        for_field = ", ".join(sorted(names)) if names else (e.get("purpose") or "")
 
         def cents(v: int) -> str:
             return f"${v / 100:.2f}"

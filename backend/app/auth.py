@@ -24,6 +24,7 @@ def require_admin(request: Request) -> str:
     """
     # Dev bypass
     if settings.is_dev and request.headers.get("X-Dev-Admin") == "true":
+        request.state.admin_email = "dev@local"
         return "dev@local"
 
     token = _get_token(request)
@@ -37,4 +38,5 @@ def require_admin(request: Request) -> str:
     if email not in settings.admin_email_set:
         raise HTTPException(status_code=403, detail="Not an admin")
 
+    request.state.admin_email = email
     return email

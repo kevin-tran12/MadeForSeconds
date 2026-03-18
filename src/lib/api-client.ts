@@ -11,6 +11,20 @@ export function setTokenGetter(fn: () => Promise<string | null>) {
   _getToken = fn
 }
 
+const TOTP_SESSION_KEY = 'mfs_totp_session'
+
+export function setTotpToken(token: string) {
+  sessionStorage.setItem(TOTP_SESSION_KEY, token)
+}
+
+export function getTotpToken(): string | null {
+  return sessionStorage.getItem(TOTP_SESSION_KEY)
+}
+
+export function clearTotpToken() {
+  sessionStorage.removeItem(TOTP_SESSION_KEY)
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -28,6 +42,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   // Dev mode: send admin bypass header
   if (import.meta.env.DEV && !headers['Authorization']) {
     headers['X-Dev-Admin'] = 'true'
+  }
+
+  // Attach TOTP session token if available
+  const totpToken = getTotpToken()
+  if (totpToken) {
+    headers['X-TOTP-Session'] = totpToken
   }
 
   const response = await fetch(`${API_URL}${path}`, {
@@ -57,6 +77,11 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
 
   if (import.meta.env.DEV && !headers['Authorization']) {
     headers['X-Dev-Admin'] = 'true'
+  }
+
+  const totpToken = getTotpToken()
+  if (totpToken) {
+    headers['X-TOTP-Session'] = totpToken
   }
 
   const response = await fetch(`${API_URL}${path}`, {

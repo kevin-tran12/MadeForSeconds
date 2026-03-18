@@ -15,6 +15,8 @@ export interface ExpenseItem {
   unit_price: number // cents
   total_price: number // cents
   project_related: boolean
+  recipe_id?: string | null
+  recipe_name?: string | null
 }
 
 export interface ExpenseCreate {
@@ -22,12 +24,15 @@ export interface ExpenseCreate {
   vendor: string
   category: ExpenseCategory
   description: string
-  recipe_id: string | null
   purpose: string | null
   items: ExpenseItem[]
   raw_subtotal: number
   raw_tax: number
   raw_total: number
+  transaction_id: string
+  merchant_id: string
+  recipe_ids: string[]
+  recipe_names: string[]
 }
 
 export interface Expense {
@@ -36,8 +41,9 @@ export interface Expense {
   vendor: string
   category: ExpenseCategory
   description: string
-  recipe_id: string | null
   purpose: string | null
+  transaction_id: string
+  merchant_id: string
   receipt_url: string | null
   receipt_filename: string | null
   receipt_content_type: string | null
@@ -45,6 +51,8 @@ export interface Expense {
   raw_tax: number
   raw_total: number
   items: ExpenseItem[]
+  recipe_ids: string[]
+  recipe_names: string[]
   project_subtotal: number
   project_tax: number
   project_total: number
@@ -63,9 +71,12 @@ export interface ExpenseSummary {
   vendor: string
   category: ExpenseCategory
   description: string
-  recipe_id: string | null
   purpose: string | null
   receipt_filename: string | null
+  transaction_id: string
+  merchant_id: string
+  recipe_ids: string[]
+  recipe_names: string[]
   raw_total: number
   project_total: number
   project_tax: number

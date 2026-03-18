@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { initAuth, onAuthChange, loginWithGoogle, logout as authLogout, getToken, type AuthUser } from '../lib/auth'
-import { setTokenGetter } from '../lib/api-client'
+import { setTokenGetter, clearTotpToken } from '../lib/api-client'
 
 const DEV_USER_KEY = 'mfs_dev_admin'
 
@@ -42,6 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    clearTotpToken()
     if (import.meta.env.DEV) {
       sessionStorage.removeItem(DEV_USER_KEY)
       setUser(null)
