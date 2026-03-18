@@ -7,7 +7,7 @@ import { SupporterModerationPanel } from '../components/admin/SupporterModeratio
 import { Button } from '../components/ui/Button'
 import { ImportRecipeModal } from '../components/admin/ImportRecipeModal'
 
-type Tab = 'recipes' | 'supporters'
+type Tab = 'recipes' | 'supporters' | 'expenses'
 
 export function AdminDashboardPage() {
   const navigate = useNavigate()
@@ -74,6 +74,9 @@ export function AdminDashboardPage() {
               </span>
             )}
           </button>
+          <button className={tabClass('expenses')} onClick={() => setTab('expenses')}>
+            Expenses
+          </button>
         </div>
 
         {tab === 'recipes' && (
@@ -103,6 +106,16 @@ export function AdminDashboardPage() {
       )}
 
       {tab === 'supporters' && <SupporterModerationPanel />}
+
+      {tab === 'expenses' && (
+        <div className="rounded-xl border border-surface-darker bg-white p-8 text-center">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Expense Ledger</h3>
+          <p className="text-sm text-gray-500 mb-4">Track purchases, upload receipts, and generate tax reports.</p>
+          <Link to="/admin/expenses">
+            <Button>Open Expense Ledger</Button>
+          </Link>
+        </div>
+      )}
 
       {showImport && (
         <ImportRecipeModal

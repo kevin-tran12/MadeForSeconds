@@ -51,6 +51,7 @@ services:
       SUBSCRIBER_JWT_SECRET: ${SUBSCRIBER_JWT_SECRET:-dev-subscriber-secret-change-in-prod}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       FRONTEND_URL: http://localhost:5173
+      GCS_RECEIPTS_BUCKET_NAME: ""
     depends_on:
       firestore-emulator:
         condition: service_healthy

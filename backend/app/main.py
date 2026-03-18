@@ -1,5 +1,6 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,7 +8,7 @@ from google.cloud import logging as cloud_logging
 
 from .config import settings
 from .mcp_server import create_mcp_app
-from .routes import admin, parse, public, subscriptions
+from .routes import admin, expenses, parse, public, reports, subscriptions, totp
 
 # Fail fast in production if the JWT secret is the known-weak placeholder or too short
 if not settings.is_dev:
@@ -30,7 +31,58 @@ else:
 logger = logging.getLogger(__name__)
 
 mcp_inner, mcp_app = create_mcp_app()
-app = FastAPI(title="MadeForSeconds API", redirect_slashes=False, lifespan=mcp_inner.router.lifespan_context)
+
+
+def _warm_cache() -> None:
+    """Eagerly initialise the Firestore client and pre-populate the Redis cache
+    with the main recipe list and categories so the first real request is fast,
+    even after a Cloud Run cold start."""
+    from .cache import cache
+    from .firestore import get_db
+    from .models import Recipe
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
+    try:
+        db = get_db()
+        docs = list(
+            db.collection("recipes")
+            .where(filter=FieldFilter("published", "==", True))
+            .order_by("created_at", direction="DESCENDING")
+            .limit(50)
+            .stream()
+        )
+        recipes = []
+        all_cats: set[str] = set()
+        for doc in docs:
+            data = doc.to_dict()
+            data["id"] = doc.id
+            if isinstance(data.get("nutrition"), dict):
+                data["nutrition"] = [
+                    {"label": k, "value": v, "unit": ""} for k, v in data["nutrition"].items()
+                ]
+            data.pop("premium_content", None)
+            data.pop("has_premium_content", None)
+            recipes.append(Recipe(**data))
+            all_cats.update(data.get("categories", []))
+
+        if recipes:
+            cache.set("recipes:::all", recipes)
+            cache.set("categories", sorted(all_cats))
+            logger.info("Cache warmed: %d recipes, %d categories", len(recipes), len(all_cats))
+        else:
+            logger.warning("Cache warm skipped: no published recipes found")
+    except Exception as exc:
+        logger.warning("Cache warm failed (non-fatal): %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(app):
+    async with mcp_inner.router.lifespan_context(app):
+        _warm_cache()
+        yield
+
+
+app = FastAPI(title="MadeForSeconds API", redirect_slashes=False, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,6 +98,9 @@ app.include_router(public.router)
 app.include_router(admin.router)
 app.include_router(parse.router)
 app.include_router(subscriptions.router)
+app.include_router(expenses.router)
+app.include_router(reports.router)
+app.include_router(totp.router)
 
 
 

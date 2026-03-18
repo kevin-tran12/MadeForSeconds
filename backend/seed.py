@@ -220,6 +220,151 @@ SUPPORTERS = [
 ]
 
 
+EXPENSES = [
+    {
+        "date": datetime(2026, 1, 15, tzinfo=timezone.utc),
+        "vendor": "H Mart",
+        "category": "ingredients",
+        "description": "Weekly grocery run for ramen and carbonara ingredients",
+        "purpose": None,
+        "transaction_id": "Tran# 100234",
+        "merchant_id": "8829301742",
+        "items": [
+            {"name": "Pork Trotters", "quantity": 1.0, "unit_price": 899, "total_price": 899, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "tonkotsu-ramen"},
+            {"name": "Fresh Ramen Noodles", "quantity": 4.0, "unit_price": 249, "total_price": 996, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "tonkotsu-ramen"},
+            {"name": "Nori Sheets 10pk", "quantity": 1.0, "unit_price": 399, "total_price": 399, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "tonkotsu-ramen"},
+            {"name": "Guanciale", "quantity": 1.0, "unit_price": 699, "total_price": 699, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "classic-spaghetti-carbonara"},
+            {"name": "Pecorino Romano", "quantity": 1.0, "unit_price": 549, "total_price": 549, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "classic-spaghetti-carbonara"},
+            {"name": "Coca-Cola 12pk", "quantity": 1.0, "unit_price": 599, "total_price": 599, "project_related": False, "recipe_id": None, "recipe_name": None},
+        ],
+        "raw_subtotal": 4141,
+        "raw_tax": 331,
+        "raw_total": 4472,
+    },
+    {
+        "date": datetime(2026, 1, 28, tzinfo=timezone.utc),
+        "vendor": "Amazon",
+        "category": "equipment",
+        "description": "Kitchen thermometer for candy and deep frying",
+        "purpose": "Instant-read thermometer",
+        "transaction_id": "111-2345678-9012345",
+        "merchant_id": "",
+        "items": [
+            {"name": "ThermoPro TP19H Instant Read Thermometer", "quantity": 1.0, "unit_price": 1599, "total_price": 1599, "project_related": True, "recipe_id": None, "recipe_name": None},
+        ],
+        "raw_subtotal": 1599,
+        "raw_tax": 128,
+        "raw_total": 1727,
+    },
+    {
+        "date": datetime(2026, 2, 5, tzinfo=timezone.utc),
+        "vendor": "Costco",
+        "category": "ingredients",
+        "description": "Bulk tahini and chickpeas for hummus batch",
+        "purpose": None,
+        "transaction_id": "4820-01-0205",
+        "merchant_id": "COSTCO #482",
+        "items": [
+            {"name": "Organic Tahini 32oz", "quantity": 1.0, "unit_price": 899, "total_price": 899, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "roasted-garlic-hummus"},
+            {"name": "Chickpeas 6-pack", "quantity": 1.0, "unit_price": 599, "total_price": 599, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "roasted-garlic-hummus"},
+            {"name": "Olive Oil 1L", "quantity": 1.0, "unit_price": 1199, "total_price": 1199, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "roasted-garlic-hummus"},
+            {"name": "Paper Towels 12pk", "quantity": 1.0, "unit_price": 1899, "total_price": 1899, "project_related": False, "recipe_id": None, "recipe_name": None},
+        ],
+        "raw_subtotal": 4596,
+        "raw_tax": 152,
+        "raw_total": 4748,
+    },
+    {
+        "date": datetime(2026, 2, 14, tzinfo=timezone.utc),
+        "vendor": "Cloudflare",
+        "category": "hosting",
+        "description": "Annual domain renewal",
+        "purpose": "madeforseconds.com domain renewal",
+        "transaction_id": "CF-2026-0214",
+        "merchant_id": "",
+        "items": [
+            {"name": "Domain renewal - madeforseconds.com", "quantity": 1.0, "unit_price": 1099, "total_price": 1099, "project_related": True, "recipe_id": None, "recipe_name": None},
+        ],
+        "raw_subtotal": 1099,
+        "raw_tax": 0,
+        "raw_total": 1099,
+    },
+    {
+        "date": datetime(2026, 2, 20, tzinfo=timezone.utc),
+        "vendor": "Whole Foods",
+        "category": "ingredients",
+        "description": "Buttermilk and maple syrup for pancake recipe shoot",
+        "purpose": None,
+        "transaction_id": "WF-8821-0220",
+        "merchant_id": "WF Store #8821",
+        "items": [
+            {"name": "Organic Buttermilk 1qt", "quantity": 1.0, "unit_price": 449, "total_price": 449, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "fluffy-buttermilk-pancakes"},
+            {"name": "Vermont Maple Syrup 12oz", "quantity": 1.0, "unit_price": 899, "total_price": 899, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "fluffy-buttermilk-pancakes"},
+            {"name": "Unsalted Butter", "quantity": 1.0, "unit_price": 549, "total_price": 549, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "fluffy-buttermilk-pancakes"},
+            {"name": "All-Purpose Flour 5lb", "quantity": 1.0, "unit_price": 499, "total_price": 499, "project_related": True, "recipe_id": None, "recipe_name": None, "_slug": "fluffy-buttermilk-pancakes"},
+        ],
+        "raw_subtotal": 2396,
+        "raw_tax": 0,
+        "raw_total": 2396,
+    },
+    {
+        "date": datetime(2026, 3, 1, tzinfo=timezone.utc),
+        "vendor": "B&H Photo",
+        "category": "equipment",
+        "description": "Ring light for overhead recipe photography",
+        "purpose": "18-inch ring light with stand",
+        "transaction_id": "BH-9922134",
+        "merchant_id": "",
+        "items": [
+            {"name": "Neewer 18\" LED Ring Light Kit", "quantity": 1.0, "unit_price": 4599, "total_price": 4599, "project_related": True, "recipe_id": None, "recipe_name": None},
+        ],
+        "raw_subtotal": 4599,
+        "raw_tax": 409,
+        "raw_total": 5008,
+    },
+    {
+        "date": datetime(2026, 3, 8, tzinfo=timezone.utc),
+        "vendor": "City Farmers Market #6",
+        "category": "ingredients",
+        "description": "Asian groceries — herbs, shrimp, coconut milk",
+        "purpose": None,
+        "transaction_id": "Tran# 400318",
+        "merchant_id": "542929807243795",
+        "items": [
+            {"name": "Mint / Hung Lui LB", "quantity": 1.0, "unit_price": 230, "total_price": 230, "project_related": True, "recipe_id": None, "recipe_name": None},
+            {"name": "Rau Ram LB", "quantity": 1.0, "unit_price": 375, "total_price": 375, "project_related": True, "recipe_id": None, "recipe_name": None},
+            {"name": "Yellow Turmeric LB", "quantity": 1.0, "unit_price": 533, "total_price": 533, "project_related": True, "recipe_id": None, "recipe_name": None},
+            {"name": "Puffed Fried Tofu 10oz", "quantity": 2.0, "unit_price": 339, "total_price": 678, "project_related": True, "recipe_id": None, "recipe_name": None},
+            {"name": "Bean Sprouts / Gia Tuoi", "quantity": 1.31, "unit_price": 99, "total_price": 130, "project_related": True, "recipe_id": None, "recipe_name": None},
+            {"name": "Ginger Root LB", "quantity": 0.29, "unit_price": 249, "total_price": 72, "project_related": True, "recipe_id": None, "recipe_name": None},
+            {"name": "6/10 Black Tiger Shrimp H/O", "quantity": 1.0, "unit_price": 1863, "total_price": 1863, "project_related": True, "recipe_id": None, "recipe_name": None},
+            {"name": "Coconut Milk 14oz", "quantity": 2.0, "unit_price": 219, "total_price": 438, "project_related": True, "recipe_id": None, "recipe_name": None},
+            {"name": "Halal Chicken Whole LB", "quantity": 1.0, "unit_price": 1390, "total_price": 1390, "project_related": False, "recipe_id": None, "recipe_name": None},
+        ],
+        "raw_subtotal": 5709,
+        "raw_tax": 157,
+        "raw_total": 5866,
+    },
+    {
+        "date": datetime(2026, 1, 10, tzinfo=timezone.utc),
+        "vendor": "Target",
+        "category": "equipment",
+        "description": "Returned — wrong size cutting board",
+        "purpose": "Bamboo cutting board (wrong size)",
+        "transaction_id": "TGT-01-0110-4421",
+        "merchant_id": "TGT Store #4421",
+        "items": [
+            {"name": "Large Bamboo Cutting Board", "quantity": 1.0, "unit_price": 2499, "total_price": 2499, "project_related": True, "recipe_id": None, "recipe_name": None},
+        ],
+        "raw_subtotal": 2499,
+        "raw_tax": 200,
+        "raw_total": 2699,
+        "_voided": True,
+        "_void_reason": "Returned to store — wrong size",
+    },
+]
+
+
 def main():
     force = "--force" in sys.argv
     db = Client(project="madefor-seconds-local")
@@ -256,6 +401,85 @@ def main():
             db.collection("subscribers").document().set(data)
             print(f"  Created supporter: {supporter['display_name']}")
         print(f"Seeded {len(SUPPORTERS)} supporters.")
+
+    # Seed sample expenses
+    if force:
+        print("Clearing existing expenses...")
+        for doc in db.collection("expenses").stream():
+            doc.reference.delete()
+        for doc in db.collection("expense_revisions").stream():
+            doc.reference.delete()
+
+    existing_expenses = list(db.collection("expenses").limit(1).stream())
+    if not existing_expenses or force:
+        # Build slug → (id, title) map from seeded recipes
+        slug_map = {}
+        for doc in db.collection("recipes").stream():
+            d = doc.to_dict()
+            slug_map[d.get("slug", "")] = (doc.id, d.get("title", ""))
+
+        for expense in EXPENSES:
+            # Resolve recipe slugs in items
+            items = []
+            for item in expense["items"]:
+                item_copy = {k: v for k, v in item.items() if not k.startswith("_")}
+                slug = item.get("_slug")
+                if slug and slug in slug_map:
+                    item_copy["recipe_id"] = slug_map[slug][0]
+                    item_copy["recipe_name"] = slug_map[slug][1]
+                items.append(item_copy)
+
+            # Calculate project amounts
+            project_subtotal = sum(i["total_price"] for i in items if i.get("project_related", True))
+            raw_subtotal = expense["raw_subtotal"]
+            raw_tax = expense["raw_tax"]
+            project_tax = round(raw_tax * (project_subtotal / raw_subtotal)) if raw_subtotal > 0 else 0
+
+            is_voided = expense.get("_voided", False)
+            data = {
+                "date": expense["date"],
+                "vendor": expense["vendor"],
+                "category": expense["category"],
+                "description": expense["description"],
+                "purpose": expense.get("purpose"),
+                "transaction_id": expense.get("transaction_id", ""),
+                "merchant_id": expense.get("merchant_id", ""),
+                "items": items,
+                "raw_subtotal": raw_subtotal,
+                "raw_tax": raw_tax,
+                "raw_total": expense["raw_total"],
+                "project_subtotal": project_subtotal,
+                "project_tax": project_tax,
+                "project_total": project_subtotal + project_tax,
+                "receipt_url": None,
+                "receipt_filename": None,
+                "receipt_content_type": None,
+                "status": "voided" if is_voided else "active",
+                "voided_at": now if is_voided else None,
+                "void_reason": expense.get("_void_reason") if is_voided else None,
+                "created_at": now,
+                "updated_at": now,
+                "revision": 1,
+                "ai_parsed": False,
+            }
+
+            doc_ref = db.collection("expenses").document()
+            doc_ref.set(data)
+
+            # Write initial revision
+            db.collection("expense_revisions").document().set({
+                "expense_id": doc_ref.id,
+                "revision": 1,
+                "snapshot": {**data, "id": doc_ref.id},
+                "changed_by": "seed",
+                "changed_at": now,
+                "change_summary": "Seeded",
+            })
+
+            status_label = " [VOIDED]" if is_voided else ""
+            print(f"  Created expense: {expense['vendor']} — ${expense['raw_total'] / 100:.2f}{status_label}")
+
+        print(f"Seeded {len(EXPENSES)} expenses.")
 
 
 if __name__ == "__main__":
