@@ -87,6 +87,32 @@ export const adminSupporterApi = {
     apiFetch<{ name_enabled: boolean }>(`/api/admin/supporters/${collection}/${id}/toggle-name`, { method: 'POST' }),
 }
 
+// ─── TOTP 2FA endpoints ────────────────────────────────────────────────────
+
+export const adminTotpApi = {
+  getStatus: () => apiFetch<{ enabled: boolean }>('/api/admin/totp/status'),
+
+  setup: () => apiFetch<{ secret: string; qr_code: string }>('/api/admin/totp/setup', { method: 'POST' }),
+
+  confirmSetup: (secret: string, code: string) =>
+    apiFetch<{ enabled: boolean; token: string }>('/api/admin/totp/confirm-setup', {
+      method: 'POST',
+      body: JSON.stringify({ secret, code }),
+    }),
+
+  verify: (code: string) =>
+    apiFetch<{ token: string }>('/api/admin/totp/verify', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+
+  reset: (code: string) =>
+    apiFetch<{ reset: boolean }>('/api/admin/totp/reset', {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+}
+
 // ─── Expense ledger endpoints ───────────────────────────────────────────────
 
 export const adminExpenseApi = {
@@ -119,20 +145,6 @@ export const adminExpenseApi = {
 
   getReceiptUrl: (id: string) =>
     apiFetch<{ url: string; filename: string; content_type?: string }>(`/api/admin/expenses/${id}/receipt`),
-
-  parseReceipt: (file: File) => {
-    const formData = new FormData()
-    formData.append('file', file)
-    return apiUpload<{
-      vendor: string
-      date: string
-      items: import('./types-expense').ExpenseItem[]
-      raw_subtotal: number
-      raw_tax: number
-      raw_total: number
-      currency: string
-    }>('/api/admin/expenses/parse-receipt', formData)
-  },
 }
 
 // ─── Report endpoints ───────────────────────────────────────────────────────

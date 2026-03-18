@@ -17,9 +17,11 @@ from ..models_expense import (
     ExpenseUpdate,
     recalculate_project_amounts,
 )
+from ..totp import require_totp_session
 
 router = APIRouter(
-    prefix="/api/admin/expenses", dependencies=[Depends(require_admin)]
+    prefix="/api/admin/expenses",
+    dependencies=[Depends(require_admin), Depends(require_totp_session)],
 )
 
 MAX_RECEIPT_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -59,7 +61,7 @@ def _write_revision(
 # ── CRUD ─────────────────────────────────────────────────────────────────────
 
 
-@router.post("/", response_model=Expense, status_code=201)
+@router.post("", response_model=Expense, status_code=201)
 async def create_expense(body: ExpenseCreate, request: Request):
     """Create a new expense entry with audit trail."""
     db = get_db()
@@ -97,7 +99,7 @@ async def create_expense(body: ExpenseCreate, request: Request):
     return Expense(**data)
 
 
-@router.get("/", response_model=list[ExpenseSummary])
+@router.get("", response_model=list[ExpenseSummary])
 async def list_expenses(
     year: int,
     month: int | None = None,

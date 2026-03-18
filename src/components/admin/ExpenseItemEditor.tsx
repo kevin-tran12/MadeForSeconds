@@ -1,13 +1,15 @@
 import type { ExpenseItem } from '../../lib/types-expense'
 import { formatCents } from '../../lib/types-expense'
+import type { Recipe } from '../../lib/types'
 import { Button } from '../ui/Button'
 
 interface ExpenseItemEditorProps {
   value: ExpenseItem[]
   onChange: (items: ExpenseItem[]) => void
+  recipes?: Recipe[]
 }
 
-export function ExpenseItemEditor({ value, onChange }: ExpenseItemEditorProps) {
+export function ExpenseItemEditor({ value, onChange, recipes = [] }: ExpenseItemEditorProps) {
   function add() {
     onChange([...value, { name: '', quantity: 1, unit_price: 0, total_price: 0, project_related: true }])
   }
@@ -16,7 +18,7 @@ export function ExpenseItemEditor({ value, onChange }: ExpenseItemEditorProps) {
     onChange(value.filter((_, i) => i !== index))
   }
 
-  function update(index: number, field: keyof ExpenseItem, val: string | number | boolean) {
+  function update(index: number, field: keyof ExpenseItem, val: string | number | boolean | null) {
     onChange(
       value.map((item, i) => {
         if (i !== index) return item
@@ -30,26 +32,41 @@ export function ExpenseItemEditor({ value, onChange }: ExpenseItemEditorProps) {
     )
   }
 
+  function updateRecipe(index: number, recipeId: string) {
+    onChange(
+      value.map((item, i) => {
+        if (i !== index) return item
+        if (!recipeId) {
+          return { ...item, recipe_id: null, recipe_name: null }
+        }
+        const recipe = recipes.find((r) => r.id === recipeId)
+        return { ...item, recipe_id: recipeId, recipe_name: recipe?.title ?? null }
+      })
+    )
+  }
+
   const inputClass =
     'rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100'
+
+  const hasRecipes = recipes.length > 0
 
   return (
     <div className="flex flex-col gap-2">
       {value.length > 0 && (
-        <div className="grid grid-cols-[2.5rem_1fr_4rem_5rem_5rem_5rem_2rem] gap-2 px-1">
+        <div className={`grid gap-2 px-1 ${hasRecipes ? 'grid-cols-[2.5rem_1fr_8rem_4rem_5rem_5rem_2rem]' : 'grid-cols-[2.5rem_1fr_4rem_5rem_5rem_5rem_2rem]'}`}>
           <span className="text-xs font-medium text-gray-500 text-center">Use</span>
           <span className="text-xs font-medium text-gray-500">Item Name</span>
+          {hasRecipes && <span className="text-xs font-medium text-gray-500">Recipe</span>}
           <span className="text-xs font-medium text-gray-500">Qty</span>
           <span className="text-xs font-medium text-gray-500">Unit $</span>
           <span className="text-xs font-medium text-gray-500">Total</span>
-          <span />
           <span />
         </div>
       )}
       {value.map((item, i) => (
         <div
           key={i}
-          className={`grid grid-cols-[2.5rem_1fr_4rem_5rem_5rem_5rem_2rem] items-center gap-2 ${
+          className={`grid items-center gap-2 ${hasRecipes ? 'grid-cols-[2.5rem_1fr_8rem_4rem_5rem_5rem_2rem]' : 'grid-cols-[2.5rem_1fr_4rem_5rem_5rem_5rem_2rem]'} ${
             !item.project_related ? 'opacity-50' : ''
           }`}
         >
@@ -68,6 +85,20 @@ export function ExpenseItemEditor({ value, onChange }: ExpenseItemEditorProps) {
             placeholder="Item name"
             className={`${inputClass} ${!item.project_related ? 'line-through' : ''}`}
           />
+          {hasRecipes && (
+            <select
+              value={item.recipe_id ?? ''}
+              onChange={(e) => updateRecipe(i, e.target.value)}
+              className={`${inputClass} text-xs`}
+            >
+              <option value="">—</option>
+              {recipes.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.title}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             type="number"
             value={item.quantity}
@@ -87,7 +118,6 @@ export function ExpenseItemEditor({ value, onChange }: ExpenseItemEditorProps) {
           <span className="text-sm text-gray-700 tabular-nums px-1">
             {formatCents(item.total_price)}
           </span>
-          <span />
           <button
             type="button"
             onClick={() => remove(i)}

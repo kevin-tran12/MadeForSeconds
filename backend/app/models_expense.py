@@ -23,11 +23,15 @@ ExpenseCategory = Literal[
 class ExpenseItem(BaseModel):
     """A single line item from a receipt."""
 
+    model_config = {"extra": "ignore"}
+
     name: str
     quantity: float = 1.0
     unit_price: int  # cents
     total_price: int  # cents
     project_related: bool = True
+    recipe_id: str | None = None
+    recipe_name: str | None = None
 
 
 class ExpenseCreate(BaseModel):
@@ -37,12 +41,15 @@ class ExpenseCreate(BaseModel):
     vendor: str
     category: ExpenseCategory = "other"
     description: str = ""
-    recipe_id: str | None = None
     purpose: str | None = None
     items: list[ExpenseItem] = []
     raw_subtotal: int = 0  # cents
     raw_tax: int = 0  # cents
     raw_total: int = 0  # cents
+    transaction_id: str = ""
+    merchant_id: str = ""
+    recipe_ids: list[str] = Field(default_factory=list)
+    recipe_names: list[str] = Field(default_factory=list)
 
 
 class ExpenseUpdate(BaseModel):
@@ -52,24 +59,32 @@ class ExpenseUpdate(BaseModel):
     vendor: str | None = None
     category: ExpenseCategory | None = None
     description: str | None = None
-    recipe_id: str | None = Field(default=None)
     purpose: str | None = Field(default=None)
     items: list[ExpenseItem] | None = None
     raw_subtotal: int | None = None
     raw_tax: int | None = None
     raw_total: int | None = None
+    transaction_id: str | None = None
+    merchant_id: str | None = None
+    recipe_ids: list[str] | None = None
+    recipe_names: list[str] | None = None
 
 
 class Expense(BaseModel):
     """Full expense model returned from the API."""
+
+    model_config = {"extra": "ignore"}
 
     id: str
     date: datetime
     vendor: str
     category: ExpenseCategory
     description: str
-    recipe_id: str | None = None
     purpose: str | None = None
+
+    # Receipt identifiers
+    transaction_id: str = ""
+    merchant_id: str = ""
 
     # Receipt file
     receipt_url: str | None = None
@@ -89,6 +104,10 @@ class Expense(BaseModel):
     project_tax: int = 0
     project_total: int = 0
 
+    # Expense-level recipe links (expense as a whole may span multiple recipes)
+    recipe_ids: list[str] = Field(default_factory=list)
+    recipe_names: list[str] = Field(default_factory=list)
+
     # Audit fields
     status: str = "active"  # "active" | "voided"
     voided_at: datetime | None = None
@@ -102,17 +121,22 @@ class Expense(BaseModel):
 class ExpenseSummary(BaseModel):
     """Lightweight model for list views (no items array)."""
 
+    model_config = {"extra": "ignore"}
+
     id: str
     date: datetime
     vendor: str
     category: ExpenseCategory
     description: str
-    recipe_id: str | None = None
     purpose: str | None = None
     receipt_filename: str | None = None
+    transaction_id: str = ""
+    merchant_id: str = ""
     raw_total: int
     project_total: int
     project_tax: int
+    recipe_ids: list[str] = Field(default_factory=list)
+    recipe_names: list[str] = Field(default_factory=list)
     status: str
     created_at: datetime
 

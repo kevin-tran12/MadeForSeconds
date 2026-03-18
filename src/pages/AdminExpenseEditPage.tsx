@@ -6,7 +6,6 @@ import type { ExpenseItem, ExpenseCreate } from '../lib/types-expense'
 import { EXPENSE_CATEGORIES, formatCents, recalcProjectAmounts } from '../lib/types-expense'
 import type { ExpenseCategory } from '../lib/types-expense'
 import { ExpenseItemEditor } from '../components/admin/ExpenseItemEditor'
-import { ReceiptItemizer } from '../components/admin/ReceiptItemizer'
 import { Button } from '../components/ui/Button'
 import { Input } from '../components/ui/Input'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
@@ -22,8 +21,9 @@ export function AdminExpenseEditPage() {
   const [vendor, setVendor] = useState('')
   const [category, setCategory] = useState<ExpenseCategory>('other')
   const [description, setDescription] = useState('')
-  const [recipeId, setRecipeId] = useState<string | null>(null)
   const [purpose, setPurpose] = useState('')
+  const [transactionId, setTransactionId] = useState('')
+  const [merchantId, setMerchantId] = useState('')
   const [items, setItems] = useState<ExpenseItem[]>([])
   const [rawSubtotal, setRawSubtotal] = useState(0)
   const [rawTax, setRawTax] = useState(0)
@@ -34,11 +34,10 @@ export function AdminExpenseEditPage() {
   const [receiptFilename, setReceiptFilename] = useState<string | null>(null)
   const [receiptContentType, setReceiptContentType] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [aiParsed, setAiParsed] = useState(false)
 
-  // Recipes list for linking
+  // Recipes list for per-item linking and expense-level multi-select
   const [recipes, setRecipes] = useState<Recipe[]>([])
+  const [linkedRecipeIds, setLinkedRecipeIds] = useState<string[]>([])
 
   // UI state
   const [loading, setLoading] = useState(!isNew)
@@ -61,16 +60,17 @@ export function AdminExpenseEditPage() {
         setVendor(exp.vendor)
         setCategory(exp.category)
         setDescription(exp.description)
-        setRecipeId(exp.recipe_id)
         setPurpose(exp.purpose ?? '')
+        setTransactionId(exp.transaction_id ?? '')
+        setMerchantId(exp.merchant_id ?? '')
         setItems(exp.items)
+        setLinkedRecipeIds(exp.recipe_ids ?? [])
         setRawSubtotal(exp.raw_subtotal)
         setRawTax(exp.raw_tax)
         setRawTotal(exp.raw_total)
         setReceiptUrl(exp.receipt_url)
         setReceiptFilename(exp.receipt_filename)
         setReceiptContentType(exp.receipt_content_type)
-        setAiParsed(exp.ai_parsed)
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'))
       .finally(() => setLoading(false))
@@ -97,30 +97,6 @@ export function AdminExpenseEditPage() {
     }
   }
 
-  async function handleScanReceipt(file: File) {
-    setScanning(true)
-    setError(null)
-    try {
-      const parsed = await adminExpenseApi.parseReceipt(file)
-      if (parsed.vendor) setVendor(parsed.vendor)
-      if (parsed.date) setDate(parsed.date.slice(0, 10))
-      if (parsed.items?.length) setItems(parsed.items)
-      if (parsed.raw_subtotal) setRawSubtotal(parsed.raw_subtotal)
-      if (parsed.raw_tax) setRawTax(parsed.raw_tax)
-      if (parsed.raw_total) setRawTotal(parsed.raw_total)
-      setAiParsed(true)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Receipt scan failed')
-    } finally {
-      setScanning(false)
-    }
-  }
-
-  async function handleReceiptFileSelected(file: File) {
-    // Upload and scan in parallel
-    await Promise.all([handleReceiptUpload(file), handleScanReceipt(file)])
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!vendor.trim()) {
@@ -131,22 +107,26 @@ export function AdminExpenseEditPage() {
     setSaving(true)
     setError(null)
     try {
+      const linkedRecipes = recipes.filter((r) => linkedRecipeIds.includes(r.id))
       const data: ExpenseCreate = {
         date: new Date(date).toISOString(),
         vendor: vendor.trim(),
         category,
         description: description.trim(),
-        recipe_id: recipeId || null,
-        purpose: recipeId ? null : purpose.trim() || null,
+        purpose: purpose.trim() || null,
         items,
         raw_subtotal: rawSubtotal,
         raw_tax: rawTax,
         raw_total: rawTotal,
+        transaction_id: transactionId.trim(),
+        merchant_id: merchantId.trim(),
+        recipe_ids: linkedRecipeIds,
+        recipe_names: linkedRecipes.map((r) => r.title),
       }
 
       let saved
       if (isNew) {
-        saved = await adminExpenseApi.create({ ...data, ai_parsed: aiParsed } as never)
+        saved = await adminExpenseApi.create(data)
       } else {
         saved = await adminExpenseApi.update(id!, data)
       }
@@ -212,34 +192,79 @@ export function AdminExpenseEditPage() {
                 ))}
               </select>
             </div>
-            <div>
-              <label htmlFor="recipe" className="mb-1 block text-sm font-medium text-gray-700">
-                Linked Recipe (optional)
-              </label>
-              <select
-                id="recipe"
-                value={recipeId ?? ''}
-                onChange={(e) => setRecipeId(e.target.value || null)}
-                className={`w-full ${inputClass}`}
-              >
-                <option value="">— No recipe —</option>
-                {recipes.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.title}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {!recipeId && (
             <Input
               id="purpose"
-              label="Purpose"
+              label="Purpose (optional)"
               value={purpose}
               onChange={(e) => setPurpose(e.target.value)}
               placeholder="e.g. KitchenAid mixer, Cloudflare domain renewal"
             />
+          </div>
+          {recipes.length > 0 && (
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Linked Recipes (optional)
+              </label>
+              <div className="flex flex-wrap gap-2 mb-2">
+                {linkedRecipeIds.map((rid) => {
+                  const r = recipes.find((x) => x.id === rid)
+                  if (!r) return null
+                  return (
+                    <span
+                      key={rid}
+                      className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-3 py-1 text-xs font-medium text-primary-800"
+                    >
+                      {r.title}
+                      <button
+                        type="button"
+                        onClick={() => setLinkedRecipeIds((ids) => ids.filter((i) => i !== rid))}
+                        className="ml-1 text-primary-500 hover:text-primary-800"
+                        aria-label={`Remove ${r.title}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  )
+                })}
+              </div>
+              <select
+                value=""
+                onChange={(e) => {
+                  const val = e.target.value
+                  if (val && !linkedRecipeIds.includes(val)) {
+                    setLinkedRecipeIds((ids) => [...ids, val])
+                  }
+                  e.target.value = ''
+                }}
+                className={`w-full ${inputClass}`}
+              >
+                <option value="">Add a recipe…</option>
+                {recipes
+                  .filter((r) => !linkedRecipeIds.includes(r.id))
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.title}
+                    </option>
+                  ))}
+              </select>
+            </div>
           )}
+          <div className="grid grid-cols-2 gap-4">
+            <Input
+              id="transactionId"
+              label="Transaction # (optional)"
+              value={transactionId}
+              onChange={(e) => setTransactionId(e.target.value)}
+              placeholder="e.g. Tran# 400318"
+            />
+            <Input
+              id="merchantId"
+              label="Merchant ID (optional)"
+              value={merchantId}
+              onChange={(e) => setMerchantId(e.target.value)}
+              placeholder="e.g. 542929807243795"
+            />
+          </div>
           <div>
             <label htmlFor="description" className="mb-1 block text-sm font-medium text-gray-700">
               Notes
@@ -288,7 +313,7 @@ export function AdminExpenseEditPage() {
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
-                  if (f) handleReceiptFileSelected(f)
+                  if (f) handleReceiptUpload(f)
                 }}
               />
               <button
@@ -300,14 +325,14 @@ export function AdminExpenseEditPage() {
                 {uploading ? (
                   <>
                     <LoadingSpinner size="sm" />
-                    {scanning ? 'Scanning with AI…' : 'Uploading…'}
+                    Uploading…
                   </>
                 ) : (
                   <>
                     <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 16v-8m0 0l-3 3m3-3l3 3M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
                     </svg>
-                    Click to upload receipt — AI will extract items automatically
+                    Click to upload receipt
                   </>
                 )}
               </button>
@@ -317,30 +342,11 @@ export function AdminExpenseEditPage() {
 
         {/* Line items */}
         <section className="rounded-xl border border-surface-darker bg-white p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Line Items</h2>
-            {aiParsed && (
-              <span className="flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-xs font-medium text-green-700 border border-green-200">
-                <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                Auto-scanned
-              </span>
-            )}
-          </div>
+          <h2 className="text-lg font-semibold text-gray-900">Line Items</h2>
           <p className="text-sm text-gray-500">
             Uncheck items that aren't project-related. Tax is recalculated proportionally.
           </p>
-          {aiParsed && items.length > 0 ? (
-            <ReceiptItemizer
-              items={items}
-              rawTax={rawTax}
-              rawSubtotal={rawSubtotal}
-              onChange={setItems}
-            />
-          ) : (
-            <ExpenseItemEditor value={items} onChange={setItems} />
-          )}
+          <ExpenseItemEditor value={items} onChange={setItems} recipes={recipes} />
         </section>
 
         {/* Totals */}

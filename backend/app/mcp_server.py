@@ -1,18 +1,28 @@
-"""Remote MCP server for creating recipes from Claude Projects.
+"""Remote MCP server for creating recipes and expenses from Claude conversations.
 
 Claude Projects on claude.ai connect to this via Streamable HTTP.
 The user develops a recipe by chatting with Claude, then Claude
 calls the create_recipe tool to save it as an unpublished draft.
+For expenses, the user pastes a receipt image, Claude parses it
+visually, and calls create_expense to record it with receipt upload.
 """
 
+import mimetypes
+import os
 import re
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
 from .config import settings
 from .firestore import get_db
 from .models import Ingredient, Instruction, NutritionEntry, RecipeComponent, RecipeCreate
+from .models_expense import (
+    EXPENSE_CATEGORIES,
+    ExpenseItem,
+    recalculate_project_amounts,
+)
 
 
 mcp = FastMCP(
@@ -23,6 +33,86 @@ mcp = FastMCP(
 
 def _generate_slug(title: str) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", title.lower()))
+
+
+# ── Expense helpers ──────────────────────────────────────────────────────────
+
+
+_ALLOWED_RECEIPT_TYPES = {"image/jpeg", "image/png", "image/webp", "application/pdf"}
+_MAX_RECEIPT_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+def _resolve_recipe_slugs(slugs: list[str]) -> dict[str, tuple[str, str]]:
+    """Query Firestore for recipes by slug, return {slug: (id, title)}."""
+    if not slugs:
+        return {}
+    db = get_db()
+    docs = db.collection("recipes").where("slug", "in", slugs[:30]).stream()
+    result: dict[str, tuple[str, str]] = {}
+    for doc in docs:
+        data = doc.to_dict()
+        result[data["slug"]] = (doc.id, data.get("title", data["slug"]))
+    return result
+
+
+def _upload_receipt(file_path: str) -> dict:
+    """Read a local file and upload to GCS (or return dev mock path).
+
+    Returns dict with receipt_url, receipt_filename, receipt_content_type.
+    """
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"Receipt file not found: {file_path}")
+
+    filename = os.path.basename(file_path)
+    content_type, _ = mimetypes.guess_type(file_path)
+    if not content_type or content_type not in _ALLOWED_RECEIPT_TYPES:
+        raise ValueError(
+            f"Unsupported file type: {content_type}. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_RECEIPT_TYPES))}"
+        )
+
+    data = open(file_path, "rb").read()
+    if len(data) > _MAX_RECEIPT_SIZE:
+        raise ValueError(f"File too large ({len(data)} bytes). Max: {_MAX_RECEIPT_SIZE // 1024 // 1024}MB")
+
+    blob_name = f"receipts/{uuid4()}-{filename}"
+
+    if settings.is_dev:
+        return {
+            "receipt_url": f"dev://{blob_name}",
+            "receipt_filename": filename,
+            "receipt_content_type": content_type,
+        }
+
+    from google.cloud import storage
+
+    client = storage.Client()
+    bucket = client.bucket(settings.gcs_receipts_bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(data, content_type=content_type)
+
+    return {
+        "receipt_url": f"gs://{settings.gcs_receipts_bucket_name}/{blob_name}",
+        "receipt_filename": filename,
+        "receipt_content_type": content_type,
+    }
+
+
+def _write_revision(db, expense_id: str, revision: int, snapshot: dict, summary: str) -> None:
+    """Write an immutable revision snapshot for audit trail."""
+    db.collection("expense_revisions").document().set(
+        {
+            "expense_id": expense_id,
+            "revision": revision,
+            "snapshot": snapshot,
+            "changed_by": "mcp",
+            "changed_at": datetime.now(timezone.utc),
+            "change_summary": summary,
+        }
+    )
+
+
+# ── Tools ────────────────────────────────────────────────────────────────────
 
 
 @mcp.tool()
@@ -106,6 +196,152 @@ def create_recipe(
         "slug": data["slug"],
         "title": recipe.title,
         "message": "Recipe created as draft. Review and publish at /admin.",
+    }
+
+
+@mcp.tool()
+def create_expense(
+    date: str,
+    vendor: str,
+    items: list[dict],
+    raw_subtotal: int,
+    raw_tax: int,
+    raw_total: int,
+    category: str = "ingredients",
+    description: str = "",
+    purpose: str = "",
+    transaction_id: str = "",
+    merchant_id: str = "",
+    receipt_file_path: str = "",
+    currency: str = "USD",
+) -> dict:
+    """Create a new expense entry on MadeForSeconds for tax tracking.
+
+    All monetary values are in CENTS (integers). For example, $79.87 = 7987.
+
+    Args:
+        date: ISO date string YYYY-MM-DD (e.g. "2026-03-08")
+        vendor: Store or service name (e.g. "City Farmers Market")
+        items: List of line items. Each dict has:
+            - name (str): Item description
+            - quantity (float): Number of units (default 1.0)
+            - unit_price (int): Price per unit in cents
+            - total_price (int): Total price in cents (quantity × unit_price)
+            - project_related (bool): Whether this item is for the project (default true)
+            - recipe_slug (str, optional): Slug of the linked recipe (e.g. "tom-yum-soup")
+        raw_subtotal: Receipt subtotal before tax, in cents
+        raw_tax: Tax amount in cents
+        raw_total: Receipt grand total in cents
+        category: One of: ingredients, equipment, hosting, marketing, software, other
+        description: Optional notes about this expense
+        purpose: What this expense is for when not tied to a recipe (e.g. "KitchenAid mixer")
+        transaction_id: Receipt transaction/reference number (e.g. "Tran# 400318")
+        merchant_id: Merchant terminal/store ID (e.g. "542929807243795")
+        receipt_file_path: Absolute path to receipt image/PDF on disk to upload
+        currency: Currency code (default "USD")
+    """
+    # Validate category
+    if category not in EXPENSE_CATEGORIES:
+        return {"error": f"Invalid category '{category}'. Must be one of: {', '.join(EXPENSE_CATEGORIES)}"}
+
+    # Resolve recipe slugs to IDs
+    slugs = list({item["recipe_slug"] for item in items if item.get("recipe_slug")})
+    slug_map = _resolve_recipe_slugs(slugs) if slugs else {}
+
+    # Check for unresolved slugs
+    unresolved = [s for s in slugs if s not in slug_map]
+    if unresolved:
+        return {"error": f"Recipe slugs not found: {', '.join(unresolved)}"}
+
+    # Build ExpenseItem list
+    expense_items = []
+    for item in items:
+        recipe_id = None
+        recipe_name = None
+        slug = item.get("recipe_slug")
+        if slug and slug in slug_map:
+            recipe_id, recipe_name = slug_map[slug]
+
+        expense_items.append(
+            ExpenseItem(
+                name=item["name"],
+                quantity=item.get("quantity", 1.0),
+                unit_price=item.get("unit_price", 0),
+                total_price=item.get("total_price", 0),
+                project_related=item.get("project_related", True),
+                recipe_id=recipe_id,
+                recipe_name=recipe_name,
+            )
+        )
+
+    # Calculate project amounts
+    project = recalculate_project_amounts(expense_items, raw_tax, raw_subtotal)
+
+    # Upload receipt if path provided
+    receipt_data: dict = {
+        "receipt_url": None,
+        "receipt_filename": None,
+        "receipt_content_type": None,
+    }
+    if receipt_file_path:
+        try:
+            receipt_data = _upload_receipt(receipt_file_path)
+        except (FileNotFoundError, ValueError) as exc:
+            return {"error": str(exc)}
+
+    # Build Firestore document
+    now = datetime.now(timezone.utc)
+    parsed_date = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+    data = {
+        "date": parsed_date,
+        "vendor": vendor,
+        "category": category,
+        "description": description,
+        "purpose": purpose or None,
+        "transaction_id": transaction_id,
+        "merchant_id": merchant_id,
+        "items": [item.model_dump() for item in expense_items],
+        "raw_subtotal": raw_subtotal,
+        "raw_tax": raw_tax,
+        "raw_total": raw_total,
+        "currency": currency,
+        **project,
+        **receipt_data,
+        "status": "active",
+        "voided_at": None,
+        "void_reason": None,
+        "created_at": now,
+        "updated_at": now,
+        "revision": 1,
+        "ai_parsed": True,
+    }
+
+    db = get_db()
+    doc_ref = db.collection("expenses").document()
+    doc_ref.set(data)
+    data["id"] = doc_ref.id
+
+    # Write first revision
+    _write_revision(db, doc_ref.id, 1, data, "Created via MCP")
+
+    # Build recipe summary for response
+    linked_recipes = sorted({
+        item.recipe_name for item in expense_items
+        if item.recipe_name
+    })
+
+    return {
+        "id": doc_ref.id,
+        "vendor": vendor,
+        "date": date,
+        "category": category,
+        "item_count": len(expense_items),
+        "project_total": f"${project['project_total'] / 100:.2f}",
+        "raw_total": f"${raw_total / 100:.2f}",
+        "linked_recipes": linked_recipes,
+        "receipt_uploaded": bool(receipt_data.get("receipt_url")),
+        "message": "Expense created. Review at /admin/expenses.",
     }
 
 

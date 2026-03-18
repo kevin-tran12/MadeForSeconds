@@ -67,7 +67,8 @@ async def list_recipes(
 
         recipes = [r for r in recipes if matches(r)]
 
-    cache.set(cache_key, recipes)
+    if recipes:
+        cache.set(cache_key, recipes)
     return recipes
 
 

@@ -2,6 +2,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { Layout } from './components/layout/Layout'
 import { AdminRoute } from './components/admin/AdminRoute'
+import { TotpGate } from './components/admin/TotpGate'
 import { HomePage } from './pages/HomePage'
 import { RecipesPage } from './pages/RecipesPage'
 import { RecipeDetailPage } from './pages/RecipeDetailPage'
@@ -36,10 +37,15 @@ const router = createBrowserRouter([
           { index: true, element: <AdminDashboardPage /> },
           { path: 'new', element: <AdminRecipeEditPage /> },
           { path: 'edit/:id', element: <AdminRecipeEditPage /> },
-          { path: 'expenses', element: <AdminExpensesPage /> },
-          { path: 'expenses/new', element: <AdminExpenseEditPage /> },
-          { path: 'expenses/reports', element: <AdminReportsPage /> },
-          { path: 'expenses/:id', element: <AdminExpenseEditPage /> },
+          {
+            element: <TotpGate />,
+            children: [
+              { path: 'expenses', element: <AdminExpensesPage /> },
+              { path: 'expenses/new', element: <AdminExpenseEditPage /> },
+              { path: 'expenses/reports', element: <AdminReportsPage /> },
+              { path: 'expenses/:id', element: <AdminExpenseEditPage /> },
+            ],
+          },
         ],
       },
     ],
