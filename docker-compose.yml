@@ -41,7 +41,7 @@ services:
       GCP_PROJECT_ID: madefor-seconds-local
       ADMIN_EMAILS: dev@local
       ENVIRONMENT: development
-      ALLOWED_ORIGINS: http://localhost:5173
+      ALLOWED_ORIGINS: http://localhost:5173,http://mfs-app:5173,http://localhost:8000
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       MCP_API_KEY: dev-mcp-key
       REDIS_URL: redis://redis:6379
@@ -73,6 +73,8 @@ services:
       - /app/node_modules
     depends_on:
       - backend
+    environment:
+      - VITE_API_URL=http://mfs-backend:8000
     env_file:
       - .env.local
 
