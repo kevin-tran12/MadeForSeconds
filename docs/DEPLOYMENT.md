@@ -16,6 +16,8 @@ Guide to deploying MadeForSeconds on GCP + Cloudflare.
 - [Terraform ≥ 1.5](https://developer.hashicorp.com/terraform/install)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - A [Cloudflare account](https://cloudflare.com/) with your domain added
+- A [Stripe account](https://stripe.com/) (for subscriptions + donations)
+- A [Resend account](https://resend.com/) (for cancellation emails)
 
 ---
 
@@ -35,13 +37,20 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `gcp_region` | Leave as `us-central1` (required for free egress) |
 | `admin_emails` | Comma-separated admin email addresses |
 | `allowed_origins` | Your frontend URL(s), e.g. `https://madeforseconds.pages.dev` |
-| `backend_image` | Leave as-is — Cloud Build will push to this path |
+| `backend_image` | Leave as-is — Cloud Build pushes to this path |
 | `github_owner` | Your GitHub username or org |
 | `github_repo` | Repository name (e.g. `MadeForSeconds`) |
 | `anthropic_api_key` | Anthropic API key for the recipe parser |
 | `mcp_api_key` | Bearer token for Claude Projects MCP integration |
+| `stripe_secret_key` | Stripe secret key (`sk_live_…`) |
+| `stripe_webhook_secret` | Stripe webhook signing secret (`whsec_…`) |
+| `stripe_product_id` | Stripe Product ID (`prod_…`) |
+| `subscriber_jwt_secret` | 32+ character secret for cancel link JWTs |
+| `resend_api_key` | Resend API key for cancellation emails |
+| `frontend_url` | Your production frontend URL (used in email links) |
+| `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
 
-> `terraform.tfvars` is gitignored — never commit it, it contains secrets.
+> `terraform.tfvars` is gitignored — never commit it.
 
 ### Step 2 — Initialize and apply Terraform
 
@@ -52,13 +61,15 @@ terraform apply
 ```
 
 This provisions:
-- Firestore database
-- Artifact Registry repository
-- Cloud Run service (scale-to-zero, 512 MB)
-- Identity Platform (email + password auth)
+- Firestore database + indexes
+- Artifact Registry repository (with cleanup policy — keeps ≤ 5 images)
+- Cloud Run service (scale-to-zero, 512 MB, startup CPU boost)
+- Cloud Storage buckets (images — public, receipts — private + versioned)
+- Identity Platform (Firebase Auth) for admin login
 - Cloud Build CI/CD trigger
+- GCP Secret Manager secrets (Stripe keys, JWT secret, API keys)
 - Cloudflare DNS record for the API subdomain
-- All required GCP APIs and service accounts
+- All required GCP APIs and IAM service accounts
 
 ### Step 3 — Connect GitHub to Cloud Build (one-time)
 
@@ -69,18 +80,34 @@ Cloud Build needs permission to read your repository before the trigger works.
 3. Select **GitHub** and follow the OAuth flow
 4. Select your `MadeForSeconds` repository and click **Connect**
 
-This only needs to be done once.
+### Step 4 — Set up Stripe
 
-### Step 4 — Build and push the first Docker image
+**Create a product and price:**
+1. Go to [Stripe Dashboard → Products](https://dashboard.stripe.com/products)
+2. Create a product (e.g. "MadeForSeconds Supporter")
+3. Add a recurring price (e.g. $3/month) — this is your subscription tier
+4. Copy the Product ID (`prod_…`) into `terraform.tfvars → stripe_product_id`
 
-Either push to `main` to trigger Cloud Build automatically, or do it manually:
+**Configure the webhook:**
+1. Go to [Stripe Dashboard → Developers → Webhooks](https://dashboard.stripe.com/webhooks)
+2. Click **Add endpoint**
+3. Set the URL to `https://your-api-domain.com/api/subscribe/webhook`
+4. Select these events:
+   - `checkout.session.completed`
+   - `customer.subscription.deleted`
+5. Copy the signing secret (`whsec_…`) into `terraform.tfvars → stripe_webhook_secret`
+
+### Step 5 — Build and push the first Docker image
+
+Either push to `main` (Cloud Build will trigger automatically after Step 3), or do it manually:
 
 ```bash
 # Authenticate Docker with Artifact Registry (once per machine)
 gcloud auth configure-docker us-central1-docker.pkg.dev
 
 # Build and push from the project root
-docker build --platform linux/amd64 -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mfs/backend:latest ./backend
+docker build --platform linux/amd64 \
+  -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mfs/backend:latest ./backend
 docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/mfs/backend:latest
 
 # Deploy to Cloud Run
@@ -90,14 +117,14 @@ gcloud run services update mfs-backend \
   --project YOUR_PROJECT_ID
 ```
 
-### Step 5 — Create an admin user
+### Step 6 — Create an admin user
 
 1. Go to [GCP console → Identity Platform → Users](https://console.cloud.google.com/customer-identity/users)
 2. Click **Add user**
 3. Enter the email address you put in `admin_emails` and set a password
-4. This is the account you'll use to log in on the live site
+4. This is the account you'll use to log in to the admin panel
 
-### Step 6 — Connect frontend to Cloudflare Pages
+### Step 7 — Connect frontend to Cloudflare Pages
 
 1. Go to [Cloudflare Pages](https://pages.cloudflare.com/) → **Create a project**
 2. Connect your GitHub account and select the `MadeForSeconds` repository
@@ -113,19 +140,24 @@ gcloud run services update mfs-backend \
 | `VITE_FIREBASE_AUTH_DOMAIN` | `YOUR_PROJECT_ID.firebaseapp.com` |
 | `VITE_FIREBASE_PROJECT_ID` | Your GCP project ID |
 
-5. Repeat for the **Preview** environment so branch preview deployments can reach the backend.
+5. Repeat for the **Preview** environment so branch previews can reach the backend.
 
-### Step 7 — Verify
+### Step 8 — Verify
 
 ```bash
-# Check Cloud Run is healthy
+# Backend health check
 curl https://$(cd terraform && terraform output -raw cloud_run_url)/api/health
 
-# Check the API returns recipes
+# Recipes endpoint
 curl https://api.yourdomain.com/api/recipes
 ```
 
-Open your domain, click **Admin login**, and sign in with the account from Step 5.
+Open your domain, click **Admin login**, and sign in with the Identity Platform account from Step 6.
+
+Set up TOTP 2FA for expenses:
+1. Log in as admin and go to `/admin/expenses`
+2. Follow the TOTP setup prompt (scan QR with Google Authenticator or similar)
+3. Expenses and reports will require the 6-digit code each session
 
 ---
 
@@ -133,30 +165,29 @@ Open your domain, click **Admin login**, and sign in with the account from Step 
 
 ### Updating the backend
 
-Any change inside `backend/` requires a new Docker image. Run these after merging backend changes to `main`:
+Any change inside `backend/` requires a new Docker image:
 
 ```bash
-# 1. Authenticate Docker with Artifact Registry (once per machine)
 gcloud auth configure-docker us-central1-docker.pkg.dev
 
-# 2. Build and push the updated image
-docker build --platform linux/amd64 -t us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest ./backend
+docker build --platform linux/amd64 \
+  -t us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest ./backend
 docker push us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest
 
-# 3. Deploy — rolling update, ~30–60 seconds, zero downtime
+# Rolling deploy, ~30–60s, zero downtime
 gcloud run services update mfs-backend \
   --region us-central1 \
   --image us-central1-docker.pkg.dev/made-for-seconds/mfs/backend:latest \
   --project made-for-seconds
 ```
 
-**Alternatively**, push to `main` — if Cloud Build is configured (Step 3), it runs these steps automatically via `cloudbuild.yaml`.
+Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild.yaml`.
 
 ### What requires what kind of deploy?
 
 | Change | Action |
 |--------|--------|
-| Frontend only (`.tsx`, `.ts`, `.css`) | Nothing — Cloudflare Pages deploys automatically on push |
+| Frontend (`.tsx`, `.ts`, `.css`) | Nothing — Cloudflare deploys automatically |
 | `backend/app/*.py` | Rebuild + push Docker image → `gcloud run services update` |
 | `backend/requirements.txt` | Rebuild + push Docker image → `gcloud run services update` |
 | New CORS origin or env var | Update `terraform.tfvars` → `terraform apply` |
@@ -166,18 +197,14 @@ gcloud run services update mfs-backend \
 
 ```bash
 cd terraform
-
-# Preview what will change
-terraform plan
-
-# Apply the changes
-terraform apply
+terraform plan     # Preview changes
+terraform apply    # Apply changes
 ```
 
 Common reasons to run `terraform apply`:
-- Adding a new allowed CORS origin to `allowed_origins`
+- Adding a new allowed CORS origin
 - Changing Cloud Run memory or CPU limits
-- Adding a new secret or environment variable
+- Adding or rotating a secret
 - Any other `.tf` file change
 
 ### Viewing backend logs
@@ -192,6 +219,17 @@ gcloud logging read \
 
 Or browse them in the [GCP console → Cloud Run → mfs-backend → Logs](https://console.cloud.google.com/run).
 
+### Rotating secrets
+
+All secrets are stored in GCP Secret Manager. To rotate (e.g. Stripe keys):
+
+1. Update the secret value in the [Secret Manager console](https://console.cloud.google.com/security/secret-manager)
+   or via: `echo -n "new-value" | gcloud secrets versions add SECRET_NAME --data-file=-`
+2. Cloud Run reads secret values at startup — re-deploy the service to pick up the new version:
+   ```bash
+   gcloud run services update mfs-backend --region us-central1 --project made-for-seconds
+   ```
+
 ---
 
 ## Cloudflare Pages previews
@@ -201,9 +239,9 @@ Every non-`main` branch gets an automatic preview at:
 https://<branch-name>.madeforseconds.pages.dev
 ```
 
-All `*.madeforseconds.pages.dev` origins are pre-approved in the backend's CORS config via regex — preview deployments can talk to the production API without any manual changes each time.
+All `*.madeforseconds.pages.dev` origins are pre-approved in the backend's CORS config — previews can talk to the production API without any manual changes.
 
-Make sure `VITE_API_URL` is set under **Settings → Environment variables → Preview** in Cloudflare Pages, pointing at the production backend URL.
+Set `VITE_API_URL` under **Settings → Environment variables → Preview** in Cloudflare Pages, pointing at the production backend URL.
 
 ---
 
@@ -218,17 +256,25 @@ Make sure `VITE_API_URL` is set under **Settings → Environment variables → P
 | `VITE_FIREBASE_AUTH_DOMAIN` | Yes | Identity Platform auth domain |
 | `VITE_FIREBASE_PROJECT_ID` | Yes | GCP project ID |
 
-### Backend (managed via Terraform / Cloud Run)
+### Backend (managed via Terraform → Cloud Run + Secret Manager)
 
 | Variable | How it's set | Description |
 |----------|-------------|-------------|
 | `GCP_PROJECT_ID` | `terraform.tfvars` | GCP project ID |
 | `ENVIRONMENT` | Hardcoded `production` in Terraform | Enables production auth |
-| `ALLOWED_ORIGINS` | `terraform.tfvars → allowed_origins` | Explicit allowed CORS origins |
+| `ALLOWED_ORIGINS` | `terraform.tfvars → allowed_origins` | Allowed CORS origins |
+| `FRONTEND_URL` | `terraform.tfvars → frontend_url` | Frontend URL used in email links |
 | `ADMIN_EMAILS` | GCP Secret Manager | Comma-separated admin emails |
-| `MCP_API_KEY` | GCP Secret Manager | Bearer token for Claude Projects MCP |
-| `ANTHROPIC_API_KEY` | GCP Secret Manager | Recipe parser API key |
-| `REDIS_URL` | GCP Secret Manager (optional) | Upstash Redis for caching |
+| `STRIPE_SECRET_KEY` | GCP Secret Manager | Stripe secret key (`sk_live_…`) |
+| `STRIPE_WEBHOOK_SECRET` | GCP Secret Manager | Stripe webhook signing secret (`whsec_…`) |
+| `STRIPE_PRODUCT_ID` | GCP Secret Manager | Stripe Product ID (`prod_…`) |
+| `SUBSCRIBER_JWT_SECRET` | GCP Secret Manager | Secret for signing cancel link JWTs (32+ chars) |
+| `RESEND_API_KEY` | GCP Secret Manager | Resend API key for cancellation emails |
+| `ANTHROPIC_API_KEY` | GCP Secret Manager | Claude API key for recipe parsing |
+| `MCP_API_KEY` | GCP Secret Manager | Bearer token for Claude Projects MCP integration |
+| `REDIS_URL` | GCP Secret Manager (optional) | Upstash Redis URL for caching |
+| `GCS_BUCKET_NAME` | Set by Terraform | Cloud Storage bucket for recipe images |
+| `GCS_RECEIPTS_BUCKET_NAME` | Set by Terraform | Cloud Storage bucket for expense receipts |
 
 ---
 
@@ -238,7 +284,9 @@ Make sure `VITE_API_URL` is set under **Settings → Environment variables → P
 |---------|---------------|----------------|
 | Cloud Run | 2M req/mo · 360K GB-sec · 180K vCPU-sec | Well under for personal use |
 | Firestore | 50K reads/day · 20K writes/day · 1 GiB storage | Well under |
-| Artifact Registry | 0.5 GB storage | Cleanup policy keeps ≤ 5 images |
+| Cloud Storage | 5 GiB storage · 1 GiB/mo egress (US) | Minimal for images + receipts |
+| Artifact Registry | 0.5 GiB storage | Cleanup policy keeps ≤ 5 images |
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
-| Cloud Logging | 50 GiB/mo | Minimal log volume |
+| Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
+| Secret Manager | 6 active secrets free · 10K access/mo | Within limits |
