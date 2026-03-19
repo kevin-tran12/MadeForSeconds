@@ -119,37 +119,41 @@ async def create_checkout(body: CheckoutRequest):
     _validate_redirect_url(body.success_url)
     _validate_redirect_url(body.cancel_url)
 
-    if body.one_time:
-        # One-time payment
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": "Support MadeForSeconds"},
-                    "unit_amount": body.amount_cents,
-                },
-                "quantity": 1,
-            }],
-            success_url=body.success_url,
-            cancel_url=body.cancel_url,
-        )
-    else:
-        # Monthly subscription
-        session = stripe.checkout.Session.create(
-            mode="subscription",
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "product": settings.stripe_product_id,
-                    "unit_amount": body.amount_cents,
-                    "recurring": {"interval": "month"},
-                },
-                "quantity": 1,
-            }],
-            success_url=body.success_url,
-            cancel_url=body.cancel_url,
-        )
+    try:
+        if body.one_time:
+            # One-time payment
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {"name": "Support MadeForSeconds"},
+                        "unit_amount": body.amount_cents,
+                    },
+                    "quantity": 1,
+                }],
+                success_url=body.success_url,
+                cancel_url=body.cancel_url,
+            )
+        else:
+            # Monthly subscription
+            session = stripe.checkout.Session.create(
+                mode="subscription",
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "product": settings.stripe_product_id,
+                        "unit_amount": body.amount_cents,
+                        "recurring": {"interval": "month"},
+                    },
+                    "quantity": 1,
+                }],
+                success_url=body.success_url,
+                cancel_url=body.cancel_url,
+            )
+    except stripe.StripeError as e:
+        logger.error("Stripe checkout error: %s", e)
+        raise HTTPException(status_code=502, detail=str(e.user_message or "Payment service error"))
 
     return CheckoutResponse(checkout_url=session.url)
 
@@ -216,6 +220,9 @@ async def get_session_info(session_id: str):
         session = stripe.checkout.Session.retrieve(session_id)
     except stripe.InvalidRequestError:
         raise HTTPException(status_code=404, detail="Session not found")
+    except stripe.StripeError as e:
+        logger.error("Stripe session retrieval error: %s", e)
+        raise HTTPException(status_code=502, detail="Payment service error")
 
     if session.payment_status != "paid":
         raise HTTPException(status_code=400, detail="Payment not completed")
@@ -258,6 +265,9 @@ async def setup_profile(body: SetupProfileRequest):
         session = stripe.checkout.Session.retrieve(body.session_id)
     except stripe.InvalidRequestError:
         raise HTTPException(status_code=404, detail="Session not found")
+    except stripe.StripeError as e:
+        logger.error("Stripe session retrieval error: %s", e)
+        raise HTTPException(status_code=502, detail="Payment service error")
 
     if session.payment_status != "paid":
         raise HTTPException(status_code=400, detail="Payment not completed")
