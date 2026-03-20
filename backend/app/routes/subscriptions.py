@@ -110,7 +110,7 @@ def _validate_redirect_url(url: str) -> None:
 async def create_checkout(body: CheckoutRequest):
     """Create a Stripe Checkout session for a subscription or one-time donation."""
 
-    if not settings.stripe_secret_key or not settings.stripe_product_id:
+    if not settings.stripe_secret_key:
         raise HTTPException(status_code=503, detail="Subscriptions not configured")
 
     if body.amount_cents < 100 or body.amount_cents > 50000:
@@ -121,13 +121,17 @@ async def create_checkout(body: CheckoutRequest):
 
     try:
         if body.one_time:
-            # One-time payment
+            # One-time donation
             session = stripe.checkout.Session.create(
                 mode="payment",
+                submit_type="donate",
                 line_items=[{
                     "price_data": {
                         "currency": "usd",
-                        "product_data": {"name": "Support MadeForSeconds"},
+                        "product_data": {
+                            "name": "MadeForSeconds Donation",
+                            "tax_code": "txcd_00000000",
+                        },
                         "unit_amount": body.amount_cents,
                     },
                     "quantity": 1,
@@ -136,13 +140,18 @@ async def create_checkout(body: CheckoutRequest):
                 cancel_url=body.cancel_url,
             )
         else:
-            # Monthly subscription
+            # Monthly recurring donation
             session = stripe.checkout.Session.create(
                 mode="subscription",
+                # Note: submit_type='donate' is not supported by Stripe for subscriptions,
+                # so we use a clear product name instead.
                 line_items=[{
                     "price_data": {
                         "currency": "usd",
-                        "product": settings.stripe_product_id,
+                        "product_data": {
+                            "name": "MadeForSeconds Monthly Donation",
+                            "tax_code": "txcd_00000000",
+                        },
                         "unit_amount": body.amount_cents,
                         "recurring": {"interval": "month"},
                     },

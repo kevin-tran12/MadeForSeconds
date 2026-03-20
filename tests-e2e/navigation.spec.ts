@@ -12,8 +12,8 @@ test.describe('Navigation', () => {
     await page.getByRole('link', { name: 'About', exact: true }).first().click();
     await expect(page).toHaveURL(/\/about/);
     
-    // Support link is actually "Support us"
-    await page.getByRole('link', { name: /support us/i }).first().click();
+    // Donate link is actually "Donate"
+    await page.getByRole('link', { name: /donate/i }).first().click();
     await expect(page).toHaveURL(/\/support/);
   });
 

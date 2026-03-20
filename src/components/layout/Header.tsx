@@ -111,8 +111,9 @@ export function Header() {
             to="/support"
             className="rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
           >
-            Support us
+            Donate
           </Link>
+
           {isAdmin && (
             <Button variant="ghost" size="sm" onClick={logout}>
               Log out
@@ -165,7 +166,7 @@ export function Header() {
                 onClick={() => setMobileOpen(false)}
                 className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white text-center hover:bg-amber-600 transition-colors"
               >
-                Support us
+                Donate
               </Link>
               {isAdmin && (
                 <Button variant="ghost" size="sm" onClick={logout}>
