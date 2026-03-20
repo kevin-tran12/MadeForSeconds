@@ -68,7 +68,7 @@ variable "stripe_webhook_secret" {
 }
 
 variable "stripe_product_id" {
-  description = "Stripe Product ID for the support subscription (prod_...)"
+  description = "(Optional) Legacy Stripe Product ID for donations (prod_...)"
   type        = string
   default     = ""
 }

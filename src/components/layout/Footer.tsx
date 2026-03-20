@@ -52,13 +52,13 @@ export function Footer() {
               to="/support"
               className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
             >
-              Support us
+              Donate
             </Link>
             <Link
               to="/support/cancel"
               className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors"
             >
-              Cancel subscription
+              Cancel recurring donation
             </Link>
           </div>
         </div>

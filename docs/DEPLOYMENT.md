@@ -44,7 +44,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `mcp_api_key` | Bearer token for Claude Projects MCP integration |
 | `stripe_secret_key` | Stripe secret key (`sk_live_…`) |
 | `stripe_webhook_secret` | Stripe webhook signing secret (`whsec_…`) |
-| `stripe_product_id` | Stripe Product ID (`prod_…`) |
+| `stripe_product_id` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `subscriber_jwt_secret` | 32+ character secret for cancel link JWTs |
 | `resend_api_key` | Resend API key for cancellation emails |
 | `frontend_url` | Your production frontend URL (used in email links) |
@@ -82,12 +82,6 @@ Cloud Build needs permission to read your repository before the trigger works.
 
 ### Step 4 — Set up Stripe
 
-**Create a product and price:**
-1. Go to [Stripe Dashboard → Products](https://dashboard.stripe.com/products)
-2. Create a product (e.g. "MadeForSeconds Supporter")
-3. Add a recurring price (e.g. $3/month) — this is your subscription tier
-4. Copy the Product ID (`prod_…`) into `terraform.tfvars → stripe_product_id`
-
 **Configure the webhook:**
 1. Go to [Stripe Dashboard → Developers → Webhooks](https://dashboard.stripe.com/webhooks)
 2. Click **Add endpoint**
@@ -96,6 +90,9 @@ Cloud Build needs permission to read your repository before the trigger works.
    - `checkout.session.completed`
    - `customer.subscription.deleted`
 5. Copy the signing secret (`whsec_…`) into `terraform.tfvars → stripe_webhook_secret`
+
+**Tax Settings:**
+By default, the application marks all donations as nontaxable (`txcd_00000000`). No further action is needed unless you exceed regional tax thresholds.
 
 ### Step 5 — Build and push the first Docker image
 

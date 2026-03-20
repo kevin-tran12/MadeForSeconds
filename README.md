@@ -10,7 +10,7 @@ A personal recipe collection with integrated supporter subscriptions, expense tr
 | Backend | FastAPI (Python 3.12) |
 | Database | Cloud Firestore |
 | Auth | Google Identity Platform (Firebase) |
-| Payments | Stripe (subscriptions + one-time donations) |
+| Payments | Stripe (one-time and recurring donations) |
 | Email | Resend |
 | Recipe parsing | Anthropic Claude API |
 | Caching | Upstash Redis (optional, falls back to in-memory) |
@@ -42,8 +42,8 @@ All GCP services stay within the always-free tier for personal/low-traffic use.
 - Expense ledger (TOTP 2FA protected): create, edit, void expenses with receipt uploads
 - Expense reports: monthly/yearly summaries by category, CSV and PDF export
 
-### Subscriptions
-- Stripe Checkout for monthly subscriptions and one-time donations
+### Donations
+- Stripe Checkout for one-time and recurring donations
 - Post-payment profile setup (display name + note, subject to admin approval)
 - Self-service cancellation via signed email link
 
@@ -122,7 +122,8 @@ Edit `.env.local` and set at minimum:
 - `VITE_DEV_ADMIN_PASSWORD` — any string, used as your local admin password
 
 Optional (needed for full local feature testing):
-- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRODUCT_ID` — Stripe test keys
+- `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — Stripe test keys
+- `STRIPE_PRODUCT_ID` — (Optional) Legacy Stripe Product ID
 - `SUBSCRIBER_JWT_SECRET` — any 32+ character string
 - `ANTHROPIC_API_KEY` — for recipe parsing
 
@@ -244,11 +245,11 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/subscribe/checkout` | Create Stripe Checkout session |
+| POST | `/api/subscribe/checkout` | Create Stripe Checkout session (Donation) |
 | POST | `/api/subscribe/webhook` | Stripe webhook receiver |
-| GET | `/api/subscribe/session-info` | Info for completed checkout |
-| POST | `/api/subscribe/setup-profile` | Set display name/note after payment |
-| POST | `/api/subscribe/cancel-request` | Request cancellation (sends email) |
+| GET | `/api/subscribe/session-info` | Info for completed donation |
+| POST | `/api/subscribe/setup-profile` | Set display name/note after donation |
+| POST | `/api/subscribe/cancel-request` | Request recurring donation cancellation (sends email) |
 | POST | `/api/subscribe/cancel-confirm` | Confirm cancellation with token |
 
 ---
@@ -338,7 +339,7 @@ Or push to `main` — Cloud Build runs these steps automatically if the trigger 
 | `FIRESTORE_EMULATOR_HOST` | Set automatically by Docker Compose |
 | `STRIPE_SECRET_KEY` | Stripe test secret key (`sk_test_…`) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_…`) |
-| `STRIPE_PRODUCT_ID` | Stripe Product ID (`prod_…`) |
+| `STRIPE_PRODUCT_ID` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | 32+ char secret for cancel link JWTs |
 | `ANTHROPIC_API_KEY` | Claude API key (recipe parsing) |
 | `RESEND_API_KEY` | Resend API key (cancel emails) |

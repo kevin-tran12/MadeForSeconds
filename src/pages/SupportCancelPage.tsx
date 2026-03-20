@@ -28,7 +28,7 @@ export function SupportCancelPage() {
         setConfirmMessage(res.message)
       })
       .catch((err) => {
-        setConfirmError(err instanceof Error ? err.message : 'Failed to cancel subscription')
+        setConfirmError(err instanceof Error ? err.message : 'Failed to cancel donation')
       })
       .finally(() => setConfirming(false))
   }, [token])
@@ -53,17 +53,17 @@ export function SupportCancelPage() {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         {confirming ? (
-          <p className="text-gray-500">Canceling your subscription...</p>
+          <p className="text-gray-500">Canceling your donation...</p>
         ) : confirmed ? (
           <>
             <div className="mb-6 text-5xl">&#x1F44B;</div>
             <h1 className="font-display text-2xl font-bold text-gray-900 mb-3">
-              Subscription Canceled
+              Donation Canceled
             </h1>
             <p className="text-gray-600 mb-8">{confirmMessage}</p>
             <Link
               to="/recipes"
-              className="inline-flex rounded-xl bg-primary-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-700 transition-colors"
+              className="inline-flex rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors"
             >
               Browse recipes
             </Link>
@@ -77,7 +77,7 @@ export function SupportCancelPage() {
             <p className="text-gray-600 mb-4">{confirmError}</p>
             <Link
               to="/support/cancel"
-              className="text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors"
+              className="text-sm font-medium text-amber-600 hover:text-amber-700 transition-colors"
             >
               Try again
             </Link>
@@ -92,10 +92,10 @@ export function SupportCancelPage() {
     <div className="mx-auto max-w-lg px-4 py-16">
       <div className="text-center mb-10">
         <h1 className="font-display text-2xl font-bold text-gray-900 mb-3">
-          Cancel Subscription
+          Cancel Recurring Donation
         </h1>
         <p className="text-gray-600">
-          Enter the email address you used when subscribing. We'll send you a
+          Enter the email address you used when donating. We'll send you a
           confirmation link to complete the cancellation.
         </p>
       </div>
@@ -104,7 +104,7 @@ export function SupportCancelPage() {
         <div className="rounded-2xl border border-green-200 bg-green-50 p-6 text-center">
           <p className="text-sm text-green-700 mb-2 font-semibold">Check your email</p>
           <p className="text-sm text-green-600">
-            If an active subscription exists for this email, we've sent a confirmation link.
+            If an active recurring donation exists for this email, we've sent a confirmation link.
             The link expires in 1 hour.
           </p>
         </div>
@@ -117,7 +117,7 @@ export function SupportCancelPage() {
             placeholder="your@email.com"
             required
             autoFocus
-            className="mb-4 w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+            className="mb-4 w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
           />
 
           {error && (
@@ -135,7 +135,7 @@ export function SupportCancelPage() {
           </button>
 
           <p className="mt-4 text-center text-xs text-gray-400">
-            We'll email you a confirmation link. Your subscription stays active until you click it.
+            We'll email you a confirmation link. Your donation stays active until you click it.
           </p>
         </form>
       )}
@@ -143,8 +143,8 @@ export function SupportCancelPage() {
       <div className="mt-8 rounded-xl bg-gray-50 border border-gray-200 p-4">
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Other ways to cancel</p>
         <ul className="text-sm text-gray-600 space-y-1.5 list-disc list-inside">
-          <li>Log in to <a href="https://billing.stripe.com" target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">Stripe's billing portal</a> directly using your email</li>
-          <li>Contact your bank or card provider to stop the recurring charge</li>
+          <li>Log in to <a href="https://billing.stripe.com" target="_blank" rel="noopener noreferrer" className="text-amber-600 hover:underline">Stripe's billing portal</a> directly using your email</li>
+          <li>Contact your bank or card provider to stop the recurring gift</li>
         </ul>
       </div>
     </div>

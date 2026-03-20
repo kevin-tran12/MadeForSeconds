@@ -2,13 +2,13 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { subscriberApi } from '../lib/api'
 
-const PRESETS = [3, 5, 10, 25]
+const PRESETS = [1, 5, 10, 25]
 
 export function SupportPage() {
-  const [selected, setSelected] = useState(5)
+  const [selected, setSelected] = useState(1)
   const [custom, setCustom] = useState('')
   const [isCustom, setIsCustom] = useState(false)
-  const [oneTime, setOneTime] = useState(false)
+  const [oneTime, setOneTime] = useState(true)
   const [showConfirm, setShowConfirm] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -49,11 +49,11 @@ export function SupportPage() {
     <div className="mx-auto max-w-lg px-4 py-16">
       <div className="text-center mb-10">
         <h1 className="font-display text-3xl font-bold text-gray-900 mb-3">
-          Support MadeForSeconds
+          Donate to MadeForSeconds
         </h1>
         <p className="text-gray-600">
-          Love what we cook? Your support helps keep the recipes coming.
-          Choose an amount that works for you.
+          Everything on MadeForSeconds is free. If you love what we cook, your
+          voluntary donation helps keep the recipes coming.
         </p>
       </div>
 
@@ -142,19 +142,19 @@ export function SupportPage() {
           {loading
             ? 'Redirecting...'
             : oneTime
-              ? `Support — $${amount}`
-              : `Support — $${amount}/month`}
+              ? `Donate — $${amount}`
+              : `Donate — $${amount}/month`}
         </button>
 
         <p className="mt-4 text-center text-xs text-gray-500">
-          After payment, you can optionally set a display name and note to be included in the supporters shoutout on the <Link to="/about#supporters" className="underline hover:text-gray-700">About page</Link>.
+          After donating, you can optionally set a display name and note to be included in the supporters shoutout on the <Link to="/about#supporters" className="underline hover:text-gray-700">About page</Link>.
         </p>
         <p className="mt-2 text-center text-xs text-gray-400">
           {oneTime ? (
             'Powered by Stripe'
           ) : (
             <>
-              <Link to="/support/cancel" className="hover:text-gray-600 underline">Cancel anytime via email</Link>
+              <Link to="/support/cancel" className="hover:text-gray-600 underline">Cancel recurring donation</Link>
               {' · Powered by Stripe'}
             </>
           )}
@@ -163,11 +163,11 @@ export function SupportPage() {
 
       {/* Disclaimers */}
       <div className="mt-6 rounded-xl border border-gray-100 bg-gray-50 p-4 text-xs text-gray-400 space-y-1.5">
-        <p><span className="font-semibold text-gray-500">Payments</span> are processed securely by Stripe. MadeForSeconds does not store your card details.</p>
-        <p><span className="font-semibold text-gray-500">Monthly subscriptions</span> renew automatically each month until canceled. Cancellations take effect at the end of the current billing period — no pro-rated refunds.</p>
-        <p><span className="font-semibold text-gray-500">One-time payments</span> are final and non-refundable.</p>
+        <p><span className="font-semibold text-gray-500">Donations</span> are processed securely by Stripe. MadeForSeconds does not store your card details.</p>
+        <p><span className="font-semibold text-gray-500">Recurring donations</span> renew automatically each month until canceled. Cancellations take effect at the end of the current billing period.</p>
+        <p><span className="font-semibold text-gray-500">One-time donations</span> are final and non-refundable.</p>
         <p><span className="font-semibold text-gray-500">Shoutouts</span> are voluntary, revocable, and subject to review. We reserve the right to remove any display name or note at our discretion.</p>
-        <p><span className="font-semibold text-gray-500">No guarantees.</span> Supporting this site does not entitle you to any product, service, or content beyond what is freely available to all visitors.</p>
+        <p><span className="font-semibold text-gray-500">No goods or services.</span> Your donation is a voluntary gift. It does not entitle you to any product, service, or exclusive content.</p>
       </div>
 
       {/* Subscription confirmation modal */}
@@ -175,7 +175,7 @@ export function SupportPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
             <h2 className="font-display text-lg font-bold text-gray-900 mb-2">
-              Confirm monthly subscription
+              Confirm recurring donation
             </h2>
             <p className="text-sm text-gray-600 mb-4">
               You'll be charged <span className="font-semibold">${amount}/month</span> until
