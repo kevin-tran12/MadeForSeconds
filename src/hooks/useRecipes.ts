@@ -19,6 +19,7 @@ export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {
   const [nextCursor, setNextCursor] = useState<string | null>(null)
 
   const cursorRef = useRef<string | null>(null)
+  const loadingMoreRef = useRef(false)
 
   const isFiltering = !!(search || category)
 
@@ -59,12 +60,13 @@ export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {
 
     load()
     return () => { cancelled = true }
-  }, [search, category, searchBy, isFiltering])
+  }, [search, category, searchBy])
 
   // Load more (only in flat/filtered mode)
   const loadMore = useCallback(async () => {
-    if (!cursorRef.current || loadingMore) return
+    if (!cursorRef.current || loadingMoreRef.current) return
 
+    loadingMoreRef.current = true
     setLoadingMore(true)
     try {
       const data = await listPublicRecipes(search, category, searchBy, PAGE_SIZE, cursorRef.current)
@@ -74,9 +76,10 @@ export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load more recipes')
     } finally {
+      loadingMoreRef.current = false
       setLoadingMore(false)
     }
-  }, [search, category, searchBy, loadingMore])
+  }, [search, category, searchBy])
 
   return {
     recipes,

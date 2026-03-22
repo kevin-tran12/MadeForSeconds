@@ -96,6 +96,7 @@ async def list_recipes(
     return result
 
 
+# NOTE: must remain above /recipes/{slug} — otherwise "grouped" is caught as a slug value
 @router.get("/recipes/grouped", response_model=GroupedRecipes)
 async def list_recipes_grouped():
     cached = cache.get("recipes:grouped")
