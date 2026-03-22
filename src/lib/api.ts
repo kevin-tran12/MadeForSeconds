@@ -1,16 +1,28 @@
 import { apiFetch, apiUpload } from './api-client'
-import type { Recipe, RecipeFormData } from './types'
+import type { Recipe, RecipeFormData, PaginatedRecipes, GroupedRecipes } from './types'
 import type { Expense, ExpenseCreate, ExpenseSummary } from './types-expense'
 
 // ─── Public endpoints ───────────────────────────────────────────────────────
 
-export async function listPublicRecipes(search?: string, category?: string, searchBy?: string): Promise<Recipe[]> {
+export async function listPublicRecipes(
+  search?: string,
+  category?: string,
+  searchBy?: string,
+  limit?: number,
+  cursor?: string,
+): Promise<PaginatedRecipes> {
   const params = new URLSearchParams()
   if (search) params.set('search', search)
   if (category) params.set('category', category)
   if (searchBy && searchBy !== 'all') params.set('search_by', searchBy)
+  if (limit) params.set('limit', String(limit))
+  if (cursor) params.set('cursor', cursor)
   const qs = params.toString()
-  return apiFetch<Recipe[]>(`/api/recipes${qs ? `?${qs}` : ''}`)
+  return apiFetch<PaginatedRecipes>(`/api/recipes${qs ? `?${qs}` : ''}`)
+}
+
+export async function getGroupedRecipes(): Promise<GroupedRecipes> {
+  return apiFetch<GroupedRecipes>('/api/recipes/grouped')
 }
 
 export async function getRecipe(slug: string): Promise<Recipe> {

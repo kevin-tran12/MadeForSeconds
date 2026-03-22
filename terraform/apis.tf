@@ -14,6 +14,10 @@ locals {
     "cloudresourcemanager.googleapis.com",
     "serviceusage.googleapis.com",
     "logging.googleapis.com",
+    "billingbudgets.googleapis.com",
+    "cloudfunctions.googleapis.com",
+    "pubsub.googleapis.com",
+    "eventarc.googleapis.com",
   ]
 }
 

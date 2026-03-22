@@ -84,3 +84,18 @@ class Recipe(BaseModel):
     updated_at: datetime
     nutrition: list[NutritionEntry] = []
     components: list[RecipeComponent] | None = None
+
+
+class PaginatedRecipes(BaseModel):
+    recipes: list[Recipe]
+    next_cursor: str | None = None
+
+
+class CategoryGroup(BaseModel):
+    category: str
+    recipes: list[Recipe]
+
+
+class GroupedRecipes(BaseModel):
+    recent: list[Recipe]
+    groups: list[CategoryGroup]
