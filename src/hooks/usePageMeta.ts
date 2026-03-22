@@ -11,7 +11,7 @@ interface PageMeta {
 const DEFAULT_TITLE = 'MadeForSeconds'
 const DEFAULT_DESCRIPTION =
   'The kitchen\'s a mess. The food\'s good.'
-const SITE_URL = 'https://madeforseconds.com'
+const SITE_URL = 'https://madeforseconds.pages.dev'
 
 function setMeta(name: string, content: string, property = false) {
   const attr = property ? 'property' : 'name'

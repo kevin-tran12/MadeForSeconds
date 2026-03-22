@@ -43,3 +43,12 @@ body {
 .animate-dropdown-in {
   animation: dropdown-in 0.15s ease-out forwards;
 }
+
+/* Hide scrollbar for horizontal scroll rows */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

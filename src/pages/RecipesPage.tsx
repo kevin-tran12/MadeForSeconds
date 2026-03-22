@@ -5,6 +5,8 @@ import { useCategories } from '../hooks/useCategories'
 import { RecipeGrid } from '../components/recipe/RecipeGrid'
 import { RecipeSearch } from '../components/recipe/RecipeSearch'
 import { CategoryFilter } from '../components/recipe/CategoryFilter'
+import { RecipeSectionRow } from '../components/recipe/RecipeSectionRow'
+import { LoadingSpinner } from '../components/ui/LoadingSpinner'
 
 export function RecipesPage() {
   const [params, setParams] = useSearchParams()
@@ -47,7 +49,9 @@ export function RecipesPage() {
     setParams(next, { replace: true })
   }
 
-  const { recipes, loading, error } = useRecipes({ search, category: category || undefined, searchBy })
+  const {
+    recipes, grouped, loading, loadingMore, error, hasMore, loadMore, isFiltering,
+  } = useRecipes({ search, category: category || undefined, searchBy })
 
   const { categories } = useCategories()
 
@@ -75,16 +79,43 @@ export function RecipesPage() {
         <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p>
       )}
 
-      {/* Count — always reserve the row height to prevent layout shifts */}
-      <p className="mb-4 text-sm text-gray-500 transition-opacity" style={{ opacity: loading ? 0.4 : 1 }}>
-        {recipes.length} recipe{recipes.length !== 1 ? 's' : ''} found
-      </p>
+      {/* Content — grouped browse or flat filtered grid */}
+      {isFiltering ? (
+        <>
+          {/* Count — always reserve the row height to prevent layout shifts */}
+          <p className="mb-4 text-sm text-gray-500 transition-opacity" style={{ opacity: loading ? 0.4 : 1 }}>
+            {recipes.length}{hasMore ? '+' : ''} recipe{recipes.length !== 1 ? 's' : ''} found
+          </p>
+          <RecipeGrid
+            recipes={recipes}
+            loading={loading}
+            emptyMessage="Try a different search or category."
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={loadMore}
+          />
+        </>
+      ) : loading ? (
+        <LoadingSpinner size="lg" className="py-16" />
+      ) : grouped ? (
+        <div>
+          {/* Recently Added */}
+          <RecipeSectionRow
+            title="Recently Added"
+            recipes={grouped.recent}
+          />
 
-      <RecipeGrid
-        recipes={recipes}
-        loading={loading}
-        emptyMessage="Try a different search or category."
-      />
+          {/* Category sections */}
+          {grouped.groups.map((group) => (
+            <RecipeSectionRow
+              key={group.category}
+              title={group.category}
+              recipes={group.recipes}
+              category={group.category}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
