@@ -15,17 +15,17 @@ def test_list_recipes_empty(client, mock_db, mock_cache):
     
     response = client.get("/api/recipes")
     assert response.status_code == 200
-    assert response.json() == []
+    assert response.json() == {"recipes": [], "next_cursor": None}
 
 def test_list_recipes_with_data(client, mock_db, mock_cache, sample_recipe_doc):
     """Verifies that recipes are returned with all fields populated."""
     mock_cache.get.return_value = None
     doc = sample_recipe_doc(id="recipe-1", title="Carbonara", categories=["Italian"])
     mock_db.stream.return_value = iter([doc])
-    
+
     response = client.get("/api/recipes")
     assert response.status_code == 200
-    data = response.json()
+    data = response.json()["recipes"]
     assert len(data) == 1
     assert data[0]["title"] == "Carbonara"
     assert data[0]["id"] == "recipe-1"
@@ -36,10 +36,10 @@ def test_list_recipes_search_filter(client, mock_db, mock_cache, sample_recipe_d
     doc1 = sample_recipe_doc(id="1", title="Carbonara")
     doc2 = sample_recipe_doc(id="2", title="Pesto")
     mock_db.stream.return_value = iter([doc1, doc2])
-    
+
     response = client.get("/api/recipes?search=carbonara")
     assert response.status_code == 200
-    data = response.json()
+    data = response.json()["recipes"]
     assert len(data) == 1
     assert data[0]["title"] == "Carbonara"
 
@@ -48,30 +48,30 @@ def test_list_recipes_category_filter(client, mock_db, mock_cache, sample_recipe
     mock_cache.get.return_value = None
     doc = sample_recipe_doc(id="1", categories=["Italian"])
     mock_db.stream.return_value = iter([doc])
-    
+
     response = client.get("/api/recipes?category=Italian")
     assert response.status_code == 200
-    assert len(response.json()) == 1
+    assert len(response.json()["recipes"]) == 1
 
 def test_list_recipes_combined_filters(client, mock_db, mock_cache, sample_recipe_doc):
     """Verifies search + category together."""
     mock_cache.get.return_value = None
     doc = sample_recipe_doc(id="1", title="Carbonara", categories=["Italian"])
     mock_db.stream.return_value = iter([doc])
-    
+
     response = client.get("/api/recipes?category=Italian&search=carbonara")
     assert response.status_code == 200
-    assert len(response.json()) == 1
+    assert len(response.json()["recipes"]) == 1
 
 def test_list_recipes_search_by_ingredient(client, mock_db, mock_cache, sample_recipe_doc):
     """Verifies ?search_by=ingredient path."""
     mock_cache.get.return_value = None
     doc = sample_recipe_doc(id="1", title="Dish", ingredients=[{"item": "egg", "amount": "1", "unit": "", "group": ""}])
     mock_db.stream.return_value = iter([doc])
-    
+
     response = client.get("/api/recipes?search=egg&search_by=ingredient")
     assert response.status_code == 200
-    assert len(response.json()) == 1
+    assert len(response.json()["recipes"]) == 1
 
 def test_get_recipe_by_slug(client, mock_db, mock_cache, sample_recipe_doc):
     """Verifies getting a single recipe by slug."""
