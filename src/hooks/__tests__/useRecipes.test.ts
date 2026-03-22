@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useRecipes } from '../useRecipes'
-import { listPublicRecipes } from '../../lib/api'
+import { listPublicRecipes, getGroupedRecipes } from '../../lib/api'
 
 vi.mock('../../lib/api', () => ({
   listPublicRecipes: vi.fn(),
+  getGroupedRecipes: vi.fn(),
 }))
 
 describe('useRecipes', () => {
@@ -12,24 +13,24 @@ describe('useRecipes', () => {
     vi.clearAllMocks()
   })
 
-  it('fetches recipes on mount', async () => {
-    const mockRecipes = [{ id: '1', title: 'Carbonara' }]
-    ;(listPublicRecipes as any).mockResolvedValue(mockRecipes)
+  it('fetches grouped recipes on mount (no filters)', async () => {
+    const mockGrouped = { recent: [{ id: '1', title: 'Carbonara' }], groups: [] }
+    ;(getGroupedRecipes as any).mockResolvedValue(mockGrouped)
 
     const { result } = renderHook(() => useRecipes())
 
     expect(result.current.loading).toBe(true)
-    
+
     await waitFor(() => {
       expect(result.current.loading).toBe(false)
     })
 
-    expect(result.current.recipes).toEqual(mockRecipes)
-    expect(listPublicRecipes).toHaveBeenCalled()
+    expect(result.current.grouped).toEqual(mockGrouped)
+    expect(getGroupedRecipes).toHaveBeenCalled()
   })
 
   it('handles error state', async () => {
-    ;(listPublicRecipes as any).mockRejectedValue(new Error('Fetch failed'))
+    ;(getGroupedRecipes as any).mockRejectedValue(new Error('Fetch failed'))
 
     const { result } = renderHook(() => useRecipes())
 
@@ -41,8 +42,9 @@ describe('useRecipes', () => {
     expect(result.current.recipes).toEqual([])
   })
 
-  it('refetches when params change', async () => {
-    ;(listPublicRecipes as any).mockResolvedValue([])
+  it('refetches with listPublicRecipes when search param changes', async () => {
+    ;(getGroupedRecipes as any).mockResolvedValue({ recent: [], groups: [] })
+    ;(listPublicRecipes as any).mockResolvedValue({ recipes: [], next_cursor: null })
 
     const { rerender } = renderHook(
       (props: { search?: string }) => useRecipes(props),
@@ -51,6 +53,8 @@ describe('useRecipes', () => {
 
     rerender({ search: 'pasta' })
 
-    expect(listPublicRecipes).toHaveBeenCalledWith('pasta', undefined, undefined)
+    await waitFor(() => {
+      expect(listPublicRecipes).toHaveBeenCalledWith('pasta', undefined, undefined, 12)
+    })
   })
 })
