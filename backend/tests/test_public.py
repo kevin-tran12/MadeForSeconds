@@ -91,27 +91,28 @@ def test_get_recipe_not_found(client, mock_db, mock_cache):
     response = client.get("/api/recipes/ghost")
     assert response.status_code == 404
 
-def test_list_categories_empty(client, mock_db, mock_cache):
-    """Verifies that an empty category list is handled correctly."""
+def test_list_categories_no_config(client, mock_db, mock_cache):
+    """Verifies empty list when config/categories doc does not exist."""
     mock_cache.get.return_value = None
-    mock_db.stream.return_value = iter([])
-    
+    config_doc = MagicMock()
+    config_doc.exists = False
+    mock_db.get.return_value = config_doc
+
     response = client.get("/api/categories")
     assert response.status_code == 200
     assert response.json() == []
 
-def test_categories_returns_distinct(client, mock_db, mock_cache):
-    """Verifies categories are deduplicated and sorted."""
+def test_list_categories_returns_from_config(client, mock_db, mock_cache):
+    """Verifies categories are returned sorted from the config document."""
     mock_cache.get.return_value = None
-    doc1 = MagicMock()
-    doc1.to_dict.return_value = {"categories": ["Italian", "Pasta"]}
-    doc2 = MagicMock()
-    doc2.to_dict.return_value = {"categories": ["Italian", "Main"]}
-    mock_db.stream.return_value = iter([doc1, doc2])
-    
+    config_doc = MagicMock()
+    config_doc.exists = True
+    config_doc.to_dict.return_value = {"list": ["soup", "breakfast", "vegan"]}
+    mock_db.get.return_value = config_doc
+
     response = client.get("/api/categories")
     assert response.status_code == 200
-    assert response.json() == ["Italian", "Main", "Pasta"]
+    assert response.json() == ["breakfast", "soup", "vegan"]
 
 def test_sitemap_xml(client, mock_db, sample_recipe_doc):
     """Verifies sitemap returns valid XML."""

@@ -7,7 +7,7 @@ import { SupporterModerationPanel } from '../components/admin/SupporterModeratio
 import { Button } from '../components/ui/Button'
 import { ImportRecipeModal } from '../components/admin/ImportRecipeModal'
 
-type Tab = 'recipes' | 'supporters' | 'expenses'
+type Tab = 'recipes' | 'supporters' | 'expenses' | 'categories' | 'pages'
 
 export function AdminDashboardPage() {
   const navigate = useNavigate()
@@ -77,6 +77,12 @@ export function AdminDashboardPage() {
           <button className={tabClass('expenses')} onClick={() => setTab('expenses')}>
             Expenses
           </button>
+          <button className={tabClass('categories')} onClick={() => setTab('categories')}>
+            Categories
+          </button>
+          <button className={tabClass('pages')} onClick={() => setTab('pages')}>
+            Pages
+          </button>
         </div>
 
         {tab === 'recipes' && (
@@ -113,6 +119,26 @@ export function AdminDashboardPage() {
           <p className="text-sm text-gray-500 mb-4">Track purchases, upload receipts, and generate tax reports.</p>
           <Link to="/admin/expenses">
             <Button>Open Expense Ledger</Button>
+          </Link>
+        </div>
+      )}
+
+      {tab === 'categories' && (
+        <div className="rounded-xl border border-surface-darker bg-white p-8 text-center">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Category Manager</h3>
+          <p className="text-sm text-gray-500 mb-4">Add or remove the categories available to assign to recipes.</p>
+          <Link to="/admin/categories">
+            <Button>Manage Categories</Button>
+          </Link>
+        </div>
+      )}
+
+      {tab === 'pages' && (
+        <div className="rounded-xl border border-surface-darker bg-white p-8 text-center">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Page Content</h3>
+          <p className="text-sm text-gray-500 mb-4">Edit the text on the Home and About pages without deploying.</p>
+          <Link to="/admin/pages">
+            <Button>Edit Pages</Button>
           </Link>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useState, type FormEvent, useRef } from 'react'
 import type { Recipe, RecipeFormData, Difficulty, NutritionEntry, RecipeComponent } from '../../lib/types'
 import { adminApi } from '../../lib/api'
+import { useCategories } from '../../hooks/useCategories'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { IngredientEditor } from './IngredientEditor'
@@ -45,7 +46,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [servings, setServings] = useState(String(recipe?.servings ?? 2))
   const [published, setPublished] = useState(recipe?.published ?? false)
   const [categories, setCategories] = useState<string[]>(recipe?.categories ?? [])
-  const [categoryInput, setCategoryInput] = useState('')
+  const { categories: availableCategories } = useCategories()
   const [ingredients, setIngredients] = useState(
     recipe?.ingredients ?? [{ amount: '', unit: '', item: '' }]
   )
@@ -81,16 +82,10 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     }
   }
 
-  function addCategory() {
-    const trimmed = categoryInput.trim().toLowerCase()
-    if (trimmed && !categories.includes(trimmed)) {
-      setCategories([...categories, trimmed])
-    }
-    setCategoryInput('')
-  }
-
-  function removeCategory(cat: string) {
-    setCategories(categories.filter((c) => c !== cat))
+  function toggleCategory(cat: string) {
+    setCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    )
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -248,30 +243,28 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
       </Section>
 
       <Section title="Categories">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={categoryInput}
-            onChange={(e) => setCategoryInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCategory() } }}
-            placeholder="Type and press Enter"
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
-          />
-          <Button type="button" variant="secondary" size="sm" onClick={addCategory}>Add</Button>
-        </div>
-        {categories.length > 0 && (
+        {availableCategories.length > 0 ? (
           <div className="flex flex-wrap gap-2">
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => removeCategory(cat)}
-                className="inline-flex items-center gap-1 rounded-full bg-primary-100 px-3 py-1 text-sm font-medium text-primary-800 hover:bg-primary-200"
-              >
-                {cat} <span className="text-primary-500">×</span>
-              </button>
-            ))}
+            {availableCategories.map((cat) => {
+              const selected = categories.includes(cat)
+              return (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => toggleCategory(cat)}
+                  className={`rounded-full px-3 py-1 text-sm font-medium capitalize transition-colors ${
+                    selected
+                      ? 'bg-primary-600 text-white hover:bg-primary-700'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  {cat}
+                </button>
+              )
+            })}
           </div>
+        ) : (
+          <p className="text-sm text-gray-400">No categories configured yet. Add some in Admin → Categories.</p>
         )}
       </Section>
 

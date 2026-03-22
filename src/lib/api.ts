@@ -33,6 +33,10 @@ export async function getCategories(): Promise<string[]> {
   return apiFetch<string[]>('/api/categories')
 }
 
+export async function getPageContent(pageId: string): Promise<Record<string, string>> {
+  return apiFetch<Record<string, string>>(`/api/pages/${encodeURIComponent(pageId)}`)
+}
+
 // ─── Admin endpoints ────────────────────────────────────────────────────────
 
 export const adminApi = {
@@ -59,6 +63,18 @@ export const adminApi = {
     if (input.text) formData.append('text', input.text)
     return apiUpload('/api/admin/parse-recipe', formData)
   },
+
+  getCategories: (): Promise<string[]> =>
+    apiFetch('/api/admin/categories'),
+
+  updateCategories: (list: string[]): Promise<string[]> =>
+    apiFetch('/api/admin/categories', { method: 'PUT', body: JSON.stringify({ list }) }),
+
+  getPageContent: (pageId: string): Promise<Record<string, string>> =>
+    apiFetch(`/api/admin/pages/${encodeURIComponent(pageId)}`),
+
+  updatePageContent: (pageId: string, data: Record<string, string>): Promise<Record<string, string>> =>
+    apiFetch(`/api/admin/pages/${encodeURIComponent(pageId)}`, { method: 'PUT', body: JSON.stringify({ data }) }),
 }
 
 // ─── Admin supporter moderation ─────────────────────────────────────────────

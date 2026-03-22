@@ -99,3 +99,7 @@ class CategoryGroup(BaseModel):
 class GroupedRecipes(BaseModel):
     recent: list[Recipe]
     groups: list[CategoryGroup]
+
+
+class PageContent(BaseModel):
+    data: dict[str, str]
