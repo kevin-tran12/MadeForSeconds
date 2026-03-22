@@ -1,12 +1,19 @@
 import { Link } from 'react-router-dom'
 import { useRecipes } from '../hooks/useRecipes'
 import { useCategories } from '../hooks/useCategories'
+import { usePageContent } from '../hooks/usePageContent'
 import { RecipeGrid } from '../components/recipe/RecipeGrid'
 import { SearchWithSuggestions } from '../components/search/SearchWithSuggestions'
 
+const HOME_DEFAULTS = {
+  hero_title: 'Made for Seconds',
+  hero_subtitle: "The kitchen's a mess. The food's good.",
+}
+
 export function HomePage() {
-  const { recipes, loading, error } = useRecipes()
+  const { recipes, loading, error } = useRecipes({ forceFlat: true })
   const { categories } = useCategories()
+  const page = usePageContent('home', HOME_DEFAULTS)
   const featured = recipes.slice(0, 6)
 
   return (
@@ -21,10 +28,10 @@ export function HomePage() {
 
         <div className="relative mx-auto max-w-4xl px-4 text-center">
           <h1 className="font-display text-5xl font-bold tracking-tight text-white md:text-7xl">
-            Made for <span className="text-primary-300">Seconds</span>
+            {page.hero_title}
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/85 md:text-xl">
-            The kitchen's a mess. The food's good.
+            {page.hero_subtitle}
           </p>
 
           {/* Hero search */}

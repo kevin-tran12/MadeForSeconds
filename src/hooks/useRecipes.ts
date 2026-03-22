@@ -6,11 +6,13 @@ interface UseRecipesOptions {
   search?: string
   category?: string
   searchBy?: string
+  /** When true, skips grouped browse and fetches a flat list even without filters. */
+  forceFlat?: boolean
 }
 
 const PAGE_SIZE = 12
 
-export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {}) {
+export function useRecipes({ search, category, searchBy, forceFlat }: UseRecipesOptions = {}) {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [grouped, setGrouped] = useState<GroupedRecipes | null>(null)
   const [loading, setLoading] = useState(true)
@@ -22,6 +24,7 @@ export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {
   const loadingMoreRef = useRef(false)
 
   const isFiltering = !!(search || category)
+  const useFlatMode = isFiltering || !!forceFlat
 
   // Load initial data — grouped browse or filtered flat list
   useEffect(() => {
@@ -34,10 +37,11 @@ export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {
       cursorRef.current = null
 
       try {
-        if (isFiltering) {
-          // Flat paginated mode
+        if (useFlatMode) {
+          // Flat paginated mode — use larger limit when forced (no-category browse)
+          const limit = forceFlat && !isFiltering ? 30 : PAGE_SIZE
           setGrouped(null)
-          const data = await listPublicRecipes(search, category, searchBy, PAGE_SIZE)
+          const data = await listPublicRecipes(search, category, searchBy, limit)
           if (!cancelled) {
             setRecipes(data.recipes)
             setNextCursor(data.next_cursor)
@@ -60,7 +64,8 @@ export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {
 
     load()
     return () => { cancelled = true }
-  }, [search, category, searchBy])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, category, searchBy, useFlatMode])
 
   // Load more (only in flat/filtered mode)
   const loadMore = useCallback(async () => {
@@ -90,5 +95,6 @@ export function useRecipes({ search, category, searchBy }: UseRecipesOptions = {
     hasMore: !!nextCursor,
     loadMore,
     isFiltering,
+    isFlat: useFlatMode,
   }
 }

@@ -365,6 +365,53 @@ EXPENSES = [
 ]
 
 
+CATEGORIES = [
+    "breakfast",
+    "dessert",
+    "italian",
+    "japanese",
+    "make-ahead",
+    "noodles",
+    "pasta",
+    "pork",
+    "quick",
+    "seafood",
+    "snack",
+    "soup",
+    "vegan",
+    "vegetarian",
+]
+
+HOME_PAGE = {
+    "hero_title": "Made for Seconds",
+    "hero_subtitle": "The kitchen's a mess. The food's good.",
+}
+
+ABOUT_PAGE = {
+    "heading": "About MadeForSeconds",
+    "body": (
+        "MadeForSeconds is where I keep and share the recipes I cook.\n\n"
+        "It started as a place to organize my own recipes so they didn't get lost in random notes, "
+        "screenshots, and half-written documents. Eventually it turned into this site.\n\n"
+        "My background is a bit all over the place. I spent most of my early working years in the food "
+        "and service industry starting at 16, mostly serving and bartending, with some time around kitchens "
+        "as well. Restaurants teach you a lot about food, but they also teach speed, repetition, and how to "
+        "handle chaos while people are hungry.\n\n"
+        "In my mid-20s I moved into software engineering and spent the next four years building applications. "
+        "More recently I've been moving deeper into cloud infrastructure.\n\n"
+        "This project sits somewhere in the overlap of those worlds. It's a place for recipes I want to keep "
+        "cooking and also a small technical playground where I can build something real.\n\n"
+        "The food here doesn't stick to one cuisine or style. Some recipes are quick things to make on a "
+        "random night. Others take time. If it tastes good and I want to make it again, it gets written down here.\n\n"
+        "No long life stories before the recipe. Just ingredients, steps, and food that works."
+    ),
+    "callout_title": "Why \"MadeForSeconds\"?",
+    "callout_body": "Because the best compliment a dish can get is someone going back for another plate.",
+    "follow_heading": "Follow the Journey",
+    "thank_you_message": "Thank you to everyone who has supported this site. You help keep it going.",
+}
+
+
 def main():
     force = "--force" in sys.argv
     db = Client(project="madefor-seconds-local")
@@ -480,6 +527,23 @@ def main():
             print(f"  Created expense: {expense['vendor']} — ${expense['raw_total'] / 100:.2f}{status_label}")
 
         print(f"Seeded {len(EXPENSES)} expenses.")
+
+    # Seed config/categories (idempotent — only writes if missing or --force)
+    cat_doc = db.collection("config").document("categories").get()
+    if not cat_doc.exists or force:
+        db.collection("config").document("categories").set({"list": CATEGORIES})
+        print(f"Seeded {len(CATEGORIES)} categories into config/categories.")
+    else:
+        print("config/categories already exists, skipping.")
+
+    # Seed page content (idempotent)
+    for page_id, content in [("home", HOME_PAGE), ("about", ABOUT_PAGE)]:
+        page_doc = db.collection("pages").document(page_id).get()
+        if not page_doc.exists or force:
+            db.collection("pages").document(page_id).set(content)
+            print(f"Seeded pages/{page_id}.")
+        else:
+            print(f"pages/{page_id} already exists, skipping.")
 
 
 if __name__ == "__main__":

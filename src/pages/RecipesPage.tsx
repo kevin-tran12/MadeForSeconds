@@ -49,11 +49,11 @@ export function RecipesPage() {
     setParams(next, { replace: true })
   }
 
-  const {
-    recipes, grouped, loading, loadingMore, error, hasMore, loadMore, isFiltering,
-  } = useRecipes({ search, category: category || undefined, searchBy })
-
   const { categories } = useCategories()
+
+  const {
+    recipes, grouped, loading, loadingMore, error, hasMore, loadMore, isFiltering, isFlat,
+  } = useRecipes({ search, category: category || undefined, searchBy, forceFlat: categories.length === 0 })
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
@@ -80,16 +80,16 @@ export function RecipesPage() {
       )}
 
       {/* Content — grouped browse or flat filtered grid */}
-      {isFiltering ? (
+      {isFlat ? (
         <>
-          {/* Count — always reserve the row height to prevent layout shifts */}
+          {/* Count row — only shown when actively filtering; keeps height reserved to avoid layout shifts */}
           <p className="mb-4 text-sm text-gray-500 transition-opacity" style={{ opacity: loading ? 0.4 : 1 }}>
-            {recipes.length}{hasMore ? '+' : ''} recipe{recipes.length !== 1 ? 's' : ''} found
+            {isFiltering ? <>{recipes.length}{hasMore ? '+' : ''} recipe{recipes.length !== 1 ? 's' : ''} found</> : <>&nbsp;</>}
           </p>
           <RecipeGrid
             recipes={recipes}
             loading={loading}
-            emptyMessage="Try a different search or category."
+            emptyMessage={isFiltering ? "Try a different search or category." : "No recipes published yet."}
             hasMore={hasMore}
             loadingMore={loadingMore}
             onLoadMore={loadMore}

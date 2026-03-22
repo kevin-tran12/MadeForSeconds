@@ -165,22 +165,23 @@ async def list_categories():
         return cached
 
     db = get_db()
-    # Only fetch categories field and limit to 100 most recent recipes
-    # This is a heuristic to keep memory low while catching most categories
-    docs = (
-        db.collection("recipes")
-        .where(filter=FieldFilter("published", "==", True))
-        .order_by("created_at", direction="DESCENDING")
-        .limit(100)
-        .select(["categories"])
-        .stream()
-    )
-    all_cats: set[str] = set()
-    for doc in docs:
-        cats = doc.to_dict().get("categories", [])
-        all_cats.update(cats)
-    result = sorted(all_cats)
+    doc = db.collection("config").document("categories").get()
+    result = sorted(doc.to_dict().get("list", [])) if doc.exists else []
     cache.set("categories", result)
+    return result
+
+
+@router.get("/pages/{page_id}")
+async def get_page_content(page_id: str):
+    cache_key = f"page:{page_id}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    db = get_db()
+    doc = db.collection("pages").document(page_id).get()
+    result = doc.to_dict() if doc.exists else {}
+    cache.set(cache_key, result)
     return result
 
 
