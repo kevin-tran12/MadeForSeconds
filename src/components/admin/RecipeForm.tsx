@@ -8,6 +8,10 @@ import { IngredientEditor } from './IngredientEditor'
 import { InstructionEditor } from './InstructionEditor'
 import { NutritionEditor } from './NutritionEditor'
 import { ComponentEditor } from './ComponentEditor'
+import { RecipePreviewPanel } from './RecipePreviewPanel'
+
+const PREVIEW_MODE_KEY = 'recipe-preview-mode'
+const PREVIEW_DRAFT_KEY = 'recipe-preview-draft'
 
 interface RecipeFormProps {
   recipe?: Recipe
@@ -81,6 +85,54 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Preview state
+  const [previewMode, setPreviewMode] = useState<'tab' | 'panel'>(
+    () => (localStorage.getItem(PREVIEW_MODE_KEY) as 'tab' | 'panel') ?? 'tab'
+  )
+  const [showPreviewPanel, setShowPreviewPanel] = useState(false)
+  const [panelRecipe, setPanelRecipe] = useState<Recipe | null>(null)
+
+  function buildCurrentRecipe(): Recipe {
+    return {
+      id: recipe?.id ?? 'preview-draft',
+      slug: recipe?.slug ?? 'preview-draft',
+      created_at: recipe?.created_at ?? new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      title: title.trim() || 'Untitled Recipe',
+      description: description.trim(),
+      image_url: imageUrl.trim() || null,
+      difficulty,
+      prep_time_minutes: parseInt(prepTime) || 0,
+      cook_time_minutes: parseInt(cookTime) || 0,
+      servings: parseInt(servings) || 1,
+      published,
+      categories,
+      ingredients: multiComponent ? [] : ingredients,
+      instructions: multiComponent ? [] : instructions,
+      nutrition,
+      components: multiComponent ? components : null,
+      receipt_urls: receiptUrls,
+    }
+  }
+
+  function togglePreviewMode() {
+    const next = previewMode === 'tab' ? 'panel' : 'tab'
+    setPreviewMode(next)
+    localStorage.setItem(PREVIEW_MODE_KEY, next)
+  }
+
+  function handlePreview() {
+    const current = buildCurrentRecipe()
+    if (previewMode === 'tab') {
+      sessionStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(current))
+      const previewId = recipe?.id ?? 'draft'
+      window.open(`/admin/preview/${previewId}`, '_blank')?.focus()
+    } else {
+      setPanelRecipe(current)
+      setShowPreviewPanel(true)
+    }
+  }
 
   async function handleReceiptUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -394,11 +446,67 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         )}
       </Section>
 
-      <div className="flex gap-3">
+      <div className="flex items-center gap-3">
+        {/* Preview button group — main action + mode toggle */}
+        <div className="flex overflow-hidden rounded-lg border border-gray-300">
+          <button
+            type="button"
+            onClick={handlePreview}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            {previewMode === 'tab' ? (
+              <>
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7.5 1H12v4.5M12 1L6.5 6.5M5.5 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8.5" />
+                </svg>
+                Preview
+              </>
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="1" y="1" width="11" height="11" rx="1.5" />
+                  <path d="M7 1v11" />
+                </svg>
+                Preview
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={togglePreviewMode}
+            title={previewMode === 'tab' ? 'Switch to side panel' : 'Switch to new tab'}
+            className="border-l border-gray-300 px-2 py-2 text-xs text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
+          >
+            {previewMode === 'tab' ? (
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="1" y="1" width="11" height="11" rx="1.5" />
+                <path d="M7 1v11" />
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7.5 1H12v4.5M12 1L6.5 6.5M5.5 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8.5" />
+              </svg>
+            )}
+          </button>
+        </div>
+
         <Button type="submit" loading={isSubmitting} size="lg">
           {recipe ? 'Save changes' : 'Create recipe'}
         </Button>
       </div>
+
+      {panelRecipe && (
+        <RecipePreviewPanel
+          recipe={panelRecipe}
+          isOpen={showPreviewPanel}
+          onClose={() => setShowPreviewPanel(false)}
+          onOpenInTab={() => {
+            sessionStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(panelRecipe))
+            const previewId = recipe?.id ?? 'draft'
+            window.open(`/admin/preview/${previewId}`, '_blank')?.focus()
+          }}
+        />
+      )}
     </form>
   )
 }

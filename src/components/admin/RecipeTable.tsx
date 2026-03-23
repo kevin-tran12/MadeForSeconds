@@ -14,9 +14,10 @@ interface RecipeTableProps {
   onEdit: (id: string) => void
   onDelete: (id: string) => Promise<void>
   onTogglePublish: (recipe: Recipe) => Promise<void>
+  onPreview: (recipe: Recipe) => void
 }
 
-export function RecipeTable({ recipes, loading, onEdit, onDelete, onTogglePublish }: RecipeTableProps) {
+export function RecipeTable({ recipes, loading, onEdit, onDelete, onTogglePublish, onPreview }: RecipeTableProps) {
   if (loading) return <LoadingSpinner size="lg" className="py-16" />
   if (recipes.length === 0) {
     return <EmptyState title="No recipes yet" message="Create your first recipe to get started." />
@@ -73,6 +74,9 @@ export function RecipeTable({ recipes, loading, onEdit, onDelete, onTogglePublis
                 <div className="flex items-center justify-end gap-2">
                   <Button variant="ghost" size="sm" onClick={() => onTogglePublish(recipe)}>
                     {recipe.published ? 'Unpublish' : 'Publish'}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => onPreview(recipe)}>
+                    Preview
                   </Button>
                   <Button variant="secondary" size="sm" onClick={() => onEdit(recipe.id)}>
                     Edit
