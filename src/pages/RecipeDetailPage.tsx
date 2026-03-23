@@ -10,7 +10,7 @@ function RecipeDetailMeta({ recipe }: { recipe: { title: string; description: st
     title: recipe.title,
     description: recipe.description || undefined,
     image: recipe.image_url,
-    url: `https://madeforseconds.com/recipes/${recipe.slug}`,
+    url: `https://madeforseconds.pages.dev/recipes/${recipe.slug}`,
     type: 'article',
   })
   return null

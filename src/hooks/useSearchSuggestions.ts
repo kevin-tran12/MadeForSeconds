@@ -9,9 +9,9 @@ let fetchPromise: Promise<Recipe[]> | null = null
 function getAllRecipes(): Promise<Recipe[]> {
   if (cachedRecipes) return Promise.resolve(cachedRecipes)
   if (!fetchPromise) {
-    fetchPromise = listPublicRecipes().then((recipes) => {
-      cachedRecipes = recipes
-      return recipes
+    fetchPromise = listPublicRecipes(undefined, undefined, undefined, 50).then((data) => {
+      cachedRecipes = data.recipes
+      return data.recipes
     })
   }
   return fetchPromise

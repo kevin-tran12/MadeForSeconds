@@ -7,9 +7,19 @@ interface RecipeGridProps {
   recipes: Recipe[]
   loading: boolean
   emptyMessage?: string
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: () => void
 }
 
-export function RecipeGrid({ recipes, loading, emptyMessage = 'No recipes found.' }: RecipeGridProps) {
+export function RecipeGrid({
+  recipes,
+  loading,
+  emptyMessage = 'No recipes found.',
+  hasMore,
+  loadingMore,
+  onLoadMore,
+}: RecipeGridProps) {
   if (loading) {
     return <LoadingSpinner size="lg" className="py-16" />
   }
@@ -19,10 +29,31 @@ export function RecipeGrid({ recipes, loading, emptyMessage = 'No recipes found.
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-      {recipes.map((recipe) => (
-        <RecipeCard key={recipe.id} recipe={recipe} />
-      ))}
+    <div>
+      <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {recipes.map((recipe) => (
+          <RecipeCard key={recipe.id} recipe={recipe} />
+        ))}
+      </div>
+
+      {hasMore && onLoadMore && (
+        <div className="mt-8 flex justify-center">
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="inline-flex items-center gap-2 rounded-xl border border-surface-darker bg-white px-6 py-3 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:pointer-events-none disabled:opacity-50"
+          >
+            {loadingMore ? (
+              <>
+                <LoadingSpinner size="sm" />
+                Loading...
+              </>
+            ) : (
+              'Load More'
+            )}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

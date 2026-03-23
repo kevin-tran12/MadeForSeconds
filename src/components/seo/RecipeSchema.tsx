@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import type { Recipe } from '../../lib/types'
 
-const SITE_URL = 'https://madeforseconds.com'
+const SITE_URL = 'https://madeforseconds.pages.dev'
 
 function isoDuration(minutes: number): string {
   const h = Math.floor(minutes / 60)

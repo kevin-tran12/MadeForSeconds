@@ -10,7 +10,7 @@ from ..auth import require_admin
 from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
-from ..models import Recipe, RecipeCreate, RecipeUpdate
+from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
@@ -30,6 +30,21 @@ def _generate_slug(title: str) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", title.lower()))
 
 
+def _validate_categories(db, categories: list[str]) -> None:
+    """Raises 422 if any submitted category is not in the allowed list."""
+    if not categories:
+        return
+    doc = db.collection("config").document("categories").get()
+    if not doc.exists:
+        return  # no list configured yet — allow anything
+    allowed: set[str] = set(doc.to_dict().get("list", []))
+    if not allowed:
+        return
+    invalid = [c for c in categories if c not in allowed]
+    if invalid:
+        raise HTTPException(status_code=422, detail=f"Unknown categories: {invalid}")
+
+
 @router.get("/recipes", response_model=list[Recipe])
 async def admin_list_recipes():
     db = get_db()
@@ -40,6 +55,7 @@ async def admin_list_recipes():
 @router.post("/recipes", response_model=Recipe, status_code=201)
 async def admin_create_recipe(body: RecipeCreate):
     db = get_db()
+    _validate_categories(db, body.categories)
     now = datetime.now(timezone.utc)
     data = body.model_dump()
     data["slug"] = _generate_slug(body.title)
@@ -57,6 +73,8 @@ async def admin_create_recipe(body: RecipeCreate):
 @router.put("/recipes/{recipe_id}", response_model=Recipe)
 async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
     db = get_db()
+    if body.categories is not None:
+        _validate_categories(db, body.categories)
     doc_ref = db.collection("recipes").document(recipe_id)
     doc = doc_ref.get()
 
@@ -110,6 +128,41 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
         return {"url": url}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
+
+
+# ── Categories ────────────────────────────────────────────────────────────────
+
+@router.get("/categories", response_model=list[str])
+async def admin_get_categories():
+    db = get_db()
+    doc = db.collection("config").document("categories").get()
+    return sorted(doc.to_dict().get("list", [])) if doc.exists else []
+
+
+@router.put("/categories", response_model=list[str])
+async def admin_update_categories(body: dict):
+    new_list: list[str] = body.get("list", [])
+    db = get_db()
+    db.collection("config").document("categories").set({"list": new_list})
+    cache.clear()
+    return sorted(new_list)
+
+
+# ── Page content ───────────────────────────────────────────────────────────────
+
+@router.get("/pages/{page_id}")
+async def admin_get_page(page_id: str):
+    db = get_db()
+    doc = db.collection("pages").document(page_id).get()
+    return doc.to_dict() if doc.exists else {}
+
+
+@router.put("/pages/{page_id}")
+async def admin_update_page(page_id: str, body: PageContent):
+    db = get_db()
+    db.collection("pages").document(page_id).set(body.data)
+    cache.clear()
+    return body.data
 
 
 # ── Supporter note moderation ─────────────────────────────────────────────────

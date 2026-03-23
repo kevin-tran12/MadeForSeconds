@@ -1,17 +1,19 @@
 import re
+from collections import defaultdict
+from datetime import datetime, timezone
 from email.utils import formatdate
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 from ..cache import cache
 from ..firestore import get_db
-from ..models import Recipe
+from ..models import CategoryGroup, GroupedRecipes, PaginatedRecipes, Recipe
 
 router = APIRouter(prefix="/api")
 
-SITE_URL = "https://madeforseconds.com"
+SITE_URL = "https://madeforseconds.pages.dev"
 
 
 def _doc_to_recipe(doc) -> Recipe:
@@ -28,13 +30,15 @@ def _doc_to_recipe(doc) -> Recipe:
     return Recipe(**data)
 
 
-@router.get("/recipes", response_model=list[Recipe])
+@router.get("/recipes", response_model=PaginatedRecipes)
 async def list_recipes(
     search: str | None = None,
     category: str | None = None,
     search_by: str = "all",
+    limit: int = Query(default=12, ge=1, le=50),
+    cursor: str | None = None,
 ):
-    cache_key = f"recipes:{search or ''}:{category or ''}:{search_by}"
+    cache_key = f"recipes:{search or ''}:{category or ''}:{search_by}:{limit}:{cursor or ''}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -45,14 +49,24 @@ async def list_recipes(
     if category:
         query = query.where(filter=FieldFilter("categories", "array_contains", category))
 
-    # Order and limit to avoid massive in-memory processing
-    query = query.order_by("created_at", direction="DESCENDING").limit(50)
-    docs = query.stream()
+    query = query.order_by("created_at", direction="DESCENDING")
 
+    # Apply cursor for pagination
+    if cursor:
+        cursor_dt = datetime.fromisoformat(cursor).replace(tzinfo=timezone.utc)
+        query = query.start_after({"created_at": cursor_dt})
+
+    if search:
+        # When searching, fetch a larger batch since we filter in Python
+        fetch_limit = min(limit * 5, 200)
+    else:
+        fetch_limit = limit + 1  # +1 to detect if there are more pages
+
+    query = query.limit(fetch_limit)
+    docs = list(query.stream())
     recipes = [_doc_to_recipe(doc) for doc in docs]
 
     # Firestore doesn't support ILIKE, so filter in Python.
-    # search_by: "all" | "name" | "ingredient"
     if search:
         pattern = re.compile(re.escape(search), re.IGNORECASE)
 
@@ -65,14 +79,60 @@ async def list_recipes(
                     return True
             return False
 
-        recipes = [r for r in recipes if matches(r)]
+        filtered = [r for r in recipes if matches(r)]
+        has_more = len(recipes) == fetch_limit or len(filtered) > limit
+        recipes = filtered[:limit]
+    else:
+        has_more = len(recipes) > limit
+        recipes = recipes[:limit]
+
+    next_cursor = recipes[-1].created_at.isoformat() if recipes and has_more else None
+    result = PaginatedRecipes(recipes=recipes, next_cursor=next_cursor)
 
     # Skip caching only when the unfiltered list is empty — that indicates
     # Firestore wasn't ready at startup, not a legitimate "no results" case.
-    # Filtered searches that genuinely return nothing are safe to cache.
     if recipes or search or category:
-        cache.set(cache_key, recipes)
-    return recipes
+        cache.set(cache_key, result)
+    return result
+
+
+# NOTE: must remain above /recipes/{slug} — otherwise "grouped" is caught as a slug value
+@router.get("/recipes/grouped", response_model=GroupedRecipes)
+async def list_recipes_grouped():
+    cached = cache.get("recipes:grouped")
+    if cached is not None:
+        return cached
+
+    db = get_db()
+    query = (
+        db.collection("recipes")
+        .where(filter=FieldFilter("published", "==", True))
+        .order_by("created_at", direction="DESCENDING")
+        .limit(50)
+    )
+    docs = query.stream()
+    all_recipes = [_doc_to_recipe(doc) for doc in docs]
+
+    # Recently added — newest 6
+    recent = all_recipes[:6]
+
+    # Group by category
+    by_category: dict[str, list[Recipe]] = defaultdict(list)
+    for recipe in all_recipes:
+        for cat in recipe.categories:
+            if len(by_category[cat]) < 8:
+                by_category[cat].append(recipe)
+
+    groups = [
+        CategoryGroup(category=cat, recipes=recipes)
+        for cat, recipes in sorted(by_category.items())
+    ]
+
+    result = GroupedRecipes(recent=recent, groups=groups)
+
+    if all_recipes:
+        cache.set("recipes:grouped", result)
+    return result
 
 
 @router.get("/recipes/{slug}", response_model=Recipe)
@@ -105,22 +165,23 @@ async def list_categories():
         return cached
 
     db = get_db()
-    # Only fetch categories field and limit to 100 most recent recipes
-    # This is a heuristic to keep memory low while catching most categories
-    docs = (
-        db.collection("recipes")
-        .where(filter=FieldFilter("published", "==", True))
-        .order_by("created_at", direction="DESCENDING")
-        .limit(100)
-        .select(["categories"])
-        .stream()
-    )
-    all_cats: set[str] = set()
-    for doc in docs:
-        cats = doc.to_dict().get("categories", [])
-        all_cats.update(cats)
-    result = sorted(all_cats)
+    doc = db.collection("config").document("categories").get()
+    result = sorted(doc.to_dict().get("list", [])) if doc.exists else []
     cache.set("categories", result)
+    return result
+
+
+@router.get("/pages/{page_id}")
+async def get_page_content(page_id: str):
+    cache_key = f"page:{page_id}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    db = get_db()
+    doc = db.collection("pages").document(page_id).get()
+    result = doc.to_dict() if doc.exists else {}
+    cache.set(cache_key, result)
     return result
 
 

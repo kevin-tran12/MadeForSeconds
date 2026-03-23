@@ -52,3 +52,18 @@ export interface Recipe {
 
 // Omit auto-generated fields when submitting from the form
 export type RecipeFormData = Omit<Recipe, 'id' | 'slug' | 'created_at' | 'updated_at'>
+
+export interface PaginatedRecipes {
+  recipes: Recipe[]
+  next_cursor: string | null
+}
+
+export interface CategoryGroup {
+  category: string
+  recipes: Recipe[]
+}
+
+export interface GroupedRecipes {
+  recent: Recipe[]
+  groups: CategoryGroup[]
+}

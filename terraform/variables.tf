@@ -88,7 +88,25 @@ variable "resend_api_key" {
 }
 
 variable "frontend_url" {
-  description = "Frontend URL for building links in emails (e.g., https://madeforseconds.com)"
+  description = "Frontend URL for building links in emails (e.g., https://madeforseconds.pages.dev)"
   type        = string
-  default     = "https://madeforseconds.com"
+  default     = "https://madeforseconds.pages.dev"
+}
+
+# ─── Cost Protection ────────────────────────────────────────────────────────
+
+variable "billing_account" {
+  description = "GCP billing account ID (format: XXXXXX-XXXXXX-XXXXXX)"
+  type        = string
+}
+
+variable "monthly_budget_amount" {
+  description = "Monthly budget cap in USD — alerts and auto-kill trigger at this amount"
+  type        = number
+  default     = 1
+}
+
+variable "alert_email" {
+  description = "Email address for budget alert notifications"
+  type        = string
 }
