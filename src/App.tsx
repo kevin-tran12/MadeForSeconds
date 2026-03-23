@@ -8,6 +8,9 @@ import { RecipesPage } from './pages/RecipesPage'
 import { RecipeDetailPage } from './pages/RecipeDetailPage'
 import { AdminDashboardPage } from './pages/AdminDashboardPage'
 import { AdminRecipeEditPage } from './pages/AdminRecipeEditPage'
+import { AdminCategoriesPage } from './pages/AdminCategoriesPage'
+import { AdminPagesPage } from './pages/AdminPagesPage'
+import { AdminPageEditPage } from './pages/AdminPageEditPage'
 import { AdminExpensesPage } from './pages/AdminExpensesPage'
 import { AdminExpenseEditPage } from './pages/AdminExpenseEditPage'
 import { AdminReportsPage } from './pages/AdminReportsPage'
@@ -37,6 +40,9 @@ const router = createBrowserRouter([
           { index: true, element: <AdminDashboardPage /> },
           { path: 'new', element: <AdminRecipeEditPage /> },
           { path: 'edit/:id', element: <AdminRecipeEditPage /> },
+          { path: 'categories', element: <AdminCategoriesPage /> },
+          { path: 'pages', element: <AdminPagesPage /> },
+          { path: 'pages/:pageId', element: <AdminPageEditPage /> },
           {
             element: <TotpGate />,
             children: [
