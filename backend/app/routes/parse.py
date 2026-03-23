@@ -138,7 +138,7 @@ def _build_tool_with_allowed_categories(allowed: list[str]) -> dict:
         tool["input_schema"]["properties"]["categories"] = {
             "type": "array",
             "items": {"type": "string", "enum": allowed},
-            "description": f"Select from these categories: {', '.join(allowed)}",
+            "description": f"Select from these categories: {', '.join(allowed)}",  # nosec B608 — not SQL, this is a tool description string
         }
     return tool
 
