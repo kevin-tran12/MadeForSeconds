@@ -6,6 +6,7 @@ import { RecipeTable } from '../components/admin/RecipeTable'
 import { SupporterModerationPanel } from '../components/admin/SupporterModerationPanel'
 import { Button } from '../components/ui/Button'
 import { ImportRecipeModal } from '../components/admin/ImportRecipeModal'
+import { RecipePreviewPanel } from '../components/admin/RecipePreviewPanel'
 
 type Tab = 'recipes' | 'supporters' | 'expenses' | 'categories' | 'pages'
 
@@ -17,6 +18,8 @@ export function AdminDashboardPage() {
   const [error, setError] = useState<string | null>(null)
   const [showImport, setShowImport] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
+  const [previewRecipe, setPreviewRecipe] = useState<Recipe | null>(null)
+  const [showPreviewPanel, setShowPreviewPanel] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -45,6 +48,21 @@ export function AdminDashboardPage() {
   async function handleTogglePublish(recipe: Recipe) {
     const updated = await adminApi.updateRecipe(recipe.id, { published: !recipe.published })
     setRecipes((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+  }
+
+  function handlePreview(recipe: Recipe) {
+    const mode = (localStorage.getItem('recipe-preview-mode') as 'tab' | 'panel') ?? 'tab'
+    if (mode === 'tab') {
+      window.open(`/admin/preview/${recipe.id}`, '_blank')?.focus()
+    } else {
+      setPreviewRecipe(recipe)
+      setShowPreviewPanel(true)
+    }
+  }
+
+  function handlePreviewOpenInTab() {
+    if (!previewRecipe) return
+    window.open(`/admin/preview/${previewRecipe.id}`, '_blank')?.focus()
   }
 
   function handleImportSuccess(data: RecipeFormData) {
@@ -108,6 +126,7 @@ export function AdminDashboardPage() {
           onEdit={(id) => navigate(`/admin/edit/${id}`)}
           onDelete={handleDelete}
           onTogglePublish={handleTogglePublish}
+          onPreview={handlePreview}
         />
       )}
 
@@ -147,6 +166,15 @@ export function AdminDashboardPage() {
         <ImportRecipeModal
           onSuccess={handleImportSuccess}
           onClose={() => setShowImport(false)}
+        />
+      )}
+
+      {previewRecipe && (
+        <RecipePreviewPanel
+          recipe={previewRecipe}
+          isOpen={showPreviewPanel}
+          onClose={() => setShowPreviewPanel(false)}
+          onOpenInTab={handlePreviewOpenInTab}
         />
       )}
     </div>
