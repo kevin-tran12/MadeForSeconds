@@ -73,9 +73,42 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     hasExistingComponents ? recipe!.components! : [defaultComponent()]
   )
 
+  const [receiptUrls, setReceiptUrls] = useState<string[]>(recipe?.receipt_urls ?? [])
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false)
+  const receiptInputRef = useRef<HTMLInputElement>(null)
+
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function handleReceiptUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setError(null)
+    setIsUploadingReceipt(true)
+    try {
+      const { url } = await adminApi.uploadReceipt(file)
+      setReceiptUrls((prev) => [...prev, url])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Receipt upload failed')
+    } finally {
+      setIsUploadingReceipt(false)
+      if (receiptInputRef.current) receiptInputRef.current.value = ''
+    }
+  }
+
+  async function handleReceiptDelete(url: string) {
+    if (recipe?.id) {
+      try {
+        await adminApi.deleteReceipt(recipe.id, url)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete receipt')
+        return
+      }
+    }
+    setReceiptUrls((prev) => prev.filter((u) => u !== url))
+  }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -132,6 +165,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         instructions: multiComponent ? [] : instructions,
         nutrition,
         components: multiComponent ? components : null,
+        receipt_urls: receiptUrls,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -301,6 +335,53 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
       <Section title="Nutrition (optional)">
         <p className="text-xs text-gray-400 -mt-2">Per serving. Add any nutrients — calories, macros, vitamins, minerals, etc.</p>
         <NutritionEditor value={nutrition} onChange={setNutrition} />
+      </Section>
+
+      <Section title="Purchase receipts (optional)">
+        <p className="text-xs text-gray-400 -mt-2">Attach grocery or shopping receipts for this recipe. Images or PDFs accepted.</p>
+        <input
+          type="file"
+          ref={receiptInputRef}
+          className="hidden"
+          accept="image/*,.pdf"
+          onChange={handleReceiptUpload}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => receiptInputRef.current?.click()}
+          loading={isUploadingReceipt}
+        >
+          Add receipt
+        </Button>
+        {receiptUrls.length > 0 && (
+          <ul className="flex flex-col gap-2">
+            {receiptUrls.map((url) => {
+              const isPdf = url.toLowerCase().includes('.pdf') || url.toLowerCase().endsWith('pdf')
+              return (
+                <li key={url} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {isPdf ? (
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-red-100 text-xs font-bold text-red-600">
+                      PDF
+                    </div>
+                  ) : (
+                    <img src={url} alt="Receipt" className="h-10 w-10 shrink-0 rounded object-cover" />
+                  )}
+                  <span className="flex-1 truncate text-xs text-gray-500">{url.split('/').pop()}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleReceiptDelete(url)}
+                    className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    aria-label="Remove receipt"
+                  >
+                    ✕
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       </Section>
 
       <div className="flex gap-3">

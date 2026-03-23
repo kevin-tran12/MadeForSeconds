@@ -38,6 +38,35 @@ def _validate_categories(db, categories: list[str]) -> None:
         raise HTTPException(status_code=422, detail=f"Unknown categories: {invalid}")
 
 
+# ── GCS helpers ───────────────────────────────────────────────────────────────
+
+def _gcs_blob_name(url: str, bucket_name: str) -> str | None:
+    """Extract blob name from https://storage.googleapis.com/{bucket}/{blob} URL.
+
+    Returns None for dev placeholder URLs, missing values, or a different bucket.
+    """
+    if not url or not bucket_name:
+        return None
+    prefix = f"https://storage.googleapis.com/{bucket_name}/"
+    if url.startswith(prefix):
+        return url[len(prefix):]
+    return None
+
+
+def _delete_gcs_blob(bucket_name: str, blob_name: str) -> None:
+    """Delete a GCS blob, silently ignoring errors.
+
+    No-op in dev mode or when bucket/blob name is missing, so recipe
+    operations are never blocked by GCS cleanup failures.
+    """
+    if settings.is_dev or not bucket_name or not blob_name:
+        return
+    try:
+        storage.Client().bucket(bucket_name).blob(blob_name).delete()
+    except Exception:
+        pass
+
+
 @router.get("/recipes", response_model=list[Recipe])
 async def admin_list_recipes():
     db = get_db()
@@ -74,9 +103,19 @@ async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    updates = body.model_dump(exclude_none=True)
+    old_data = doc.to_dict()
+    # Use exclude_unset so we can distinguish "field omitted" from "field set to null/empty"
+    updates = body.model_dump(exclude_unset=True)
     updates["updated_at"] = datetime.now(timezone.utc)
     doc_ref.update(updates)
+
+    # Delete replaced image from GCS (only when image_url was explicitly changed)
+    if "image_url" in updates:
+        old_image = old_data.get("image_url") or ""
+        new_image = updates["image_url"] or ""
+        if old_image != new_image:
+            if blob := _gcs_blob_name(old_image, settings.gcs_bucket_name or ""):
+                _delete_gcs_blob(settings.gcs_bucket_name, blob)
 
     updated = doc_ref.get().to_dict()
     updated["id"] = recipe_id
@@ -92,6 +131,17 @@ async def admin_delete_recipe(recipe_id: str):
 
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Recipe not found")
+
+    data = doc.to_dict()
+
+    # Delete recipe image from GCS
+    if blob := _gcs_blob_name(data.get("image_url") or "", settings.gcs_bucket_name or ""):
+        _delete_gcs_blob(settings.gcs_bucket_name, blob)
+
+    # Delete all receipt images from GCS
+    for url in data.get("receipt_urls", []):
+        if blob := _gcs_blob_name(url, settings.gcs_receipts_bucket_name or ""):
+            _delete_gcs_blob(settings.gcs_receipts_bucket_name, blob)
 
     doc_ref.delete()
     cache.clear()
@@ -121,6 +171,57 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
         return {"url": url}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
+
+
+@router.post("/upload-receipt")
+async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
+    """Upload a purchase receipt photo or PDF for a recipe."""
+    _ALLOWED_RECEIPT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf"}
+    if file.content_type not in _ALLOWED_RECEIPT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Receipt must be an image or PDF. Got: {file.content_type}",
+        )
+
+    filename = f"{uuid.uuid4()}-{file.filename}"
+
+    if settings.is_dev or not settings.gcs_receipts_bucket_name:
+        return {"url": f"https://placehold.co/400x300?text=receipt-{filename}"}
+
+    try:
+        client = storage.Client()
+        blob = client.bucket(settings.gcs_receipts_bucket_name).blob(filename)
+        blob.upload_from_file(file.file, content_type=file.content_type)
+        url = f"https://storage.googleapis.com/{settings.gcs_receipts_bucket_name}/{filename}"
+        return {"url": url}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
+
+
+@router.delete("/recipes/{recipe_id}/receipts", status_code=204)
+async def admin_delete_recipe_receipt(recipe_id: str, body: dict):
+    """Remove a single receipt URL from a recipe and delete its GCS blob."""
+    url = body.get("url", "")
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    db = get_db()
+    doc_ref = db.collection("recipes").document(recipe_id)
+    doc = doc_ref.get()
+
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+
+    current_urls: list[str] = doc.to_dict().get("receipt_urls", [])
+    if url not in current_urls:
+        raise HTTPException(status_code=404, detail="Receipt not found on this recipe")
+
+    doc_ref.update({"receipt_urls": [u for u in current_urls if u != url]})
+
+    if blob := _gcs_blob_name(url, settings.gcs_receipts_bucket_name or ""):
+        _delete_gcs_blob(settings.gcs_receipts_bucket_name, blob)
+
+    cache.clear()
 
 
 # ── Categories ────────────────────────────────────────────────────────────────
