@@ -11,6 +11,7 @@ from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
 from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate
+from ..validation import get_invalid_categories
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
@@ -32,15 +33,7 @@ def _generate_slug(title: str) -> str:
 
 def _validate_categories(db, categories: list[str]) -> None:
     """Raises 422 if any submitted category is not in the allowed list."""
-    if not categories:
-        return
-    doc = db.collection("config").document("categories").get()
-    if not doc.exists:
-        return  # no list configured yet — allow anything
-    allowed: set[str] = set(doc.to_dict().get("list", []))
-    if not allowed:
-        return
-    invalid = [c for c in categories if c not in allowed]
+    invalid = get_invalid_categories(db, categories)
     if invalid:
         raise HTTPException(status_code=422, detail=f"Unknown categories: {invalid}")
 

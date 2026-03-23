@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 from .config import settings
 from .firestore import get_db
 from .models import Ingredient, Instruction, NutritionEntry, RecipeComponent, RecipeCreate
+from .validation import get_invalid_categories
 from .models_expense import (
     EXPENSE_CATEGORIES,
     ExpenseItem,
@@ -181,13 +182,23 @@ def create_recipe(
         components=parsed_components,
     )
 
+    db = get_db()
+
+    # Validate categories against admin-configured allowed list
+    invalid = get_invalid_categories(db, recipe.categories)
+    if invalid:
+        allowed_doc = db.collection("config").document("categories").get()
+        allowed = sorted(allowed_doc.to_dict().get("list", [])) if allowed_doc.exists else []
+        return {
+            "error": f"Unknown categories: {invalid}. Allowed: {', '.join(allowed)}",
+        }
+
     now = datetime.now(timezone.utc)
     data = recipe.model_dump()
     data["slug"] = _generate_slug(recipe.title)
     data["created_at"] = now
     data["updated_at"] = now
 
-    db = get_db()
     doc_ref = db.collection("recipes").document()
     doc_ref.set(data)
 
