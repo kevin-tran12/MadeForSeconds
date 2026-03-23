@@ -1,4 +1,4 @@
-import { useState, type FormEvent, useRef } from 'react'
+import { useState, useEffect, type FormEvent, useRef } from 'react'
 import type { Recipe, RecipeFormData, Difficulty, NutritionEntry, RecipeComponent } from '../../lib/types'
 import { adminApi } from '../../lib/api'
 import { useCategories } from '../../hooks/useCategories'
@@ -47,6 +47,17 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [published, setPublished] = useState(recipe?.published ?? false)
   const [categories, setCategories] = useState<string[]>(recipe?.categories ?? [])
   const { categories: availableCategories } = useCategories()
+
+  // Strip categories not in the admin-configured list (e.g. from AI import or stale data)
+  useEffect(() => {
+    if (availableCategories.length > 0 && categories.length > 0) {
+      const valid = categories.filter(c => availableCategories.includes(c))
+      if (valid.length !== categories.length) {
+        setCategories(valid)
+      }
+    }
+  }, [availableCategories]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [ingredients, setIngredients] = useState(
     recipe?.ingredients ?? [{ amount: '', unit: '', item: '' }]
   )
