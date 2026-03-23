@@ -106,3 +106,7 @@ class GroupedRecipes(BaseModel):
 
 class PageContent(BaseModel):
     data: dict[str, str]
+
+
+class ReceiptDeleteBody(BaseModel):
+    url: str

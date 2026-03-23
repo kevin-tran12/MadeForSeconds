@@ -75,6 +75,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
 
   const [receiptUrls, setReceiptUrls] = useState<string[]>(recipe?.receipt_urls ?? [])
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false)
+  const [deletingReceiptUrl, setDeletingReceiptUrl] = useState<string | null>(null)
   const receiptInputRef = useRef<HTMLInputElement>(null)
 
   const [isUploading, setIsUploading] = useState(false)
@@ -99,15 +100,19 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   }
 
   async function handleReceiptDelete(url: string) {
+    if (deletingReceiptUrl) return
+    setDeletingReceiptUrl(url)
     if (recipe?.id) {
       try {
         await adminApi.deleteReceipt(recipe.id, url)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to delete receipt')
+        setDeletingReceiptUrl(null)
         return
       }
     }
     setReceiptUrls((prev) => prev.filter((u) => u !== url))
+    setDeletingReceiptUrl(null)
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -358,7 +363,9 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         {receiptUrls.length > 0 && (
           <ul className="flex flex-col gap-2">
             {receiptUrls.map((url) => {
-              const isPdf = url.toLowerCase().includes('.pdf') || url.toLowerCase().endsWith('pdf')
+              const filename = url.split('/').pop() ?? ''
+              const isPdf = filename.toLowerCase().endsWith('.pdf')
+              const isDeleting = deletingReceiptUrl === url
               return (
                 <li key={url} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
                   {isPdf ? (
@@ -368,14 +375,17 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
                   ) : (
                     <img src={url} alt="Receipt" className="h-10 w-10 shrink-0 rounded object-cover" />
                   )}
-                  <span className="flex-1 truncate text-xs text-gray-500">{url.split('/').pop()}</span>
+                  <span className="flex-1 truncate text-xs text-gray-500">{filename}</span>
                   <button
                     type="button"
                     onClick={() => handleReceiptDelete(url)}
-                    className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+                    disabled={isDeleting || !!deletingReceiptUrl}
+                    className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
                     aria-label="Remove receipt"
                   >
-                    ✕
+                    {isDeleting ? (
+                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+                    ) : '✕'}
                   </button>
                 </li>
               )

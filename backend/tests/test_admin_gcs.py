@@ -392,21 +392,17 @@ class TestDeleteReceipt:
 
         assert response.status_code == 404
 
-    def test_returns_400_when_url_missing(
+    def test_returns_422_when_url_missing(
         self, authenticated_client, mock_db, mock_cache
     ):
-        mock_doc = MagicMock()
-        mock_doc.exists = True
-        mock_doc.to_dict.return_value = {**_RECIPE_DATA, "receipt_urls": []}
-        mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
-
+        """Missing required `url` field → Pydantic validation returns 422."""
         response = _delete_with_json(
             authenticated_client,
             "/api/admin/recipes/test-id/receipts",
             {},
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 422
 
 
 # ── receipt_urls on Recipe model ──────────────────────────────────────────────

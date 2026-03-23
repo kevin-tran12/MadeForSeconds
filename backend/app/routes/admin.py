@@ -10,7 +10,7 @@ from ..auth import require_admin
 from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
-from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate
+from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
 from ..validation import get_invalid_categories
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
@@ -199,9 +199,9 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
 
 
 @router.delete("/recipes/{recipe_id}/receipts", status_code=204)
-async def admin_delete_recipe_receipt(recipe_id: str, body: dict):
+async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
     """Remove a single receipt URL from a recipe and delete its GCS blob."""
-    url = body.get("url", "")
+    url = body.url
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
 
