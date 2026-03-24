@@ -23,6 +23,7 @@ Run inside the backend container:
   docker compose exec backend bash -c "cd /app && FIRESTORE_EMULATOR_HOST=firestore:8080 python migrate_categories_to_labels.py --dry-run"
 """
 import argparse
+import os
 
 from google.cloud import firestore
 
@@ -32,7 +33,8 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print changes without writing")
     args = parser.parse_args()
 
-    db = firestore.Client()
+    project = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    db = firestore.Client(project=project) if project else firestore.Client()
 
     # Load the admin-configured allowed category list
     cat_doc = db.collection("config").document("categories").get()
