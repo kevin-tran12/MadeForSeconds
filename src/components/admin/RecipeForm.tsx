@@ -77,6 +77,9 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     hasExistingComponents ? recipe!.components! : [defaultComponent()]
   )
 
+  const [labels, setLabels] = useState<string[]>(recipe?.labels ?? [])
+  const [labelInput, setLabelInput] = useState('')
+
   const [receiptUrls, setReceiptUrls] = useState<string[]>(recipe?.receipt_urls ?? [])
   const [isUploadingReceipt, setIsUploadingReceipt] = useState(false)
   const [deletingReceiptUrl, setDeletingReceiptUrl] = useState<string | null>(null)
@@ -92,6 +95,26 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   )
   const [showPreviewPanel, setShowPreviewPanel] = useState(false)
   const [panelRecipe, setPanelRecipe] = useState<Recipe | null>(null)
+
+  function addLabel(raw: string) {
+    const trimmed = raw.replace(/,/g, '').trim().toLowerCase()
+    if (trimmed && !labels.includes(trimmed)) {
+      setLabels((prev) => [...prev, trimmed])
+    }
+    setLabelInput('')
+  }
+
+  function handleLabelKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      addLabel(labelInput)
+    } else if (e.key === ',') {
+      e.preventDefault()
+      addLabel(labelInput)
+    } else if (e.key === 'Backspace' && labelInput === '' && labels.length > 0) {
+      setLabels((prev) => prev.slice(0, -1))
+    }
+  }
 
   function buildCurrentRecipe(): Recipe {
     return {
@@ -113,6 +136,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
       nutrition,
       components: multiComponent ? components : null,
       receipt_urls: receiptUrls,
+      labels,
     }
   }
 
@@ -125,9 +149,14 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   function handlePreview() {
     const current = buildCurrentRecipe()
     if (previewMode === 'tab') {
-      sessionStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(current))
-      const previewId = recipe?.id ?? 'draft'
-      window.open(`/admin/preview/${previewId}`, '_blank')?.focus()
+      if (recipe?.id) {
+        // Saved recipe — just open the page, it fetches from the admin API
+        window.open(`/admin/preview/${recipe.id}`, '_blank')?.focus()
+      } else {
+        // Unsaved draft — localStorage is shared across same-origin tabs
+        localStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(current))
+        window.open('/admin/preview/draft', '_blank')?.focus()
+      }
     } else {
       setPanelRecipe(current)
       setShowPreviewPanel(true)
@@ -223,6 +252,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         nutrition,
         components: multiComponent ? components : null,
         receipt_urls: receiptUrls,
+        labels,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -370,6 +400,41 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         )}
       </Section>
 
+      <Section title="Labels">
+        <p className="text-xs text-gray-400 -mt-2">
+          Free-form tags like cuisine, ingredient, or occasion. Press Enter or comma to add.
+        </p>
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 focus-within:border-primary-500 focus-within:ring-2 focus-within:ring-primary-100">
+          {labels.map((label) => (
+            <span
+              key={label}
+              className="flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-sm text-gray-700"
+            >
+              {label}
+              <button
+                type="button"
+                onClick={() => setLabels((prev) => prev.filter((l) => l !== label))}
+                className="text-gray-400 hover:text-gray-700 transition-colors"
+                aria-label={`Remove label ${label}`}
+              >
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M1 1l8 8M9 1L1 9" />
+                </svg>
+              </button>
+            </span>
+          ))}
+          <input
+            type="text"
+            value={labelInput}
+            onChange={(e) => setLabelInput(e.target.value)}
+            onKeyDown={handleLabelKeyDown}
+            onBlur={() => { if (labelInput.trim()) addLabel(labelInput) }}
+            placeholder={labels.length === 0 ? 'chinese, chicken, weeknight...' : ''}
+            className="min-w-24 flex-1 bg-transparent text-sm outline-none placeholder:text-gray-400"
+          />
+        </div>
+      </Section>
+
       {multiComponent ? (
         <Section title="Components">
           <p className="text-xs text-gray-400 -mt-2">
@@ -501,9 +566,12 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
           isOpen={showPreviewPanel}
           onClose={() => setShowPreviewPanel(false)}
           onOpenInTab={() => {
-            sessionStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(panelRecipe))
-            const previewId = recipe?.id ?? 'draft'
-            window.open(`/admin/preview/${previewId}`, '_blank')?.focus()
+            if (recipe?.id) {
+              window.open(`/admin/preview/${recipe.id}`, '_blank')?.focus()
+            } else {
+              localStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(panelRecipe))
+              window.open('/admin/preview/draft', '_blank')?.focus()
+            }
           }}
         />
       )}

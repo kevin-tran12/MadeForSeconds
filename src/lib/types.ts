@@ -49,6 +49,7 @@ export interface Recipe {
   nutrition: NutritionEntry[]
   components?: RecipeComponent[] | null
   receipt_urls?: string[]
+  labels?: string[]
 }
 
 // Omit auto-generated fields when submitting from the form

@@ -49,6 +49,7 @@ class RecipeCreate(BaseModel):
     nutrition: list[NutritionEntry] = []
     components: list[RecipeComponent] | None = None
     receipt_urls: list[str] = []
+    labels: list[str] = []
 
 
 class RecipeUpdate(BaseModel):
@@ -66,6 +67,7 @@ class RecipeUpdate(BaseModel):
     nutrition: list[NutritionEntry] | None = None
     components: list[RecipeComponent] | None = None
     receipt_urls: list[str] | None = None
+    labels: list[str] | None = None
 
 
 class Recipe(BaseModel):
@@ -87,6 +89,7 @@ class Recipe(BaseModel):
     nutrition: list[NutritionEntry] = []
     components: list[RecipeComponent] | None = None
     receipt_urls: list[str] = []
+    labels: list[str] = []
 
 
 class PaginatedRecipes(BaseModel):
