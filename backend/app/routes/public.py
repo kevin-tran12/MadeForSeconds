@@ -34,11 +34,12 @@ def _doc_to_recipe(doc) -> Recipe:
 async def list_recipes(
     search: str | None = None,
     category: str | None = None,
+    label: str | None = None,
     search_by: str = "all",
     limit: int = Query(default=12, ge=1, le=50),
     cursor: str | None = None,
 ):
-    cache_key = f"recipes:{search or ''}:{category or ''}:{search_by}:{limit}:{cursor or ''}"
+    cache_key = f"recipes:{search or ''}:{category or ''}:{label or ''}:{search_by}:{limit}:{cursor or ''}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -48,6 +49,9 @@ async def list_recipes(
 
     if category:
         query = query.where(filter=FieldFilter("categories", "array_contains", category))
+
+    if label:
+        query = query.where(filter=FieldFilter("labels", "array_contains", label))
 
     query = query.order_by("created_at", direction="DESCENDING")
 
@@ -74,6 +78,8 @@ async def list_recipes(
             if search_by in ("all", "name"):
                 if pattern.search(r.title) or pattern.search(r.description):
                     return True
+                if any(pattern.search(lbl) for lbl in r.labels):
+                    return True
             if search_by in ("all", "ingredient"):
                 if any(pattern.search(ing.item) for ing in r.ingredients):
                     return True
@@ -91,7 +97,7 @@ async def list_recipes(
 
     # Skip caching only when the unfiltered list is empty — that indicates
     # Firestore wasn't ready at startup, not a legitimate "no results" case.
-    if recipes or search or category:
+    if recipes or search or category or label:
         cache.set(cache_key, result)
     return result
 
