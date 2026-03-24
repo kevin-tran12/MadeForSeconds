@@ -27,18 +27,19 @@ import os
 
 from google.cloud import firestore
 
+try:
+    from app.config import settings as _settings
+    _default_project: str = _settings.gcp_project_id
+except ImportError:
+    _default_project = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT") or "madefor-seconds-local"
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Migrate recipe categories to labels")
     parser.add_argument("--dry-run", action="store_true", help="Print changes without writing")
     args = parser.parse_args()
 
-    project = (
-        os.environ.get("GCP_PROJECT_ID")
-        or os.environ.get("GOOGLE_CLOUD_PROJECT")
-        or "madefor-seconds-local"
-    )
-    db = firestore.Client(project=project)
+    db = firestore.Client(project=_default_project)
 
     # Load the admin-configured allowed category list
     cat_doc = db.collection("config").document("categories").get()
