@@ -21,7 +21,7 @@ export function AdminCategoriesPage() {
   }, [])
 
   function addCategory() {
-    const trimmed = input.trim().toLowerCase()
+    const trimmed = input.trim()
     if (!trimmed || categories.includes(trimmed)) return
     setCategories([...categories, trimmed].sort())
     setInput('')

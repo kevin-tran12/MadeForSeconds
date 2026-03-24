@@ -33,8 +33,12 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print changes without writing")
     args = parser.parse_args()
 
-    project = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
-    db = firestore.Client(project=project) if project else firestore.Client()
+    project = (
+        os.environ.get("GCP_PROJECT_ID")
+        or os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or "madefor-seconds-local"
+    )
+    db = firestore.Client(project=project)
 
     # Load the admin-configured allowed category list
     cat_doc = db.collection("config").document("categories").get()
