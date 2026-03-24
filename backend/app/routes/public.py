@@ -78,10 +78,11 @@ async def list_recipes(
             if search_by in ("all", "name"):
                 if pattern.search(r.title) or pattern.search(r.description):
                     return True
-                if any(pattern.search(lbl) for lbl in r.labels):
-                    return True
             if search_by in ("all", "ingredient"):
                 if any(pattern.search(ing.item) for ing in r.ingredients):
+                    return True
+            if search_by in ("all", "label"):
+                if any(pattern.search(lbl) for lbl in r.labels):
                     return True
             return False
 
