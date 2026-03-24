@@ -14,6 +14,7 @@ import { AdminPageEditPage } from './pages/AdminPageEditPage'
 import { AdminExpensesPage } from './pages/AdminExpensesPage'
 import { AdminExpenseEditPage } from './pages/AdminExpenseEditPage'
 import { AdminReportsPage } from './pages/AdminReportsPage'
+import { AdminRecipePreviewPage } from './pages/AdminRecipePreviewPage'
 import { AboutPage } from './pages/AboutPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { SupportPage } from './pages/SupportPage'
@@ -40,6 +41,7 @@ const router = createBrowserRouter([
           { index: true, element: <AdminDashboardPage /> },
           { path: 'new', element: <AdminRecipeEditPage /> },
           { path: 'edit/:id', element: <AdminRecipeEditPage /> },
+          { path: 'preview/:id', element: <AdminRecipePreviewPage /> },
           { path: 'categories', element: <AdminCategoriesPage /> },
           { path: 'pages', element: <AdminPagesPage /> },
           { path: 'pages/:pageId', element: <AdminPageEditPage /> },

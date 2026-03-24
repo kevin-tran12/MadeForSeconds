@@ -75,6 +75,18 @@ export const adminApi = {
 
   updatePageContent: (pageId: string, data: Record<string, string>): Promise<Record<string, string>> =>
     apiFetch(`/api/admin/pages/${encodeURIComponent(pageId)}`, { method: 'PUT', body: JSON.stringify({ data }) }),
+
+  uploadReceipt: (file: File): Promise<{ url: string }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiUpload('/api/admin/upload-receipt', formData)
+  },
+
+  deleteReceipt: (recipeId: string, url: string): Promise<void> =>
+    apiFetch(`/api/admin/recipes/${recipeId}/receipts`, {
+      method: 'DELETE',
+      body: JSON.stringify({ url }),
+    }),
 }
 
 // ─── Admin supporter moderation ─────────────────────────────────────────────

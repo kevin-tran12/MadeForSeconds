@@ -1,4 +1,4 @@
-import { useState, type FormEvent, useRef } from 'react'
+import { useState, useEffect, type FormEvent, useRef } from 'react'
 import type { Recipe, RecipeFormData, Difficulty, NutritionEntry, RecipeComponent } from '../../lib/types'
 import { adminApi } from '../../lib/api'
 import { useCategories } from '../../hooks/useCategories'
@@ -8,6 +8,10 @@ import { IngredientEditor } from './IngredientEditor'
 import { InstructionEditor } from './InstructionEditor'
 import { NutritionEditor } from './NutritionEditor'
 import { ComponentEditor } from './ComponentEditor'
+import { RecipePreviewPanel } from './RecipePreviewPanel'
+
+const PREVIEW_MODE_KEY = 'recipe-preview-mode'
+const PREVIEW_DRAFT_KEY = 'recipe-preview-draft'
 
 interface RecipeFormProps {
   recipe?: Recipe
@@ -47,6 +51,17 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [published, setPublished] = useState(recipe?.published ?? false)
   const [categories, setCategories] = useState<string[]>(recipe?.categories ?? [])
   const { categories: availableCategories } = useCategories()
+
+  // Strip categories not in the admin-configured list (e.g. from AI import or stale data)
+  useEffect(() => {
+    if (availableCategories.length > 0 && categories.length > 0) {
+      const valid = categories.filter(c => availableCategories.includes(c))
+      if (valid.length !== categories.length) {
+        setCategories(valid)
+      }
+    }
+  }, [availableCategories]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const [ingredients, setIngredients] = useState(
     recipe?.ingredients ?? [{ amount: '', unit: '', item: '' }]
   )
@@ -62,9 +77,95 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     hasExistingComponents ? recipe!.components! : [defaultComponent()]
   )
 
+  const [receiptUrls, setReceiptUrls] = useState<string[]>(recipe?.receipt_urls ?? [])
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false)
+  const [deletingReceiptUrl, setDeletingReceiptUrl] = useState<string | null>(null)
+  const receiptInputRef = useRef<HTMLInputElement>(null)
+
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Preview state
+  const [previewMode, setPreviewMode] = useState<'tab' | 'panel'>(
+    () => (localStorage.getItem(PREVIEW_MODE_KEY) as 'tab' | 'panel') ?? 'tab'
+  )
+  const [showPreviewPanel, setShowPreviewPanel] = useState(false)
+  const [panelRecipe, setPanelRecipe] = useState<Recipe | null>(null)
+
+  function buildCurrentRecipe(): Recipe {
+    return {
+      id: recipe?.id ?? 'preview-draft',
+      slug: recipe?.slug ?? 'preview-draft',
+      created_at: recipe?.created_at ?? new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      title: title.trim() || 'Untitled Recipe',
+      description: description.trim(),
+      image_url: imageUrl.trim() || null,
+      difficulty,
+      prep_time_minutes: parseInt(prepTime) || 0,
+      cook_time_minutes: parseInt(cookTime) || 0,
+      servings: parseInt(servings) || 1,
+      published,
+      categories,
+      ingredients: multiComponent ? [] : ingredients,
+      instructions: multiComponent ? [] : instructions,
+      nutrition,
+      components: multiComponent ? components : null,
+      receipt_urls: receiptUrls,
+    }
+  }
+
+  function togglePreviewMode() {
+    const next = previewMode === 'tab' ? 'panel' : 'tab'
+    setPreviewMode(next)
+    localStorage.setItem(PREVIEW_MODE_KEY, next)
+  }
+
+  function handlePreview() {
+    const current = buildCurrentRecipe()
+    if (previewMode === 'tab') {
+      sessionStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(current))
+      const previewId = recipe?.id ?? 'draft'
+      window.open(`/admin/preview/${previewId}`, '_blank')?.focus()
+    } else {
+      setPanelRecipe(current)
+      setShowPreviewPanel(true)
+    }
+  }
+
+  async function handleReceiptUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setError(null)
+    setIsUploadingReceipt(true)
+    try {
+      const { url } = await adminApi.uploadReceipt(file)
+      setReceiptUrls((prev) => [...prev, url])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Receipt upload failed')
+    } finally {
+      setIsUploadingReceipt(false)
+      if (receiptInputRef.current) receiptInputRef.current.value = ''
+    }
+  }
+
+  async function handleReceiptDelete(url: string) {
+    if (deletingReceiptUrl) return
+    setDeletingReceiptUrl(url)
+    if (recipe?.id) {
+      try {
+        await adminApi.deleteReceipt(recipe.id, url)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete receipt')
+        setDeletingReceiptUrl(null)
+        return
+      }
+    }
+    setReceiptUrls((prev) => prev.filter((u) => u !== url))
+    setDeletingReceiptUrl(null)
+  }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -121,6 +222,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         instructions: multiComponent ? [] : instructions,
         nutrition,
         components: multiComponent ? components : null,
+        receipt_urls: receiptUrls,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -292,11 +394,119 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         <NutritionEditor value={nutrition} onChange={setNutrition} />
       </Section>
 
-      <div className="flex gap-3">
+      <Section title="Purchase receipts (optional)">
+        <p className="text-xs text-gray-400 -mt-2">Attach grocery or shopping receipts for this recipe. Images or PDFs accepted.</p>
+        <input
+          type="file"
+          ref={receiptInputRef}
+          className="hidden"
+          accept="image/*,.pdf"
+          onChange={handleReceiptUpload}
+        />
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => receiptInputRef.current?.click()}
+          loading={isUploadingReceipt}
+        >
+          Add receipt
+        </Button>
+        {receiptUrls.length > 0 && (
+          <ul className="flex flex-col gap-2">
+            {receiptUrls.map((url) => {
+              const filename = url.split('/').pop() ?? ''
+              const isPdf = filename.toLowerCase().endsWith('.pdf')
+              const isDeleting = deletingReceiptUrl === url
+              return (
+                <li key={url} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {isPdf ? (
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-red-100 text-xs font-bold text-red-600">
+                      PDF
+                    </div>
+                  ) : (
+                    <img src={url} alt="Receipt" className="h-10 w-10 shrink-0 rounded object-cover" />
+                  )}
+                  <span className="flex-1 truncate text-xs text-gray-500">{filename}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleReceiptDelete(url)}
+                    disabled={isDeleting || !!deletingReceiptUrl}
+                    className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-label="Remove receipt"
+                  >
+                    {isDeleting ? (
+                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+                    ) : '✕'}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Section>
+
+      <div className="flex items-center gap-3">
+        {/* Preview button group — main action + mode toggle */}
+        <div className="flex overflow-hidden rounded-lg border border-gray-300">
+          <button
+            type="button"
+            onClick={handlePreview}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+          >
+            {previewMode === 'tab' ? (
+              <>
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7.5 1H12v4.5M12 1L6.5 6.5M5.5 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8.5" />
+                </svg>
+                Preview
+              </>
+            ) : (
+              <>
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="1" y="1" width="11" height="11" rx="1.5" />
+                  <path d="M7 1v11" />
+                </svg>
+                Preview
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={togglePreviewMode}
+            title={previewMode === 'tab' ? 'Switch to side panel' : 'Switch to new tab'}
+            className="border-l border-gray-300 px-2 py-2 text-xs text-gray-400 transition-colors hover:bg-gray-50 hover:text-gray-600"
+          >
+            {previewMode === 'tab' ? (
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="1" y="1" width="11" height="11" rx="1.5" />
+                <path d="M7 1v11" />
+              </svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7.5 1H12v4.5M12 1L6.5 6.5M5.5 2H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V8.5" />
+              </svg>
+            )}
+          </button>
+        </div>
+
         <Button type="submit" loading={isSubmitting} size="lg">
           {recipe ? 'Save changes' : 'Create recipe'}
         </Button>
       </div>
+
+      {panelRecipe && (
+        <RecipePreviewPanel
+          recipe={panelRecipe}
+          isOpen={showPreviewPanel}
+          onClose={() => setShowPreviewPanel(false)}
+          onOpenInTab={() => {
+            sessionStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(panelRecipe))
+            const previewId = recipe?.id ?? 'draft'
+            window.open(`/admin/preview/${previewId}`, '_blank')?.focus()
+          }}
+        />
+      )}
     </form>
   )
 }
