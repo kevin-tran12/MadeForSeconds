@@ -135,6 +135,7 @@ export function SearchWithSuggestions({
             <option value="all">All</option>
             <option value="name">Name</option>
             <option value="ingredient">Ingredient</option>
+            <option value="label">Label</option>
           </select>
           {/* Chevron icon */}
           <svg

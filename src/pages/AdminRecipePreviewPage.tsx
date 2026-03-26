@@ -20,12 +20,12 @@ export function AdminRecipePreviewPage() {
     async function load() {
       try {
         if (isDraft) {
-          const raw = sessionStorage.getItem(STORAGE_KEY)
+          const raw = localStorage.getItem(STORAGE_KEY)
           if (!raw) {
             setError('Preview data not found. Go back and click Preview again.')
             return
           }
-          sessionStorage.removeItem(STORAGE_KEY)
+          localStorage.removeItem(STORAGE_KEY)
           setRecipe(JSON.parse(raw) as Recipe)
         } else {
           const all = await adminApi.listRecipes()

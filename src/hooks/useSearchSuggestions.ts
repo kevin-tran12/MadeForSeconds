@@ -65,12 +65,14 @@ export function useSearchSuggestions(query: string, searchBy: string) {
               .map((ing) => ing.item)
           : []
 
-      if (matchesName || matchedIngredients.length > 0) {
-        // Only surface ingredient matches when the title didn't already match,
-        // so the label isn't redundant on a name hit.
+      const matchesLabel =
+        (searchBy === 'all' || searchBy === 'label') &&
+        (recipe.labels ?? []).some((lbl) => lbl.toLowerCase().includes(q))
+
+      if (matchesName || matchedIngredients.length > 0 || matchesLabel) {
         results.push({
           recipe,
-          matchedIngredients: matchesName ? [] : matchedIngredients,
+          matchedIngredients: matchesName || matchesLabel ? [] : matchedIngredients,
         })
       }
 
