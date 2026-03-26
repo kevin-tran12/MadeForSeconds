@@ -10,6 +10,42 @@ RECIPES = [
         "title": "Classic Spaghetti Carbonara",
         "slug": "classic-spaghetti-carbonara",
         "description": "A rich and creamy Roman pasta made with eggs, Pecorino Romano, guanciale, and black pepper. No cream needed.",
+        "about": (
+            "Carbonara is one of Rome's four canonical pasta dishes — the others being cacio e pepe, amatriciana, "
+            "and gricia. Its origins are debated: some attribute it to Roman coal miners (carbonari) who made it "
+            "on long work camps in the Apennines, others to Allied soldiers in WWII who combined their rations of "
+            "bacon and powdered eggs with local pasta. What's undisputed is that true carbonara contains no cream — "
+            "the silkiness comes entirely from the emulsification of eggs, aged cheese, starchy pasta water, and fat. "
+            "In Rome, guanciale (cured pork cheek) is non-negotiable; its higher fat content and distinct flavor "
+            "cannot be replicated by pancetta, let alone bacon."
+        ),
+        "prep_steps": [
+            {"step": 1, "text": "Remove guanciale from packaging and cut into 1cm lardons (thick strips). The rind can be left on — it renders beautifully.", "tip": "If using pancetta, cut similarly. The pieces should be chunky, not shaved thin."},
+            {"step": 2, "text": "Grate Pecorino Romano finely — a microplane or the small holes on a box grater work best. You want it almost powdery so it melts into the sauce without clumping."},
+            {"step": 3, "text": "Combine eggs and grated Pecorino in a bowl. Season generously with freshly cracked black pepper. Whisk until smooth and set aside at room temperature.", "tip": "Room-temperature egg mixture is crucial — cold eggs hitting hot pasta can scramble instead of emulsify."},
+        ],
+        "secrets": [
+            {
+                "title": "The Emulsification Window",
+                "body": (
+                    "Carbonara lives and dies in about 30 seconds. The egg mixture must hit the pasta when it's "
+                    "hot enough to cook the eggs gently but not so hot that they scramble. The sweet spot is "
+                    "roughly 65–70°C (150–160°F). Pulling the pan off heat completely before adding the eggs — "
+                    "and using pasta water aggressively — gives you control over that temperature. The starch in "
+                    "the pasta water stabilizes the emulsion the same way cornstarch stabilizes a custard."
+                ),
+            },
+            {
+                "title": "Why Guanciale, Not Pancetta",
+                "body": (
+                    "Guanciale (pork cheek) has a higher fat-to-meat ratio than pancetta (pork belly) and a "
+                    "more pronounced, funky depth from the curing process. When rendered, its fat becomes the "
+                    "cooking medium for the sauce — a flavor you simply cannot replicate with pancetta. "
+                    "In traditional Roman kitchens, substituting pancetta is considered acceptable; "
+                    "using bacon is not."
+                ),
+            },
+        ],
         "ingredients": [
             {"item": "spaghetti", "amount": "400", "unit": "g"},
             {"item": "guanciale or pancetta", "amount": "200", "unit": "g"},

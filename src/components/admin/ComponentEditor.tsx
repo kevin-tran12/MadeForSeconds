@@ -11,6 +11,7 @@ function emptyComponent(): RecipeComponent {
     title: '',
     description: null,
     ingredients: [{ amount: '', unit: '', item: '' }],
+    prep_steps: [],
     instructions: [{ step: 1, text: '' }],
     prep_time_minutes: null,
     cook_time_minutes: null,
@@ -76,7 +77,7 @@ export function ComponentEditor({ value, onChange }: ComponentEditorProps) {
                 value={comp.description ?? ''}
                 onChange={(e) => update(i, 'description', e.target.value || null)}
                 placeholder="Brief description of this component…"
-                className="resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+                className="resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
               />
             </div>
 
@@ -113,6 +114,16 @@ export function ComponentEditor({ value, onChange }: ComponentEditorProps) {
               <IngredientEditor
                 value={comp.ingredients}
                 onChange={(ings) => update(i, 'ingredients', ings)}
+              />
+            </div>
+
+            {/* Prep steps */}
+            <div>
+              <p className="mb-1 text-sm font-medium text-gray-700">Prep steps <span className="text-xs font-normal text-gray-400">(optional)</span></p>
+              <p className="mb-2 text-xs text-gray-400">How to prepare ingredients for this component before cooking.</p>
+              <InstructionEditor
+                value={comp.prep_steps ?? []}
+                onChange={(steps) => update(i, 'prep_steps', steps)}
               />
             </div>
 

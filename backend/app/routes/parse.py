@@ -51,7 +51,11 @@ SAVE_RECIPE_TOOL = {
         "type": "object",
         "properties": {
             "title": {"type": "string", "description": "Recipe title"},
-            "description": {"type": "string", "description": "Short description or introduction"},
+            "description": {"type": "string", "description": "Short 1–2 sentence teaser or introduction"},
+            "about": {
+                "type": "string",
+                "description": "2–4 sentences on the dish's cultural origin, regional context, and what makes it special. Richer and more narrative than the description field. Omit if the source has nothing meaningful.",
+            },
             "prep_time_minutes": {"type": "integer", "description": "Prep time in minutes"},
             "cook_time_minutes": {"type": "integer", "description": "Cook/total active time in minutes"},
             "servings": {"type": "integer", "description": "Number of servings"},
@@ -70,10 +74,27 @@ SAVE_RECIPE_TOOL = {
                 "description": "All ingredients (use this for simple recipes; leave empty when using components)",
                 "items": _INGREDIENT_SCHEMA,
             },
+            "prep_steps": {
+                "type": "array",
+                "description": "Ingredient preparation steps before cooking begins — how to cut, marinate, toast spices, etc. Use the same format as instructions. Omit if the source does not have a distinct prep phase.",
+                "items": _INSTRUCTION_SCHEMA,
+            },
             "instructions": {
                 "type": "array",
-                "description": "Numbered steps in order (use this for simple recipes; leave empty when using components)",
+                "description": "Numbered cooking steps in order (use this for simple recipes; leave empty when using components)",
                 "items": _INSTRUCTION_SCHEMA,
+            },
+            "secrets": {
+                "type": "array",
+                "description": "Chef's secrets — titled explanations of why a technique works, old-school methods, or professional kitchen tricks. Include the science where relevant.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Short name, e.g. 'The First Reduction'"},
+                        "body": {"type": "string", "description": "Full explanation, optionally with the science behind it"},
+                    },
+                    "required": ["title", "body"],
+                },
             },
             "nutrition": {
                 "type": "array",
@@ -103,6 +124,11 @@ SAVE_RECIPE_TOOL = {
                         "ingredients": {
                             "type": "array",
                             "items": _INGREDIENT_SCHEMA,
+                        },
+                        "prep_steps": {
+                            "type": "array",
+                            "description": "Ingredient prep steps for this component before cooking",
+                            "items": _INSTRUCTION_SCHEMA,
                         },
                         "instructions": {
                             "type": "array",

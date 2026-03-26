@@ -154,6 +154,34 @@ function ComponentSection({
           </div>
         )}
 
+        {/* Prep steps */}
+        {(comp.prep_steps?.length ?? 0) > 0 && (
+          <section className="lg:col-span-3">
+            <h3 className="font-display text-lg font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8 mb-4">
+              Ingredient Preparation
+            </h3>
+            <ol className="space-y-4 mb-6">
+              {comp.prep_steps!.map((inst) => (
+                <li key={inst.step} className="group flex gap-4">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white border border-gray-100 font-display text-sm font-bold text-gray-500 shadow-sm">
+                    {inst.step}
+                  </span>
+                  <div className="pt-1 flex flex-col gap-2">
+                    <p className="leading-relaxed text-gray-700">{inst.text}</p>
+                    {inst.tip && (
+                      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                        <span className="text-sm leading-none mt-0.5">💡</span>
+                        <p className="text-xs leading-relaxed text-amber-800">{inst.tip}</p>
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <div className="mb-6 h-px bg-gray-200" />
+          </section>
+        )}
+
         {/* Instructions */}
         {comp.instructions.length > 0 && (
           <section className={comp.ingredients.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'}>
@@ -396,6 +424,14 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         </div>
       </div>
 
+      {/* About this dish */}
+      {recipe.about && (
+        <div className="mt-8 rounded-3xl border-l-4 border-primary-300 bg-primary-50/40 px-6 py-5">
+          <h2 className="mb-2 text-xs font-bold uppercase tracking-widest text-primary-500">About this dish</h2>
+          <p className="text-base leading-relaxed text-gray-700 italic">{recipe.about}</p>
+        </div>
+      )}
+
       {/* Metadata bar */}
       <div className="mt-10 grid grid-cols-2 gap-4 rounded-3xl bg-surface-dark p-6 sm:grid-cols-4 md:p-8">
         <MetaItem 
@@ -511,6 +547,34 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         {/* ── Single-component instructions (shown when no components) ────── */}
         {!isMultiComponent && (
           <section className="lg:col-span-2">
+            {/* Prep steps */}
+            {(recipe.prep_steps?.length ?? 0) > 0 && (
+              <>
+                <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8">
+                  Ingredient Preparation
+                </h2>
+                <ol className="mt-8 mb-12 space-y-8">
+                  {recipe.prep_steps!.map((inst) => (
+                    <li key={inst.step} className="group flex gap-6">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white border border-gray-100 font-display text-lg font-bold text-gray-500 shadow-sm transition-all group-hover:bg-gray-600 group-hover:text-white">
+                        {inst.step}
+                      </span>
+                      <div className="pt-1.5 flex flex-col gap-3">
+                        <p className="text-lg leading-relaxed text-gray-700">{inst.text}</p>
+                        {inst.tip && (
+                          <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                            <span className="text-base leading-none mt-0.5">💡</span>
+                            <p className="text-sm leading-relaxed text-amber-800">{inst.tip}</p>
+                          </div>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                <div className="mb-8 h-px bg-gray-200" />
+              </>
+            )}
+
             <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8">
               Instructions
             </h2>
@@ -551,6 +615,23 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
           ))}
         </div>
       )}
+      {/* Chef's secrets */}
+      {(recipe.secrets?.length ?? 0) > 0 && (
+        <div className="mt-12">
+          <h2 className="font-display text-2xl font-bold text-gray-900 underline decoration-primary-200 decoration-4 underline-offset-8 mb-6">
+            Chef's Secrets
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {recipe.secrets!.map((secret, i) => (
+              <div key={i} className="rounded-3xl border border-primary-100 bg-primary-50/40 p-6">
+                <h3 className="mb-2 font-display text-lg font-bold text-gray-900">{secret.title}</h3>
+                <p className="text-sm leading-relaxed text-gray-600">{secret.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <NutritionCard nutrition={recipe.nutrition} scale={scale} />
     </article>
 
