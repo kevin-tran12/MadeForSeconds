@@ -19,11 +19,17 @@ export interface NutritionEntry {
   unit: string
 }
 
+export interface RecipeSecret {
+  title: string
+  body: string
+}
+
 /** A sub-recipe within a multi-component dish (e.g. the rice in Hainanese Chicken Rice). */
 export interface RecipeComponent {
   title: string
   description?: string | null
   ingredients: Ingredient[]
+  prep_steps?: Instruction[]
   instructions: Instruction[]
   prep_time_minutes?: number | null
   cook_time_minutes?: number | null
@@ -35,7 +41,9 @@ export interface Recipe {
   title: string
   slug: string
   description: string
+  about?: string | null
   ingredients: Ingredient[]
+  prep_steps?: Instruction[]
   instructions: Instruction[]
   prep_time_minutes: number
   cook_time_minutes: number
@@ -50,6 +58,7 @@ export interface Recipe {
   components?: RecipeComponent[] | null
   receipt_urls?: string[]
   labels?: string[]
+  secrets?: RecipeSecret[]
 }
 
 // Omit auto-generated fields when submitting from the form

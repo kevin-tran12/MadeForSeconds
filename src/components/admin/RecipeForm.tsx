@@ -1,5 +1,5 @@
 import { useState, useEffect, type FormEvent, useRef } from 'react'
-import type { Recipe, RecipeFormData, Difficulty, NutritionEntry, RecipeComponent } from '../../lib/types'
+import type { Recipe, RecipeFormData, Difficulty, NutritionEntry, RecipeComponent, RecipeSecret } from '../../lib/types'
 import { adminApi } from '../../lib/api'
 import { useCategories } from '../../hooks/useCategories'
 import { Button } from '../ui/Button'
@@ -33,6 +33,7 @@ function defaultComponent(): RecipeComponent {
     title: '',
     description: null,
     ingredients: [{ amount: '', unit: '', item: '' }],
+    prep_steps: [],
     instructions: [{ step: 1, text: '' }],
     prep_time_minutes: null,
     cook_time_minutes: null,
@@ -40,9 +41,14 @@ function defaultComponent(): RecipeComponent {
   }
 }
 
+function defaultSecret(): RecipeSecret {
+  return { title: '', body: '' }
+}
+
 export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) {
   const [title, setTitle] = useState(recipe?.title ?? '')
   const [description, setDescription] = useState(recipe?.description ?? '')
+  const [about, setAbout] = useState(recipe?.about ?? '')
   const [imageUrl, setImageUrl] = useState(recipe?.image_url ?? '')
   const [difficulty, setDifficulty] = useState<Difficulty>(recipe?.difficulty ?? 'easy')
   const [prepTime, setPrepTime] = useState(String(recipe?.prep_time_minutes ?? 0))
@@ -65,10 +71,12 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   const [ingredients, setIngredients] = useState(
     recipe?.ingredients ?? [{ amount: '', unit: '', item: '' }]
   )
+  const [prepSteps, setPrepSteps] = useState(recipe?.prep_steps ?? [])
   const [instructions, setInstructions] = useState(
     recipe?.instructions ?? [{ step: 1, text: '' }]
   )
   const [nutrition, setNutrition] = useState<NutritionEntry[]>(recipe?.nutrition ?? [])
+  const [secrets, setSecrets] = useState<RecipeSecret[]>(recipe?.secrets ?? [])
 
   // Multi-component mode
   const hasExistingComponents = (recipe?.components?.length ?? 0) > 0
@@ -124,6 +132,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
       updated_at: new Date().toISOString(),
       title: title.trim() || 'Untitled Recipe',
       description: description.trim(),
+      about: about.trim() || null,
       image_url: imageUrl.trim() || null,
       difficulty,
       prep_time_minutes: parseInt(prepTime) || 0,
@@ -132,11 +141,13 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
       published,
       categories,
       ingredients: multiComponent ? [] : ingredients,
+      prep_steps: multiComponent ? [] : prepSteps,
       instructions: multiComponent ? [] : instructions,
       nutrition,
       components: multiComponent ? components : null,
       receipt_urls: receiptUrls,
       labels,
+      secrets,
     }
   }
 
@@ -240,6 +251,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
       await onSubmit({
         title: title.trim(),
         description: description.trim(),
+        about: about.trim() || null,
         image_url: imageUrl.trim() || null,
         difficulty,
         prep_time_minutes: parseInt(prepTime) || 0,
@@ -248,11 +260,13 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         published,
         categories,
         ingredients: multiComponent ? [] : ingredients,
+        prep_steps: multiComponent ? [] : prepSteps,
         instructions: multiComponent ? [] : instructions,
         nutrition,
         components: multiComponent ? components : null,
         receipt_urls: receiptUrls,
         labels,
+        secrets,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -276,7 +290,21 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
             rows={3}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+            className="resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="about" className="text-sm font-medium text-gray-700">
+            About this dish <span className="text-xs font-normal text-gray-400">(optional)</span>
+          </label>
+          <p className="text-xs text-gray-400">Cultural origin, regional context, what makes this dish special. Richer and more narrative than the description.</p>
+          <textarea
+            id="about"
+            rows={5}
+            value={about}
+            onChange={(e) => setAbout(e.target.value)}
+            placeholder="e.g. Carbonara is one of Rome's four canonical pasta dishes…"
+            className="resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
           />
         </div>
 
@@ -448,11 +476,60 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
             <IngredientEditor value={ingredients} onChange={setIngredients} />
           </Section>
 
+          <Section title="Prep steps (optional)">
+            <p className="text-xs text-gray-400 -mt-2">
+              How to prepare ingredients before cooking starts — trimming, marinating, toasting spices, etc.
+            </p>
+            <InstructionEditor value={prepSteps} onChange={setPrepSteps} />
+          </Section>
+
           <Section title="Instructions">
             <InstructionEditor value={instructions} onChange={setInstructions} />
           </Section>
         </>
       )}
+
+      <Section title="Chef's secrets (optional)">
+        <p className="text-xs text-gray-400 -mt-2">
+          Titled explanations of why a technique works, old-school methods, or professional kitchen tricks.
+        </p>
+        {secrets.map((secret, idx) => (
+          <div key={idx} className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={secret.title}
+                onChange={(e) => setSecrets((prev) => prev.map((s, i) => i === idx ? { ...s, title: e.target.value } : s))}
+                placeholder='e.g. "The Emulsification Window"'
+                className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+              />
+              <button
+                type="button"
+                onClick={() => setSecrets((prev) => prev.filter((_, i) => i !== idx))}
+                className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                aria-label="Remove secret"
+              >
+                ✕
+              </button>
+            </div>
+            <textarea
+              rows={4}
+              value={secret.body}
+              onChange={(e) => setSecrets((prev) => prev.map((s, i) => i === idx ? { ...s, body: e.target.value } : s))}
+              placeholder="Explanation of the technique, and optionally the science behind it…"
+              className="resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+            />
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => setSecrets((prev) => [...prev, defaultSecret()])}
+        >
+          + Add secret
+        </Button>
+      </Section>
 
       <Section title="Nutrition (optional)">
         <p className="text-xs text-gray-400 -mt-2">Per serving. Add any nutrients — calories, macros, vitamins, minerals, etc.</p>

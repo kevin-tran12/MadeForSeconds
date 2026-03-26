@@ -23,11 +23,17 @@ class NutritionEntry(BaseModel):
     unit: str = ""
 
 
+class RecipeSecret(BaseModel):
+    title: str
+    body: str
+
+
 class RecipeComponent(BaseModel):
     """A sub-recipe within a multi-component dish (e.g. the rice in Hainanese Chicken Rice)."""
     title: str
     description: str | None = None
     ingredients: list[Ingredient] = []
+    prep_steps: list[Instruction] = []
     instructions: list[Instruction] = []
     prep_time_minutes: int | None = None
     cook_time_minutes: int | None = None
@@ -37,7 +43,9 @@ class RecipeComponent(BaseModel):
 class RecipeCreate(BaseModel):
     title: str
     description: str = ""
+    about: str | None = None
     ingredients: list[Ingredient] = []
+    prep_steps: list[Instruction] = []
     instructions: list[Instruction] = []
     prep_time_minutes: int = 0
     cook_time_minutes: int = 0
@@ -50,12 +58,15 @@ class RecipeCreate(BaseModel):
     components: list[RecipeComponent] | None = None
     receipt_urls: list[str] = []
     labels: list[str] = []
+    secrets: list[RecipeSecret] = []
 
 
 class RecipeUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
+    about: str | None = None
     ingredients: list[Ingredient] | None = None
+    prep_steps: list[Instruction] | None = None
     instructions: list[Instruction] | None = None
     prep_time_minutes: int | None = None
     cook_time_minutes: int | None = None
@@ -68,6 +79,7 @@ class RecipeUpdate(BaseModel):
     components: list[RecipeComponent] | None = None
     receipt_urls: list[str] | None = None
     labels: list[str] | None = None
+    secrets: list[RecipeSecret] | None = None
 
 
 class Recipe(BaseModel):
@@ -75,7 +87,9 @@ class Recipe(BaseModel):
     title: str
     slug: str
     description: str
+    about: str | None = None
     ingredients: list[Ingredient]
+    prep_steps: list[Instruction] = []
     instructions: list[Instruction]
     prep_time_minutes: int
     cook_time_minutes: int
@@ -90,6 +104,7 @@ class Recipe(BaseModel):
     components: list[RecipeComponent] | None = None
     receipt_urls: list[str] = []
     labels: list[str] = []
+    secrets: list[RecipeSecret] = []
 
 
 class PaginatedRecipes(BaseModel):
