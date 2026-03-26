@@ -25,7 +25,8 @@ jobs:
         run: bandit -r backend/app -ll
 
       - name: pip-audit — Python dependency CVEs
-        run: pip-audit -r backend/requirements.txt
+        # CVE-2026-4539: pygments (via rich) — no fix released yet, ignore until patch ships
+        run: pip-audit -r backend/requirements.txt --ignore-vuln CVE-2026-4539
 
       - name: Set up Node
         uses: actions/setup-node@v4
