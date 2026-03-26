@@ -2,6 +2,7 @@ const SEARCH_BY_OPTIONS = [
   { value: 'all', label: 'All' },
   { value: 'name', label: 'Name' },
   { value: 'ingredient', label: 'Ingredient' },
+  { value: 'label', label: 'Label' },
 ]
 
 interface RecipeSearchProps {

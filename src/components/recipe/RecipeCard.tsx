@@ -59,6 +59,21 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
             ))}
           </div>
         )}
+
+        {(recipe.labels?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {recipe.labels!.slice(0, 3).map((label) => (
+              <span key={label} className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-500 capitalize">
+                {label}
+              </span>
+            ))}
+            {recipe.labels!.length > 3 && (
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-400">
+                +{recipe.labels!.length - 3}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </Link>
   )

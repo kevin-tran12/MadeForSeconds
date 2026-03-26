@@ -10,10 +10,12 @@ export async function listPublicRecipes(
   searchBy?: string,
   limit?: number,
   cursor?: string,
+  label?: string,
 ): Promise<PaginatedRecipes> {
   const params = new URLSearchParams()
   if (search) params.set('search', search)
   if (category) params.set('category', category)
+  if (label) params.set('label', label)
   if (searchBy && searchBy !== 'all') params.set('search_by', searchBy)
   if (limit) params.set('limit', String(limit))
   if (cursor) params.set('cursor', cursor)

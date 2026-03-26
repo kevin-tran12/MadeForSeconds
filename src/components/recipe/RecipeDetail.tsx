@@ -277,13 +277,27 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         <div className="flex-1">
           {/* Categories */}
           {recipe.categories.length > 0 && (
-            <div className="mb-4 flex flex-wrap gap-2">
+            <div className="mb-3 flex flex-wrap gap-2">
               {recipe.categories.map((cat) => (
                 <Link key={cat} to={`/recipes?category=${encodeURIComponent(cat)}`}>
                   <Badge variant="primary" className="capitalize cursor-pointer hover:bg-primary-600 hover:text-white transition-colors">
                     {cat}
                   </Badge>
                 </Link>
+              ))}
+            </div>
+          )}
+
+          {/* Labels */}
+          {(recipe.labels?.length ?? 0) > 0 && (
+            <div className="mb-4 flex flex-wrap gap-1.5">
+              {recipe.labels!.map((lbl) => (
+                <span
+                  key={lbl}
+                  className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium capitalize text-gray-500"
+                >
+                  {lbl}
+                </span>
               ))}
             </div>
           )}
