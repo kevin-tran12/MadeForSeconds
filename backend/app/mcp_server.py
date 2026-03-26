@@ -17,7 +17,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .config import settings
 from .firestore import get_db
-from .models import Ingredient, Instruction, NutritionEntry, RecipeComponent, RecipeCreate
+from .models import Ingredient, Instruction, NutritionEntry, RecipeComponent, RecipeCreate, RecipeSecret
 from .validation import get_invalid_categories
 from .models_expense import (
     EXPENSE_CATEGORIES,
@@ -120,7 +120,9 @@ def _write_revision(db, expense_id: str, revision: int, snapshot: dict, summary:
 def create_recipe(
     title: str,
     description: str = "",
+    about: str | None = None,
     ingredients: list[dict] = [],
+    prep_steps: list[dict] = [],
     instructions: list[dict] = [],
     prep_time_minutes: int = 0,
     cook_time_minutes: int = 0,
@@ -130,21 +132,24 @@ def create_recipe(
     nutrition: list[dict] = [],
     image_url: str | None = None,
     components: list[dict] | None = None,
+    secrets: list[dict] = [],
 ) -> dict:
     """Create a new recipe draft on MadeForSeconds.
 
     The recipe is saved as unpublished. Review and publish it from the admin dashboard.
 
     Each ingredient dict must have: item (str), amount (str), unit (str), and optionally group (str).
-    Each instruction dict must have: step (int), text (str), and optionally tip (str).
+    Each instruction/prep_step dict must have: step (int), text (str), and optionally tip (str).
     Each nutrition dict must have: label (str), value (float), unit (str).
+    Each secret dict must have: title (str), body (str).
     Difficulty must be one of: easy, medium, hard.
+    about is optional — cultural/historical context, richer than the description.
     image_url is optional — a publicly accessible URL to the recipe photo.
 
     For multi-component dishes (e.g. Hainanese Chicken Rice with separate rice, sauces):
       Pass components as a list of up to 5 dicts, each with:
         title (str), description (str, optional),
-        ingredients (list[dict]), instructions (list[dict]),
+        ingredients (list[dict]), prep_steps (list[dict], optional), instructions (list[dict]),
         prep_time_minutes (int, optional), cook_time_minutes (int, optional),
         yield_description (str, optional — e.g. "About ½ cup" for sauces).
       When components is provided, top-level ingredients/instructions should be empty.
@@ -157,6 +162,7 @@ def create_recipe(
                 title=c["title"],
                 description=c.get("description"),
                 ingredients=[Ingredient(**ing) for ing in c.get("ingredients", [])],
+                prep_steps=[Instruction(**s) for s in c.get("prep_steps", [])],
                 instructions=[Instruction(**inst) for inst in c.get("instructions", [])],
                 prep_time_minutes=c.get("prep_time_minutes"),
                 cook_time_minutes=c.get("cook_time_minutes"),
@@ -169,7 +175,9 @@ def create_recipe(
     recipe = RecipeCreate(
         title=title,
         description=description,
+        about=about,
         ingredients=[Ingredient(**ing) for ing in ingredients],
+        prep_steps=[Instruction(**s) for s in prep_steps],
         instructions=[Instruction(**inst) for inst in instructions],
         prep_time_minutes=prep_time_minutes,
         cook_time_minutes=cook_time_minutes,
@@ -180,6 +188,7 @@ def create_recipe(
         image_url=image_url,
         published=False,
         components=parsed_components,
+        secrets=[RecipeSecret(**s) for s in secrets],
     )
 
     db = get_db()
