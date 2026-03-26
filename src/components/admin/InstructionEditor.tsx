@@ -40,8 +40,8 @@ export function InstructionEditor({ value, onChange }: InstructionEditorProps) {
               value={inst.text}
               onChange={(e) => updateText(i, e.target.value)}
               placeholder={`Step ${inst.step}…`}
-              rows={2}
-              className="resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
+              rows={3}
+              className="resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
             />
             {inst.tip != null ? (
               <div className="flex gap-2">
@@ -50,7 +50,7 @@ export function InstructionEditor({ value, onChange }: InstructionEditorProps) {
                   onChange={(e) => updateTip(i, e.target.value)}
                   placeholder="Tip or visual cue for this step…"
                   rows={2}
-                  className="flex-1 resize-none rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
+                  className="flex-1 resize-y rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
                 />
                 <button
                   type="button"
