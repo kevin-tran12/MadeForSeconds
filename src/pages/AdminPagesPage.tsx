@@ -9,7 +9,7 @@ export function AdminPagesPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-10">
       <div className="mb-6 flex items-center gap-3">
-        <Link to="/admin" className="text-sm text-gray-500 hover:text-gray-700">← Dashboard</Link>
+        <Link to="/admin/" className="text-sm text-gray-500 hover:text-gray-700">← Dashboard</Link>
         <span className="text-gray-300">/</span>
         <h1 className="font-display text-2xl font-bold text-gray-900">Pages</h1>
       </div>
@@ -18,7 +18,7 @@ export function AdminPagesPage() {
         {PAGES.map((page) => (
           <Link
             key={page.id}
-            to={`/admin/pages/${page.id}`}
+            to={`/admin/pages/${page.id}/`}
             className="flex items-center justify-between rounded-xl border border-surface-darker bg-white px-5 py-4 transition-colors hover:border-primary-200 hover:bg-primary-50/30"
           >
             <div>

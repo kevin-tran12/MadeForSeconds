@@ -15,7 +15,7 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
 
   return (
     <Link
-      to={`/recipes/${recipe.slug}`}
+      to={`/recipes/${recipe.slug}/`}
       className="group flex flex-col overflow-hidden rounded-2xl border border-surface-darker bg-white shadow-sm transition-all hover:-translate-y-2 hover:shadow-xl hover:shadow-primary-100/50"
     >
       {/* Image */}

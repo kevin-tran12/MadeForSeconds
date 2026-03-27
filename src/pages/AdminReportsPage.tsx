@@ -67,7 +67,7 @@ export function AdminReportsPage() {
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <Link to="/admin/expenses" className="text-sm text-primary-600 hover:text-primary-700 mb-1 inline-block">
+          <Link to="/admin/expenses/" className="text-sm text-primary-600 hover:text-primary-700 mb-1 inline-block">
             ← Back to Expenses
           </Link>
           <h1 className="text-2xl font-bold text-gray-900 font-display">Expense Reports</h1>

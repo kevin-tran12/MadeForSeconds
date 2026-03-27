@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import type { Instruction } from '../../lib/types'
 import { Button } from '../ui/Button'
 
@@ -6,7 +7,19 @@ interface InstructionEditorProps {
   onChange: (instructions: Instruction[]) => void
 }
 
+function autoResize(el: HTMLTextAreaElement) {
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
 export function InstructionEditor({ value, onChange }: InstructionEditorProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Resize all textareas when value changes (handles pre-filled content on load)
+  useEffect(() => {
+    containerRef.current?.querySelectorAll('textarea').forEach((el) => autoResize(el))
+  }, [value])
+
   function add() {
     onChange([...value, { step: value.length + 1, text: '' }])
   }
@@ -29,28 +42,32 @@ export function InstructionEditor({ value, onChange }: InstructionEditorProps) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div ref={containerRef} className="flex flex-col gap-8">
       {value.map((inst, i) => (
         <div key={i} className="flex gap-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-bold text-primary-700 mt-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-bold text-primary-700 mt-1.5">
             {inst.step}
           </span>
           <div className="flex flex-1 flex-col gap-1.5">
             <textarea
               value={inst.text}
               onChange={(e) => updateText(i, e.target.value)}
+              onInput={(e) => autoResize(e.currentTarget)}
               placeholder={`Step ${inst.step}…`}
-              rows={3}
-              className="resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
+              rows={1}
+              style={{ overflow: 'hidden' }}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
             />
             {inst.tip != null ? (
               <div className="flex gap-2">
                 <textarea
                   value={inst.tip}
                   onChange={(e) => updateTip(i, e.target.value)}
+                  onInput={(e) => autoResize(e.currentTarget)}
                   placeholder="Tip or visual cue for this step…"
-                  rows={2}
-                  className="flex-1 resize-y rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
+                  rows={1}
+                  style={{ overflow: 'hidden' }}
+                  className="flex-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
                 />
                 <button
                   type="button"
@@ -76,7 +93,7 @@ export function InstructionEditor({ value, onChange }: InstructionEditorProps) {
           <button
             type="button"
             onClick={() => remove(i)}
-            className="self-start rounded-lg p-1 text-gray-400 hover:text-red-500 mt-2"
+            className="self-start rounded-lg p-1 text-gray-400 hover:text-red-500 mt-1.5"
             aria-label="Remove step"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

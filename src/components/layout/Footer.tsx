@@ -21,7 +21,7 @@ export function Footer() {
               Supported by
             </p>
             <p className="text-sm text-gray-600">{topSupporters.join(' · ')}</p>
-            <Link to="/about#supporters" className="mt-0.5 inline-block text-xs text-gray-400 hover:text-gray-600 transition-colors">
+            <Link to="/about/#supporters" className="mt-0.5 inline-block text-xs text-gray-400 hover:text-gray-600 transition-colors">
               See all →
             </Link>
           </div>
@@ -49,13 +49,13 @@ export function Footer() {
           {/* Actions */}
           <div className="flex items-center gap-2">
             <Link
-              to="/support"
+              to="/support/"
               className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
             >
               Donate
             </Link>
             <Link
-              to="/support/cancel"
+              to="/support/cancel/"
               className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors"
             >
               Cancel recurring donation

@@ -60,7 +60,7 @@ export function SearchWithSuggestions({
     setOpen(false)
     setQuery('')
     onClose?.()
-    navigate(`/recipes/${recipe.slug}`)
+    navigate(`/recipes/${recipe.slug}/`)
   }
 
   function submit() {
@@ -71,9 +71,9 @@ export function SearchWithSuggestions({
       const params = new URLSearchParams()
       params.set('q', q)
       if (searchBy !== 'all') params.set('search_by', searchBy)
-      navigate(`/recipes?${params.toString()}`)
+      navigate(`/recipes/?${params.toString()}`)
     } else {
-      navigate('/recipes')
+      navigate('/recipes/')
     }
   }
 
