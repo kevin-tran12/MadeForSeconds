@@ -85,7 +85,7 @@ export function AboutPage() {
                   ))}
                 </div>
                 <Link
-                  to="/support"
+                  to="/support/"
                   className="inline-flex rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
                 >
                   Join them
@@ -97,7 +97,7 @@ export function AboutPage() {
                   Be the first to support MadeForSeconds.
                 </p>
                 <Link
-                  to="/support"
+                  to="/support/"
                   className="inline-flex rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
                 >
                   Support us

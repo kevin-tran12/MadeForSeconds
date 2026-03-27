@@ -62,7 +62,7 @@ export function SupportCancelPage() {
             </h1>
             <p className="text-gray-600 mb-8">{confirmMessage}</p>
             <Link
-              to="/recipes"
+              to="/recipes/"
               className="inline-flex rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors"
             >
               Browse recipes
@@ -76,7 +76,7 @@ export function SupportCancelPage() {
             </h1>
             <p className="text-gray-600 mb-4">{confirmError}</p>
             <Link
-              to="/support/cancel"
+              to="/support/cancel/"
               className="text-sm font-medium text-amber-600 hover:text-amber-700 transition-colors"
             >
               Try again

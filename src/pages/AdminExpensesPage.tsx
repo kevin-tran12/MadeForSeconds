@@ -73,16 +73,16 @@ export function AdminExpensesPage() {
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <Link to="/admin" className="text-sm text-primary-600 hover:text-primary-700 mb-1 inline-block">
+          <Link to="/admin/" className="text-sm text-primary-600 hover:text-primary-700 mb-1 inline-block">
             ← Back to Dashboard
           </Link>
           <h1 className="text-2xl font-bold text-gray-900 font-display">Expense Ledger</h1>
         </div>
         <div className="flex gap-2">
-          <Link to="/admin/expenses/reports">
+          <Link to="/admin/expenses/reports/">
             <Button variant="secondary">Reports</Button>
           </Link>
-          <Link to="/admin/expenses/new">
+          <Link to="/admin/expenses/new/">
             <Button>+ New Expense</Button>
           </Link>
         </div>
@@ -165,7 +165,7 @@ export function AdminExpensesPage() {
       <ExpenseTable
         expenses={expenses}
         loading={loading}
-        onView={(id) => navigate(`/admin/expenses/${id}`)}
+        onView={(id) => navigate(`/admin/expenses/${id}/`)}
         onVoid={handleVoid}
       />
     </div>

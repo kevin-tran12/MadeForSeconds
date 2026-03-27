@@ -53,7 +53,7 @@ export function AdminDashboardPage() {
   function handlePreview(recipe: Recipe) {
     const mode = (localStorage.getItem('recipe-preview-mode') as 'tab' | 'panel') ?? 'tab'
     if (mode === 'tab') {
-      window.open(`/admin/preview/${recipe.id}`, '_blank')?.focus()
+      window.open(`/admin/preview/${recipe.id}/`, '_blank')?.focus()
     } else {
       setPreviewRecipe(recipe)
       setShowPreviewPanel(true)
@@ -62,12 +62,12 @@ export function AdminDashboardPage() {
 
   function handlePreviewOpenInTab() {
     if (!previewRecipe) return
-    window.open(`/admin/preview/${previewRecipe.id}`, '_blank')?.focus()
+    window.open(`/admin/preview/${previewRecipe.id}/`, '_blank')?.focus()
   }
 
   function handleImportSuccess(data: RecipeFormData) {
     setShowImport(false)
-    navigate('/admin/new', { state: { prefill: data } })
+    navigate('/admin/new/', { state: { prefill: data } })
   }
 
   const tabClass = (t: Tab) =>
@@ -106,7 +106,7 @@ export function AdminDashboardPage() {
         {tab === 'recipes' && (
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => setShowImport(true)}>Import recipe</Button>
-            <Link to="/admin/new">
+            <Link to="/admin/new/">
               <Button>+ New recipe</Button>
             </Link>
           </div>
@@ -123,7 +123,7 @@ export function AdminDashboardPage() {
         <RecipeTable
           recipes={recipes}
           loading={loading}
-          onEdit={(id) => navigate(`/admin/edit/${id}`)}
+          onEdit={(id) => navigate(`/admin/edit/${id}/`)}
           onDelete={handleDelete}
           onTogglePublish={handleTogglePublish}
           onPreview={handlePreview}
@@ -136,7 +136,7 @@ export function AdminDashboardPage() {
         <div className="rounded-xl border border-surface-darker bg-white p-8 text-center">
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Expense Ledger</h3>
           <p className="text-sm text-gray-500 mb-4">Track purchases, upload receipts, and generate tax reports.</p>
-          <Link to="/admin/expenses">
+          <Link to="/admin/expenses/">
             <Button>Open Expense Ledger</Button>
           </Link>
         </div>
@@ -146,7 +146,7 @@ export function AdminDashboardPage() {
         <div className="rounded-xl border border-surface-darker bg-white p-8 text-center">
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Category Manager</h3>
           <p className="text-sm text-gray-500 mb-4">Add or remove the categories available to assign to recipes.</p>
-          <Link to="/admin/categories">
+          <Link to="/admin/categories/">
             <Button>Manage Categories</Button>
           </Link>
         </div>
@@ -156,7 +156,7 @@ export function AdminDashboardPage() {
         <div className="rounded-xl border border-surface-darker bg-white p-8 text-center">
           <h3 className="text-lg font-semibold text-gray-900 mb-2">Page Content</h3>
           <p className="text-sm text-gray-500 mb-4">Edit the text on the Home and About pages without deploying.</p>
-          <Link to="/admin/pages">
+          <Link to="/admin/pages/">
             <Button>Edit Pages</Button>
           </Link>
         </div>

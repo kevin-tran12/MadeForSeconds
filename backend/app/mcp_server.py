@@ -18,7 +18,6 @@ from mcp.server.fastmcp import FastMCP
 from .config import settings
 from .firestore import get_db
 from .models import Ingredient, Instruction, NutritionEntry, RecipeComponent, RecipeCreate, RecipeSecret
-from .validation import get_invalid_categories
 from .models_expense import (
     EXPENSE_CATEGORIES,
     ExpenseItem,
@@ -128,7 +127,7 @@ def create_recipe(
     cook_time_minutes: int = 0,
     servings: int = 1,
     difficulty: str = "easy",
-    categories: list[str] = [],
+    labels: list[str] = [],
     nutrition: list[dict] = [],
     image_url: str | None = None,
     components: list[dict] | None = None,
@@ -144,6 +143,7 @@ def create_recipe(
     Each secret dict must have: title (str), body (str).
     Difficulty must be one of: easy, medium, hard.
     about is optional — cultural/historical context, richer than the description.
+    labels are free-form tags (cuisine, ingredient, occasion, etc.) — e.g. ["Malaysian", "pork", "braised"].
     image_url is optional — a publicly accessible URL to the recipe photo.
 
     For multi-component dishes (e.g. Hainanese Chicken Rice with separate rice, sauces):
@@ -183,7 +183,8 @@ def create_recipe(
         cook_time_minutes=cook_time_minutes,
         servings=servings,
         difficulty=difficulty,
-        categories=categories,
+        categories=[],
+        labels=labels,
         nutrition=[NutritionEntry(**n) for n in nutrition],
         image_url=image_url,
         published=False,
@@ -192,16 +193,6 @@ def create_recipe(
     )
 
     db = get_db()
-
-    # Validate categories against admin-configured allowed list
-    invalid = get_invalid_categories(db, recipe.categories)
-    if invalid:
-        allowed_doc = db.collection("config").document("categories").get()
-        allowed = sorted(allowed_doc.to_dict().get("list", [])) if allowed_doc.exists else []
-        return {
-            "error": f"Unknown categories: {invalid}. Allowed: {', '.join(allowed)}",
-        }
-
     now = datetime.now(timezone.utc)
     data = recipe.model_dump()
     data["slug"] = _generate_slug(recipe.title)

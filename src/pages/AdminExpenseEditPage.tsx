@@ -140,7 +140,7 @@ export function AdminExpenseEditPage() {
         } as never)
       }
 
-      navigate('/admin/expenses')
+      navigate('/admin/expenses/')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -155,7 +155,7 @@ export function AdminExpenseEditPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10">
-      <Link to="/admin/expenses" className="text-sm text-primary-600 hover:text-primary-700 mb-4 inline-block">
+      <Link to="/admin/expenses/" className="text-sm text-primary-600 hover:text-primary-700 mb-4 inline-block">
         ← Back to Expenses
       </Link>
       <h1 className="mb-6 text-2xl font-bold text-gray-900 font-display">
@@ -410,7 +410,7 @@ export function AdminExpenseEditPage() {
 
         {/* Submit */}
         <div className="flex items-center justify-end gap-3">
-          <Link to="/admin/expenses">
+          <Link to="/admin/expenses/">
             <Button type="button" variant="secondary">
               Cancel
             </Button>
