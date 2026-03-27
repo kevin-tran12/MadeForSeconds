@@ -45,7 +45,7 @@ export function AdminRecipeEditPage() {
       } else {
         await adminApi.createRecipe(data)
       }
-      navigate('/admin')
+      navigate('/admin/')
     } finally {
       setIsSubmitting(false)
     }
@@ -57,7 +57,7 @@ export function AdminRecipeEditPage() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-24 text-center">
         <p className="text-red-600">{loadError}</p>
-        <Link to="/admin" className="mt-4 inline-block text-sm text-primary-600 hover:underline">
+        <Link to="/admin/" className="mt-4 inline-block text-sm text-primary-600 hover:underline">
           ← Back to admin
         </Link>
       </div>
@@ -67,7 +67,7 @@ export function AdminRecipeEditPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
       <div className="mb-6 flex items-center gap-3">
-        <Link to="/admin" className="text-sm text-gray-500 hover:text-gray-700">
+        <Link to="/admin/" className="text-sm text-gray-500 hover:text-gray-700">
           ← Admin
         </Link>
         <span className="text-gray-300">/</span>

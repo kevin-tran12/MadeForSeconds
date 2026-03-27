@@ -32,14 +32,14 @@ export function Header() {
             <NavLink to="/" end className={navLinkClass}>
               Home
             </NavLink>
-            <NavLink to="/recipes" className={navLinkClass}>
+            <NavLink to="/recipes/" className={navLinkClass}>
               Recipes
             </NavLink>
-            <NavLink to="/about" className={navLinkClass}>
+            <NavLink to="/about/" className={navLinkClass}>
               About
             </NavLink>
             {isAdmin && (
-              <NavLink to="/admin" className={navLinkClass}>
+              <NavLink to="/admin/" className={navLinkClass}>
                 Admin
               </NavLink>
             )}
@@ -108,7 +108,7 @@ export function Header() {
         {/* Auth area (desktop) */}
         <div className="hidden md:flex items-center gap-2">
           <Link
-            to="/support"
+            to="/support/"
             className="rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
           >
             Donate
@@ -149,20 +149,20 @@ export function Header() {
             <NavLink to="/" end className={navLinkClass} onClick={() => setMobileOpen(false)}>
               Home
             </NavLink>
-            <NavLink to="/recipes" className={navLinkClass} onClick={() => setMobileOpen(false)}>
+            <NavLink to="/recipes/" className={navLinkClass} onClick={() => setMobileOpen(false)}>
               Recipes
             </NavLink>
-            <NavLink to="/about" className={navLinkClass} onClick={() => setMobileOpen(false)}>
+            <NavLink to="/about/" className={navLinkClass} onClick={() => setMobileOpen(false)}>
               About
             </NavLink>
             {isAdmin && (
-              <NavLink to="/admin" className={navLinkClass} onClick={() => setMobileOpen(false)}>
+              <NavLink to="/admin/" className={navLinkClass} onClick={() => setMobileOpen(false)}>
                 Admin
               </NavLink>
             )}
             <div className="border-t border-surface-darker pt-3 mt-1 flex flex-col gap-2">
               <Link
-                to="/support"
+                to="/support/"
                 onClick={() => setMobileOpen(false)}
                 className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white text-center hover:bg-amber-600 transition-colors"
               >
