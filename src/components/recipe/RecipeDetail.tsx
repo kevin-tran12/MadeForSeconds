@@ -307,7 +307,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
           {recipe.categories.length > 0 && (
             <div className="mb-3 flex flex-wrap gap-2">
               {recipe.categories.map((cat) => (
-                <Link key={cat} to={`/recipes?category=${encodeURIComponent(cat)}`}>
+                <Link key={cat} to={`/recipes/?category=${encodeURIComponent(cat)}`}>
                   <Badge variant="primary" className="capitalize cursor-pointer hover:bg-primary-600 hover:text-white transition-colors">
                     {cat}
                   </Badge>

@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, useLocation, Navigate, Outlet } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { Layout } from './components/layout/Layout'
 import { AdminRoute } from './components/admin/AdminRoute'
@@ -21,37 +21,50 @@ import { SupportPage } from './pages/SupportPage'
 import { SupportSuccessPage } from './pages/SupportSuccessPage'
 import { SupportCancelPage } from './pages/SupportCancelPage'
 
+function EnsureTrailingSlash() {
+  const { pathname, search, hash } = useLocation()
+  if (!pathname.endsWith('/')) {
+    return <Navigate to={`${pathname}/${search}${hash}`} replace />
+  }
+  return <Outlet />
+}
+
 const router = createBrowserRouter([
   {
-    path: '/',
-    element: <Layout />,
-    errorElement: <NotFoundPage />,
+    element: <EnsureTrailingSlash />,
     children: [
-      { index: true, element: <HomePage /> },
-      { path: 'recipes', element: <RecipesPage /> },
-      { path: 'recipes/:slug', element: <RecipeDetailPage /> },
-      { path: 'about', element: <AboutPage /> },
-      { path: 'support', element: <SupportPage /> },
-      { path: 'support/success', element: <SupportSuccessPage /> },
-      { path: 'support/cancel', element: <SupportCancelPage /> },
       {
-        path: 'admin',
-        element: <AdminRoute />,
+        path: '/',
+        element: <Layout />,
+        errorElement: <NotFoundPage />,
         children: [
-          { index: true, element: <AdminDashboardPage /> },
-          { path: 'new', element: <AdminRecipeEditPage /> },
-          { path: 'edit/:id', element: <AdminRecipeEditPage /> },
-          { path: 'preview/:id', element: <AdminRecipePreviewPage /> },
-          { path: 'categories', element: <AdminCategoriesPage /> },
-          { path: 'pages', element: <AdminPagesPage /> },
-          { path: 'pages/:pageId', element: <AdminPageEditPage /> },
+          { index: true, element: <HomePage /> },
+          { path: 'recipes/', element: <RecipesPage /> },
+          { path: 'recipes/:slug/', element: <RecipeDetailPage /> },
+          { path: 'about/', element: <AboutPage /> },
+          { path: 'support/', element: <SupportPage /> },
+          { path: 'support/success/', element: <SupportSuccessPage /> },
+          { path: 'support/cancel/', element: <SupportCancelPage /> },
           {
-            element: <TotpGate />,
+            path: 'admin/',
+            element: <AdminRoute />,
             children: [
-              { path: 'expenses', element: <AdminExpensesPage /> },
-              { path: 'expenses/new', element: <AdminExpenseEditPage /> },
-              { path: 'expenses/reports', element: <AdminReportsPage /> },
-              { path: 'expenses/:id', element: <AdminExpenseEditPage /> },
+              { index: true, element: <AdminDashboardPage /> },
+              { path: 'new/', element: <AdminRecipeEditPage /> },
+              { path: 'edit/:id/', element: <AdminRecipeEditPage /> },
+              { path: 'preview/:id/', element: <AdminRecipePreviewPage /> },
+              { path: 'categories/', element: <AdminCategoriesPage /> },
+              { path: 'pages/', element: <AdminPagesPage /> },
+              { path: 'pages/:pageId/', element: <AdminPageEditPage /> },
+              {
+                element: <TotpGate />,
+                children: [
+                  { path: 'expenses/', element: <AdminExpensesPage /> },
+                  { path: 'expenses/new/', element: <AdminExpenseEditPage /> },
+                  { path: 'expenses/reports/', element: <AdminReportsPage /> },
+                  { path: 'expenses/:id/', element: <AdminExpenseEditPage /> },
+                ],
+              },
             ],
           },
         ],

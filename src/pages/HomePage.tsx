@@ -41,13 +41,13 @@ export function HomePage() {
 
           <div className="mt-6 flex flex-col items-center justify-center gap-4 sm:flex-row">
             <Link
-              to="/recipes"
+              to="/recipes/"
               className="rounded-xl bg-primary-500 px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-black/30 transition-all hover:bg-primary-400 hover:shadow-xl active:scale-95"
             >
               Browse recipes
             </Link>
             <Link
-              to="/about"
+              to="/about/"
               className="rounded-xl border border-white/50 px-8 py-4 text-lg font-semibold text-white transition-all hover:bg-white/10 active:scale-95"
             >
               Learn more
@@ -69,7 +69,7 @@ export function HomePage() {
             {categories.map((cat) => (
               <Link
                 key={cat}
-                to={`/recipes?category=${encodeURIComponent(cat)}`}
+                to={`/recipes/?category=${encodeURIComponent(cat)}`}
                 className="group flex items-center gap-2 rounded-2xl bg-surface-dark border border-surface-darker px-6 py-3 text-base font-medium capitalize text-gray-700 transition-all hover:bg-primary-600 hover:text-white hover:shadow-lg hover:shadow-primary-100 active:scale-95"
               >
                 {cat}
@@ -83,7 +83,7 @@ export function HomePage() {
       <section className="mx-auto max-w-6xl px-4 pb-24">
         <div className="mb-8 flex items-center justify-between border-b border-gray-100 pb-4">
           <h2 className="font-display text-2xl font-bold text-gray-900 md:text-3xl">Latest recipes</h2>
-          <Link to="/recipes" className="group flex items-center gap-1 text-sm font-bold text-primary-600 transition-colors hover:text-primary-700">
+          <Link to="/recipes/" className="group flex items-center gap-1 text-sm font-bold text-primary-600 transition-colors hover:text-primary-700">
             View all 
             <svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />

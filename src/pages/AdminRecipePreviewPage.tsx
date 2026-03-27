@@ -68,7 +68,7 @@ export function AdminRecipePreviewPage() {
     )
   }
 
-  const editHref = recipe.id !== 'preview-draft' ? `/admin/edit/${recipe.id}` : '/admin'
+  const editHref = recipe.id !== 'preview-draft' ? `/admin/edit/${recipe.id}/` : '/admin/'
 
   return (
     <div className="min-h-screen bg-white">

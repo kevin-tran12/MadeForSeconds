@@ -162,11 +162,11 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     if (previewMode === 'tab') {
       if (recipe?.id) {
         // Saved recipe — just open the page, it fetches from the admin API
-        window.open(`/admin/preview/${recipe.id}`, '_blank')?.focus()
+        window.open(`/admin/preview/${recipe.id}/`, '_blank')?.focus()
       } else {
         // Unsaved draft — localStorage is shared across same-origin tabs
         localStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(current))
-        window.open('/admin/preview/draft', '_blank')?.focus()
+        window.open('/admin/preview/draft/', '_blank')?.focus()
       }
     } else {
       setPanelRecipe(current)
@@ -644,10 +644,10 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
           onClose={() => setShowPreviewPanel(false)}
           onOpenInTab={() => {
             if (recipe?.id) {
-              window.open(`/admin/preview/${recipe.id}`, '_blank')?.focus()
+              window.open(`/admin/preview/${recipe.id}/`, '_blank')?.focus()
             } else {
               localStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(panelRecipe))
-              window.open('/admin/preview/draft', '_blank')?.focus()
+              window.open('/admin/preview/draft/', '_blank')?.focus()
             }
           }}
         />

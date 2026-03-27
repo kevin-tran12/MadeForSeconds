@@ -80,7 +80,7 @@ export function SupportSuccessPage() {
         </h1>
         <p className="text-gray-600 mb-8">{error}</p>
         <Link
-          to="/recipes"
+          to="/recipes/"
           className="inline-flex rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors"
         >
           Browse recipes
@@ -114,7 +114,7 @@ export function SupportSuccessPage() {
             Want a shoutout?
           </h2>
           <p className="text-sm text-gray-600 mb-4">
-            Add a display name to appear on the <Link to="/about#supporters" className="underline hover:text-gray-800">supporters wall</Link>. You can also leave a note — it'll appear once reviewed. Totally optional!
+            Add a display name to appear on the <Link to="/about/#supporters" className="underline hover:text-gray-800">supporters wall</Link>. You can also leave a note — it'll appear once reviewed. Totally optional!
           </p>
           <form onSubmit={handleSave} className="flex flex-col gap-3">
             <input
@@ -180,7 +180,7 @@ export function SupportSuccessPage() {
       ) : null}
 
       <Link
-        to="/recipes"
+        to="/recipes/"
         className="inline-flex rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors"
       >
         Browse recipes

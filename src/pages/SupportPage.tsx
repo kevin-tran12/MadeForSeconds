@@ -147,14 +147,14 @@ export function SupportPage() {
         </button>
 
         <p className="mt-4 text-center text-xs text-gray-500">
-          After donating, you can optionally set a display name and note to be included in the supporters shoutout on the <Link to="/about#supporters" className="underline hover:text-gray-700">About page</Link>.
+          After donating, you can optionally set a display name and note to be included in the supporters shoutout on the <Link to="/about/#supporters" className="underline hover:text-gray-700">About page</Link>.
         </p>
         <p className="mt-2 text-center text-xs text-gray-400">
           {oneTime ? (
             'Powered by Stripe'
           ) : (
             <>
-              <Link to="/support/cancel" className="hover:text-gray-600 underline">Cancel recurring donation</Link>
+              <Link to="/support/cancel/" className="hover:text-gray-600 underline">Cancel recurring donation</Link>
               {' · Powered by Stripe'}
             </>
           )}
