@@ -190,8 +190,8 @@ resource "google_cloud_run_v2_service" "backend" {
     scaling {
       # Scale to zero = free when idle
       min_instance_count = 0
-      # Cap at 2 to stay within free egress budget
-      max_instance_count = 2
+      # Cap at 1 to stay within free tier budget
+      max_instance_count = 1
     }
   }
 }
