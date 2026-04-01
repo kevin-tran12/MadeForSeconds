@@ -37,10 +37,18 @@ def _warm_cache() -> None:
     """Eagerly initialise the Firestore client and pre-populate the Redis cache
     with the main recipe list and categories so the first real request is fast,
     even after a Cloud Run cold start."""
+    from collections import defaultdict
+
+    from google.cloud.firestore_v1.base_query import FieldFilter
+
     from .cache import cache
     from .firestore import get_db
-    from .models import Recipe
-    from google.cloud.firestore_v1.base_query import FieldFilter
+    from .models import (
+        CategoryGroup,
+        GroupedRecipes,
+        PaginatedRecipes,
+        Recipe,
+    )
 
     try:
         db = get_db()
@@ -66,7 +74,27 @@ def _warm_cache() -> None:
             all_cats.update(data.get("categories", []))
 
         if recipes:
-            cache.set("recipes:::all", recipes)
+            # Warm the default /api/recipes response (no filters, limit=12)
+            page = recipes[:12]
+            next_cursor = page[-1].created_at.isoformat() if len(recipes) > 12 else None
+            cache.set(
+                "recipes::::all:12:",
+                PaginatedRecipes(recipes=page, next_cursor=next_cursor),
+            )
+
+            # Warm the /api/recipes/grouped response (homepage)
+            recent = recipes[:6]
+            by_category: dict[str, list[Recipe]] = defaultdict(list)
+            for recipe in recipes:
+                for cat in recipe.categories:
+                    if len(by_category[cat]) < 8:
+                        by_category[cat].append(recipe)
+            groups = [
+                CategoryGroup(category=cat, recipes=recs)
+                for cat, recs in sorted(by_category.items())
+            ]
+            cache.set("recipes:grouped", GroupedRecipes(recent=recent, groups=groups))
+
             cache.set("categories", sorted(all_cats))
             logger.info("Cache warmed: %d recipes, %d categories", len(recipes), len(all_cats))
         else:

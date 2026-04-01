@@ -62,7 +62,7 @@ async def list_recipes(
 
     if search:
         # When searching, fetch a larger batch since we filter in Python
-        fetch_limit = min(limit * 5, 200)
+        fetch_limit = min(limit * 3, 100)
     else:
         fetch_limit = limit + 1  # +1 to detect if there are more pages
 
