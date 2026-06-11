@@ -2,6 +2,7 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from google.auth import credentials as google_auth_credentials
 
 from app.services import uploads
@@ -100,6 +101,101 @@ class TestSignedUrls:
         assert result["required_headers"]["Content-Type"] == "image/jpeg"
         assert result["required_headers"]["x-goog-content-length-range"] == "0,10485760"
         assert result["expires_in_seconds"] == 900
+
+
+# ── fetch_image_to_gcs (SSRF guards) ──────────────────────────────────────────
+
+_PUBLIC_ADDR = [(2, 1, 6, "", ("93.184.216.34", 443))]
+
+
+def _mock_response(mock_httpx, status=200, content_type="image/jpeg", chunks=None):
+    resp = MagicMock()
+    resp.status_code = status
+    resp.headers = {"content-type": content_type}
+    resp.iter_bytes.return_value = chunks if chunks is not None else [b"image-bytes"]
+    client = mock_httpx.Client.return_value.__enter__.return_value
+    client.stream.return_value.__enter__.return_value = resp
+    return resp
+
+
+class TestFetchImageToGcs:
+    def test_rejects_http_scheme(self):
+        with pytest.raises(ValueError, match="https"):
+            uploads.fetch_image_to_gcs("http://example.com/x.jpg")
+
+    def test_rejects_missing_hostname(self):
+        with pytest.raises(ValueError):
+            uploads.fetch_image_to_gcs("https:///x.jpg")
+
+    def test_rejects_private_address(self):
+        with patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("10.0.0.5", 443))]):
+            with pytest.raises(ValueError, match="non-public"):
+                uploads.fetch_image_to_gcs("https://internal.example/x.jpg")
+
+    def test_rejects_loopback(self):
+        with patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("127.0.0.1", 443))]):
+            with pytest.raises(ValueError, match="non-public"):
+                uploads.fetch_image_to_gcs("https://localhost/x.jpg")
+
+    def test_rejects_metadata_server(self):
+        with patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("169.254.169.254", 443))]):
+            with pytest.raises(ValueError, match="non-public"):
+                uploads.fetch_image_to_gcs("https://metadata.google.internal/x.jpg")
+
+    def test_rejects_redirects_and_errors(self):
+        with (
+            patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
+            patch("app.services.uploads.httpx") as mock_httpx,
+        ):
+            _mock_response(mock_httpx, status=302)
+            with pytest.raises(ValueError, match="HTTP 302"):
+                uploads.fetch_image_to_gcs("https://example.com/x.jpg")
+
+    def test_rejects_non_image_content_type(self):
+        with (
+            patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
+            patch("app.services.uploads.httpx") as mock_httpx,
+        ):
+            _mock_response(mock_httpx, content_type="text/html")
+            with pytest.raises(ValueError, match="content type"):
+                uploads.fetch_image_to_gcs("https://example.com/x.jpg")
+
+    def test_rejects_oversized_body(self):
+        with (
+            patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
+            patch("app.services.uploads.httpx") as mock_httpx,
+        ):
+            _mock_response(mock_httpx, chunks=[b"x" * (1024 * 1024)] * 11)
+            with pytest.raises(ValueError, match="10MB"):
+                uploads.fetch_image_to_gcs("https://example.com/huge.jpg")
+
+    def test_uploads_to_images_bucket_in_production(self):
+        with (
+            patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
+            patch("app.services.uploads.httpx") as mock_httpx,
+            patch("app.services.uploads.settings") as mock_settings,
+            patch("app.services.uploads.storage") as mock_storage,
+        ):
+            _mock_response(mock_httpx)
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+
+            url = uploads.fetch_image_to_gcs("https://example.com/photos/dish.jpg")
+
+        assert url.startswith("https://storage.googleapis.com/img-bucket/")
+        assert url.endswith("-dish.jpg")
+        blob = mock_storage.Client.return_value.bucket.return_value.blob.return_value
+        blob.upload_from_string.assert_called_once_with(b"image-bytes", content_type="image/jpeg")
+
+    def test_dev_mode_returns_placeholder(self):
+        with (
+            patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
+            patch("app.services.uploads.httpx") as mock_httpx,
+        ):
+            _mock_response(mock_httpx)
+            url = uploads.fetch_image_to_gcs("https://example.com/x.jpg")
+
+        assert "placehold.co" in url
 
 
 # ── blob URL helpers (bucket-aware wrappers) ──────────────────────────────────
