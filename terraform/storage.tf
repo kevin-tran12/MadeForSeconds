@@ -9,8 +9,8 @@ resource "google_storage_bucket" "images" {
   uniform_bucket_level_access = true
 
   cors {
-    origin          = split(",", var.allowed_origins)
-    method          = ["GET", "HEAD", "OPTIONS"]
+    origin = split(",", var.allowed_origins)
+    method = ["GET", "HEAD", "OPTIONS"]
     # Best practice: List specific headers needed for delivery and browser caching
     response_header = [
       "Content-Type",

@@ -19,6 +19,7 @@ locals {
     "pubsub.googleapis.com",
     "eventarc.googleapis.com",
     "iamcredentials.googleapis.com", # signed URLs via IAM signBlob (no key file on Cloud Run)
+    "monitoring.googleapis.com",     # uptime checks + alert policies
   ]
 }
 
