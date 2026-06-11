@@ -103,8 +103,8 @@ app.add_middleware(
     # Allow all Cloudflare Pages preview deployments automatically
     allow_origin_regex=r"https://.*\.madeforseconds\.pages\.dev",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Dev-Admin", "X-TOTP-Session"],
 )
 
 app.include_router(public.router)

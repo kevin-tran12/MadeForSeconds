@@ -152,7 +152,9 @@ resource "google_cloudfunctions2_function" "budget_killer" {
     trigger_region = var.gcp_region
     event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
     pubsub_topic   = google_pubsub_topic.budget_alert.id
-    retry_policy   = "RETRY_POLICY_DO_NOT_RETRY"
+    # Retry on failure — this function is the cost backstop; a dropped
+    # message must not silently skip the shutdown
+    retry_policy = "RETRY_POLICY_RETRY"
   }
 
   depends_on = [google_project_service.required_apis]

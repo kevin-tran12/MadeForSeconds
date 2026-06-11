@@ -227,7 +227,14 @@ export const subscriberApi = {
   createCheckout: (amountCents: number, successUrl: string, cancelUrl: string, oneTime = false) =>
     apiFetch<{ checkout_url: string }>('/api/subscribe/checkout', {
       method: 'POST',
-      body: JSON.stringify({ amount_cents: amountCents, success_url: successUrl, cancel_url: cancelUrl, one_time: oneTime }),
+      body: JSON.stringify({
+        amount_cents: amountCents,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        one_time: oneTime,
+        // Lets Stripe dedupe a retried/double-submitted request
+        idempotency_key: crypto.randomUUID(),
+      }),
     }),
 
   getSessionInfo: (sessionId: string) =>

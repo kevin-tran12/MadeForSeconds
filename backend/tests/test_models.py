@@ -76,3 +76,46 @@ def test_expense_category_enum():
         category="software"
     )
     assert expense.category == "software"
+
+
+def test_recipe_create_field_bounds():
+    """Input fields are bounded so a payload can't balloon Firestore docs."""
+    with pytest.raises(ValidationError):
+        RecipeCreate(title="")  # empty title
+
+    with pytest.raises(ValidationError):
+        RecipeCreate(title="x" * 201)  # title too long
+
+    with pytest.raises(ValidationError):
+        RecipeCreate(title="ok", about="x" * 10_001)  # about too long
+
+    with pytest.raises(ValidationError):
+        RecipeCreate(title="ok", servings=0)  # servings must be >= 1
+
+    with pytest.raises(ValidationError):
+        RecipeCreate(
+            title="ok",
+            ingredients=[{"item": "x" * 301, "amount": "1", "unit": "cup"}],
+        )
+
+    with pytest.raises(ValidationError):
+        RecipeCreate(title="ok", prep_time_minutes=-1)
+
+    # Realistic recipe is untouched by the bounds
+    recipe = RecipeCreate(
+        title="Hainanese Chicken Rice",
+        about="A beloved dish..." * 50,
+        ingredients=[{"item": "Chicken", "amount": "1", "unit": "whole"}] * 40,
+        servings=6,
+    )
+    assert recipe.servings == 6
+
+
+def test_recipe_update_field_bounds():
+    with pytest.raises(ValidationError):
+        RecipeUpdate(title="")
+
+    with pytest.raises(ValidationError):
+        RecipeUpdate(description="x" * 2001)
+
+    assert RecipeUpdate(title="Fine").title == "Fine"

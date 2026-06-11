@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import httpx
 import stripe
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..firestore import get_db
@@ -55,6 +55,8 @@ class CheckoutRequest(BaseModel):
     cancel_url: str
     amount_cents: int  # amount in cents (min 100 = $1)
     one_time: bool = False  # True for one-time donation, False for monthly subscription
+    # Client-generated UUID so a retried request can't create a second session
+    idempotency_key: str | None = Field(default=None, max_length=64)
 
 
 class CheckoutResponse(BaseModel):
@@ -119,6 +121,11 @@ async def create_checkout(body: CheckoutRequest):
     _validate_redirect_url(body.success_url)
     _validate_redirect_url(body.cancel_url)
 
+    # Stripe dedupes retried requests carrying the same key for 24h
+    idempotency = (
+        {"idempotency_key": f"checkout-{body.idempotency_key}"} if body.idempotency_key else {}
+    )
+
     try:
         if body.one_time:
             # One-time donation
@@ -138,6 +145,7 @@ async def create_checkout(body: CheckoutRequest):
                 }],
                 success_url=body.success_url,
                 cancel_url=body.cancel_url,
+                **idempotency,
             )
         else:
             # Monthly recurring donation
@@ -159,6 +167,7 @@ async def create_checkout(body: CheckoutRequest):
                 }],
                 success_url=body.success_url,
                 cancel_url=body.cancel_url,
+                **idempotency,
             )
     except stripe.StripeError as e:
         logger.error("Stripe checkout error: %s", e)
