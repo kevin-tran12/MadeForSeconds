@@ -2,13 +2,24 @@
 # Always-free tier: 1 GiB storage · 50K reads/day · 20K writes/day · 10 GiB egress/mo
 
 resource "google_firestore_database" "default" {
-  project                     = var.gcp_project_id
-  name                        = "(default)"
-  location_id                 = var.gcp_region
-  type                        = "FIRESTORE_NATIVE"
-  delete_protection_state     = "DELETE_PROTECTION_ENABLED"
+  project                 = var.gcp_project_id
+  name                    = "(default)"
+  location_id             = var.gcp_region
+  type                    = "FIRESTORE_NATIVE"
+  delete_protection_state = "DELETE_PROTECTION_ENABLED"
 
   depends_on = [google_project_service.required_apis]
+}
+
+# Daily managed backup, 7-day retention. Expenses are tax records — losing
+# the database to an accidental wipe must be recoverable. Restore via:
+#   gcloud firestore databases restore --source-backup=<backup> --destination-database=<name>
+resource "google_firestore_backup_schedule" "daily" {
+  project   = var.gcp_project_id
+  database  = google_firestore_database.default.name
+  retention = "604800s" # 7 days
+
+  daily_recurrence {}
 }
 
 # ─── Firestore Composite Indexes ──────────────────────────────────────────────

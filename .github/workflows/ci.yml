@@ -80,9 +80,27 @@ jobs:
       - name: Run unit tests
         run: npm run test:unit
 
+  terraform-check:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: terraform fmt
+        working-directory: terraform
+        run: terraform fmt -check -diff
+
+      - name: terraform validate
+        working-directory: terraform
+        # -backend=false: validation needs no state or GCP credentials
+        run: terraform init -backend=false -input=false && terraform validate -no-color
+
   build:
     name: Build Check
-    needs: [security-scan, test-backend, test-frontend]
+    needs: [security-scan, test-backend, test-frontend, terraform-check]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

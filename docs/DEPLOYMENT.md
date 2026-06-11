@@ -204,6 +204,30 @@ Common reasons to run `terraform apply`:
 - Adding or rotating a secret
 - Any other `.tf` file change
 
+### Migrating Terraform state to GCS (one-time)
+
+State currently lives in `terraform/terraform.tfstate` on one machine — losing
+that file means losing track of every managed resource, and it contains secret
+material. A versioned state bucket is defined in `state_backend.tf`:
+
+```bash
+cd terraform
+terraform apply                 # creates the made-for-seconds-tf-state bucket
+# Uncomment the backend "gcs" block in state_backend.tf, then:
+terraform init -migrate-state   # copies local state into the bucket
+terraform plan                  # should show no changes
+rm terraform.tfstate terraform.tfstate.backup
+```
+
+### Backups & monitoring
+
+- **Firestore**: daily managed backup with 7-day retention
+  (`google_firestore_backup_schedule.daily`). List with
+  `gcloud firestore backups list`; restore with
+  `gcloud firestore databases restore`.
+- **Uptime**: a Cloud Monitoring check hits `/api/health` every 15 minutes
+  and emails the alert address after ~20 minutes of failures.
+
 ### Viewing backend logs
 
 ```bash
