@@ -116,7 +116,25 @@ def test_get_receipt_url(totp_authenticated_client, mock_db, sample_expense_doc)
     """Returns signed URL structure (mocked)."""
     mock_doc = sample_expense_doc(id="exp_123", receipt_url="dev://receipts/test.pdf")
     mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
-    
+
     response = totp_authenticated_client.get("/api/admin/expenses/exp_123/receipt")
     assert response.status_code == 200
     assert response.json()["url"] == "dev://receipts/test.pdf"
+
+def test_get_receipt_gcs_uses_cloud_run_safe_signing(totp_authenticated_client, mock_db, sample_expense_doc):
+    """gs:// receipts go through the IAM signBlob helper (works on Cloud Run)."""
+    mock_doc = sample_expense_doc(
+        id="exp_123",
+        receipt_url="gs://my-receipts/receipts/uuid-r.pdf",
+        receipt_filename="r.pdf",
+        receipt_content_type="application/pdf",
+    )
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    with patch("app.services.uploads.signed_get_url", return_value="https://signed.example/r") as signer:
+        response = totp_authenticated_client.get("/api/admin/expenses/exp_123/receipt")
+
+    assert response.status_code == 200
+    assert response.json()["url"] == "https://signed.example/r"
+    assert response.json()["filename"] == "r.pdf"
+    signer.assert_called_once_with("my-receipts", "receipts/uuid-r.pdf")

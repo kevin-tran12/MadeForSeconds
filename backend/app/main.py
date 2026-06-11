@@ -6,20 +6,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import logging as cloud_logging
 
-from .config import settings
+from .config import settings, validate_production_settings
 from .mcp_server import create_mcp_app
 from .routes import admin, expenses, parse, public, reports, subscriptions, totp
 
-# Fail fast in production if the JWT secret is the known-weak placeholder or too short
-if not settings.is_dev:
-    _secret = settings.subscriber_jwt_secret
-    if _secret == "dev-subscriber-secret-change-in-prod":
-        raise RuntimeError(
-            "SUBSCRIBER_JWT_SECRET must be set to a cryptographically random value in production. "
-            'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
-        )
-    if len(_secret) < 32:
-        raise RuntimeError("SUBSCRIBER_JWT_SECRET must be at least 32 characters in production")
+validate_production_settings(settings)
 
 # Setup Cloud Logging
 if not settings.is_dev:
@@ -49,6 +40,7 @@ def _warm_cache() -> None:
         PaginatedRecipes,
         Recipe,
     )
+    from .services.recipes import doc_to_recipe
 
     try:
         db = get_db()
@@ -62,16 +54,9 @@ def _warm_cache() -> None:
         recipes = []
         all_cats: set[str] = set()
         for doc in docs:
-            data = doc.to_dict()
-            data["id"] = doc.id
-            if isinstance(data.get("nutrition"), dict):
-                data["nutrition"] = [
-                    {"label": k, "value": v, "unit": ""} for k, v in data["nutrition"].items()
-                ]
-            data.pop("premium_content", None)
-            data.pop("has_premium_content", None)
-            recipes.append(Recipe(**data))
-            all_cats.update(data.get("categories", []))
+            recipe = doc_to_recipe(doc)
+            recipes.append(recipe)
+            all_cats.update(recipe.categories)
 
         if recipes:
             # Warm the default /api/recipes response (no filters, limit=12)

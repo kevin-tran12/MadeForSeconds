@@ -17,6 +17,7 @@ from ..models_expense import (
     ExpenseUpdate,
     recalculate_project_amounts,
 )
+from ..services import uploads
 from ..totp import require_totp_session
 
 router = APIRouter(
@@ -295,17 +296,9 @@ async def get_receipt(expense_id: str):
     blob_path = parts[1]
 
     try:
-        from datetime import timedelta
-
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(blob_path)
-
-        signed_url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(minutes=15),
-            method="GET",
-        )
+        # Routed through IAM signBlob so it works on Cloud Run, where the
+        # metadata-server credentials have no local private key.
+        signed_url = uploads.signed_get_url(bucket_name, blob_path)
         return {
             "url": signed_url,
             "filename": data.get("receipt_filename"),

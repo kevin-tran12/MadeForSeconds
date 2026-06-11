@@ -54,6 +54,26 @@ def test_admin_create_recipe(authenticated_client, mock_db):
     assert response.json()["id"] == "new-test-id"
     assert response.json()["slug"] == "new-recipe"
 
+def test_admin_create_recipe_duplicate_slug_returns_409(authenticated_client, mock_db):
+    """Re-creating a recipe whose title slugifies to an existing slug returns 409."""
+    existing = MagicMock()
+    existing.id = "existing-id"
+    existing.to_dict.return_value = {
+        "slug": "new-recipe",
+        "title": "New Recipe",
+        "published": True,
+        "updated_at": datetime(2026, 1, 1),
+    }
+    mock_db.stream.return_value = iter([existing])
+
+    response = authenticated_client.post("/api/admin/recipes", json={"title": "New Recipe"})
+
+    assert response.status_code == 409
+    assert "already exists" in response.json()["detail"]
+    assert "existing-id" in response.json()["detail"]
+    mock_db.set.assert_not_called()
+
+
 def test_admin_update_recipe(authenticated_client, mock_db, sample_recipe_doc):
     """Verifies that the admin can update an existing recipe."""
     mock_doc = sample_recipe_doc(id="test-id", title="Old Title")
