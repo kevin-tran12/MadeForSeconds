@@ -1,21 +1,23 @@
 import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
+import { useDarkMode } from '../../hooks/useDarkMode'
 import { Button } from '../ui/Button'
 import { SearchWithSuggestions } from '../search/SearchWithSuggestions'
 
 export function Header() {
   const { isAdmin, logout } = useAuth()
+  const { isDark, toggle: toggleDark } = useDarkMode()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `text-sm font-medium transition-colors ${
-      isActive ? 'text-primary-600' : 'text-gray-700 hover:text-primary-600'
+      isActive ? 'text-primary-600' : 'text-gray-700 dark:text-stone-300 hover:text-primary-600'
     }`
 
   return (
-    <header className="sticky top-0 z-40 border-b border-surface-darker bg-surface/95 backdrop-blur-sm">
+    <header className="no-print sticky top-0 z-40 border-b border-surface-darker bg-surface/95 backdrop-blur-sm">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
         {/* Logo */}
         <Link
@@ -69,7 +71,7 @@ export function Header() {
             className={`rounded-lg p-1.5 transition-all duration-200 ${
               searchOpen
                 ? 'text-primary-600'
-                : 'text-gray-500 hover:text-primary-600'
+                : 'text-gray-500 dark:text-stone-400 hover:text-primary-600'
             }`}
             aria-label={searchOpen ? 'Close search' : 'Open search'}
           >
@@ -105,6 +107,24 @@ export function Header() {
           </button>
         </div>
 
+        {/* Dark mode toggle (desktop) */}
+        <button
+          onClick={toggleDark}
+          className="hidden md:flex items-center justify-center rounded-lg p-1.5 text-gray-500 dark:text-stone-400 transition-colors hover:text-primary-600 dark:hover:text-primary-400"
+          aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          title={isDark ? 'Light mode' : 'Dark mode'}
+        >
+          {isDark ? (
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          ) : (
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+            </svg>
+          )}
+        </button>
+
         {/* Auth area (desktop) */}
         <div className="hidden md:flex items-center gap-2">
           <Link
@@ -123,7 +143,7 @@ export function Header() {
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden p-2 text-gray-600 hover:text-gray-900"
+          className="md:hidden p-2 text-gray-600 dark:text-stone-400 hover:text-gray-900 dark:hover:text-stone-100"
           onClick={() => setMobileOpen((v) => !v)}
           aria-label="Toggle menu"
         >
@@ -146,6 +166,22 @@ export function Header() {
           </div>
 
           <nav className="flex flex-col gap-3">
+            {/* Dark mode toggle (mobile) */}
+            <button
+              onClick={toggleDark}
+              className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-stone-300 hover:text-primary-600"
+            >
+              {isDark ? (
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              ) : (
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                </svg>
+              )}
+              {isDark ? 'Light mode' : 'Dark mode'}
+            </button>
             <NavLink to="/" end className={navLinkClass} onClick={() => setMobileOpen(false)}>
               Home
             </NavLink>
