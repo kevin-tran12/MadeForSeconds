@@ -54,6 +54,15 @@ resource "google_service_account_iam_member" "backend_act_as_self" {
   member             = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Allow the backend to sign GCS URLs via the IAM signBlob API. Cloud Run
+# metadata credentials have no private key, so generate_signed_url must call
+# iamcredentials.signBlob as the SA itself.
+resource "google_service_account_iam_member" "backend_token_creator" {
+  service_account_id = google_service_account.backend.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Grant access to read the Redis URL secret (only when redis_url is provided)
 resource "google_secret_manager_secret_iam_member" "backend_redis_url_access" {
   count     = var.redis_url != "" ? 1 : 0

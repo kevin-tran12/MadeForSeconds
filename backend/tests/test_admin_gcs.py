@@ -14,7 +14,7 @@ import pytest
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-from app.routes.admin import _gcs_blob_name, _delete_gcs_blob
+from app.services.uploads import gcs_blob_name as _gcs_blob_name, delete_gcs_blob as _delete_gcs_blob
 
 
 def _delete_with_json(client, url, payload):
@@ -63,29 +63,29 @@ class TestGcsBlobName:
 
 class TestDeleteGcsBlob:
     def test_no_op_in_dev_mode(self):
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = True
             _delete_gcs_blob("my-bucket", "photo.jpg")
             mock_storage.Client.assert_not_called()
 
     def test_no_op_when_bucket_empty(self):
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = False
             _delete_gcs_blob("", "photo.jpg")
             mock_storage.Client.assert_not_called()
 
     def test_no_op_when_blob_name_empty(self):
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = False
             _delete_gcs_blob("my-bucket", "")
             mock_storage.Client.assert_not_called()
 
     def test_deletes_blob_in_production(self):
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = False
             mock_blob = MagicMock()
             mock_storage.Client.return_value.bucket.return_value.blob.return_value = mock_blob
@@ -97,8 +97,8 @@ class TestDeleteGcsBlob:
             mock_blob.delete.assert_called_once()
 
     def test_silently_ignores_gcs_errors(self):
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = False
             mock_storage.Client.return_value.bucket.return_value.blob.return_value.delete.side_effect = Exception("GCS error")
             # Should not raise
@@ -145,8 +145,8 @@ class TestUpdateRecipeImageReplacement:
 
         mock_db.collection.return_value.document.return_value.get.side_effect = [old_doc, updated_doc]
 
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = False
             mock_settings.gcs_bucket_name = "test-bucket"
             mock_settings.gcs_receipts_bucket_name = "test-receipts-bucket"
@@ -179,7 +179,7 @@ class TestUpdateRecipeImageReplacement:
             existing_doc, updated_doc
         ]
 
-        with patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.storage") as mock_storage:
             response = authenticated_client.put(
                 "/api/admin/recipes/test-id", json={"title": "Updated Title"}
             )
@@ -202,7 +202,7 @@ class TestUpdateRecipeImageReplacement:
             existing_doc, updated_doc
         ]
 
-        with patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.storage") as mock_storage:
             response = authenticated_client.put(
                 "/api/admin/recipes/test-id", json={"image_url": same_url}
             )
@@ -223,8 +223,8 @@ class TestDeleteRecipeGcsCascade:
         mock_doc.to_dict.return_value = {**_RECIPE_DATA, "image_url": image_url, "receipt_urls": []}
         mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
 
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = False
             mock_settings.gcs_bucket_name = "test-bucket"
             mock_settings.gcs_receipts_bucket_name = "test-receipts-bucket"
@@ -252,8 +252,8 @@ class TestDeleteRecipeGcsCascade:
         }
         mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
 
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = False
             mock_settings.gcs_bucket_name = "test-bucket"
             mock_settings.gcs_receipts_bucket_name = "test-receipts"
@@ -274,7 +274,7 @@ class TestDeleteRecipeGcsCascade:
         mock_doc.to_dict.return_value = {**_RECIPE_DATA, "image_url": None, "receipt_urls": []}
         mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
 
-        with patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.storage") as mock_storage:
             response = authenticated_client.delete("/api/admin/recipes/test-id")
 
         assert response.status_code == 204
@@ -340,8 +340,8 @@ class TestDeleteReceipt:
         mock_doc.to_dict.return_value = {**_RECIPE_DATA, "receipt_urls": [receipt_url]}
         mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
 
-        with patch("app.routes.admin.settings") as mock_settings, \
-             patch("app.routes.admin.storage") as mock_storage:
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
             mock_settings.is_dev = False
             mock_settings.gcs_receipts_bucket_name = "test-receipts"
             mock_blob = MagicMock()

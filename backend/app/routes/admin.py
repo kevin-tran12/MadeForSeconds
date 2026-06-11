@@ -1,4 +1,3 @@
-import re
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -11,140 +10,54 @@ from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
 from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
-from ..validation import get_invalid_categories
+from ..services import recipes as recipe_service
+from ..services import uploads
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
-
-
-def _doc_to_recipe(doc) -> Recipe:
-    data = doc.to_dict()
-    data["id"] = doc.id
-    # Migrate legacy nutrition dict {label: value} → list[{label, value, unit}]
-    if isinstance(data.get("nutrition"), dict):
-        data["nutrition"] = [
-            {"label": k, "value": v, "unit": ""} for k, v in data["nutrition"].items()
-        ]
-    return Recipe(**data)
-
-
-def _generate_slug(title: str) -> str:
-    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", title.lower()))
-
-
-def _validate_categories(db, categories: list[str]) -> None:
-    """Raises 422 if any submitted category is not in the allowed list."""
-    invalid = get_invalid_categories(db, categories)
-    if invalid:
-        raise HTTPException(status_code=422, detail=f"Unknown categories: {invalid}")
-
-
-# ── GCS helpers ───────────────────────────────────────────────────────────────
-
-def _gcs_blob_name(url: str, bucket_name: str) -> str | None:
-    """Extract blob name from https://storage.googleapis.com/{bucket}/{blob} URL.
-
-    Returns None for dev placeholder URLs, missing values, or a different bucket.
-    """
-    if not url or not bucket_name:
-        return None
-    prefix = f"https://storage.googleapis.com/{bucket_name}/"
-    if url.startswith(prefix):
-        return url[len(prefix):]
-    return None
-
-
-def _delete_gcs_blob(bucket_name: str, blob_name: str) -> None:
-    """Delete a GCS blob, silently ignoring errors.
-
-    No-op in dev mode or when bucket/blob name is missing, so recipe
-    operations are never blocked by GCS cleanup failures.
-    """
-    if settings.is_dev or not bucket_name or not blob_name:
-        return
-    try:
-        storage.Client().bucket(bucket_name).blob(blob_name).delete()
-    except Exception:
-        pass
 
 
 @router.get("/recipes", response_model=list[Recipe])
 async def admin_list_recipes():
     db = get_db()
     docs = db.collection("recipes").order_by("created_at", direction="DESCENDING").stream()
-    return [_doc_to_recipe(doc) for doc in docs]
+    return [recipe_service.doc_to_recipe(doc) for doc in docs]
 
 
 @router.post("/recipes", response_model=Recipe, status_code=201)
 async def admin_create_recipe(body: RecipeCreate):
     db = get_db()
-    _validate_categories(db, body.categories)
-    now = datetime.now(timezone.utc)
-    data = body.model_dump()
-    data["slug"] = _generate_slug(body.title)
-    data["created_at"] = now
-    data["updated_at"] = now
-
-    doc_ref = db.collection("recipes").document()
-    doc_ref.set(data)
-
-    data["id"] = doc_ref.id
-    cache.clear()
-    return Recipe(**data)
+    try:
+        return recipe_service.create_recipe(db, body, source="admin")
+    except recipe_service.InvalidCategories as exc:
+        raise HTTPException(status_code=422, detail=f"Unknown categories: {exc.invalid}")
+    except recipe_service.SlugConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A recipe with this title already exists "
+                f"(slug '{exc.existing['slug']}', id '{exc.existing['id']}')"
+            ),
+        )
 
 
 @router.put("/recipes/{recipe_id}", response_model=Recipe)
 async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
     db = get_db()
-    if body.categories is not None:
-        _validate_categories(db, body.categories)
-    doc_ref = db.collection("recipes").document(recipe_id)
-    doc = doc_ref.get()
-
-    if not doc.exists:
+    try:
+        return recipe_service.update_recipe(db, recipe_id, body, source="admin")
+    except recipe_service.InvalidCategories as exc:
+        raise HTTPException(status_code=422, detail=f"Unknown categories: {exc.invalid}")
+    except recipe_service.RecipeNotFound:
         raise HTTPException(status_code=404, detail="Recipe not found")
-
-    old_data = doc.to_dict()
-    # Use exclude_unset so we can distinguish "field omitted" from "field set to null/empty"
-    updates = body.model_dump(exclude_unset=True)
-    updates["updated_at"] = datetime.now(timezone.utc)
-    doc_ref.update(updates)
-
-    # Delete replaced image from GCS (only when image_url was explicitly changed)
-    if "image_url" in updates:
-        old_image = old_data.get("image_url") or ""
-        new_image = updates["image_url"] or ""
-        if old_image != new_image:
-            if blob := _gcs_blob_name(old_image, settings.gcs_bucket_name or ""):
-                _delete_gcs_blob(settings.gcs_bucket_name, blob)
-
-    updated = doc_ref.get().to_dict()
-    updated["id"] = recipe_id
-    cache.clear()
-    return Recipe(**updated)
 
 
 @router.delete("/recipes/{recipe_id}", status_code=204)
 async def admin_delete_recipe(recipe_id: str):
     db = get_db()
-    doc_ref = db.collection("recipes").document(recipe_id)
-    doc = doc_ref.get()
-
-    if not doc.exists:
+    try:
+        recipe_service.delete_recipe(db, recipe_id)
+    except recipe_service.RecipeNotFound:
         raise HTTPException(status_code=404, detail="Recipe not found")
-
-    data = doc.to_dict()
-
-    # Delete recipe image from GCS
-    if blob := _gcs_blob_name(data.get("image_url") or "", settings.gcs_bucket_name or ""):
-        _delete_gcs_blob(settings.gcs_bucket_name, blob)
-
-    # Delete all receipt images from GCS
-    for url in data.get("receipt_urls", []):
-        if blob := _gcs_blob_name(url, settings.gcs_receipts_bucket_name or ""):
-            _delete_gcs_blob(settings.gcs_receipts_bucket_name, blob)
-
-    doc_ref.delete()
-    cache.clear()
 
 
 @router.post("/upload-image")
@@ -218,8 +131,7 @@ async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
 
     doc_ref.update({"receipt_urls": [u for u in current_urls if u != url]})
 
-    if blob := _gcs_blob_name(url, settings.gcs_receipts_bucket_name or ""):
-        _delete_gcs_blob(settings.gcs_receipts_bucket_name, blob)
+    uploads.delete_recipe_receipt_blob(url)
 
     cache.clear()
 
@@ -229,8 +141,7 @@ async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
 @router.get("/categories", response_model=list[str])
 async def admin_get_categories():
     db = get_db()
-    doc = db.collection("config").document("categories").get()
-    return sorted(doc.to_dict().get("list", [])) if doc.exists else []
+    return recipe_service.get_categories(db)
 
 
 @router.put("/categories", response_model=list[str])

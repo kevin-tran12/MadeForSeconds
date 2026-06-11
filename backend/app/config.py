@@ -32,4 +32,22 @@ class Settings(BaseSettings):
     model_config = {"env_file": ".env"}
 
 
+def validate_production_settings(s: "Settings") -> None:
+    """Fail fast at startup when production would run with weak/missing secrets."""
+    if s.is_dev:
+        return
+    if s.subscriber_jwt_secret == "dev-subscriber-secret-change-in-prod":
+        raise RuntimeError(
+            "SUBSCRIBER_JWT_SECRET must be set to a cryptographically random value in production. "
+            'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+        )
+    if len(s.subscriber_jwt_secret) < 32:
+        raise RuntimeError("SUBSCRIBER_JWT_SECRET must be at least 32 characters in production")
+    if len(s.mcp_api_key) < 16:
+        raise RuntimeError(
+            "MCP_API_KEY must be set (at least 16 characters) in production — "
+            "without it the /mcp endpoint would accept unauthenticated requests"
+        )
+
+
 settings = Settings()

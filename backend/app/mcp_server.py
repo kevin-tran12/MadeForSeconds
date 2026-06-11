@@ -7,9 +7,9 @@ For expenses, the user pastes a receipt image, Claude parses it
 visually, and calls create_expense to record it with receipt upload.
 """
 
+import hmac
 import mimetypes
 import os
-import re
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -23,16 +23,13 @@ from .models_expense import (
     ExpenseItem,
     recalculate_project_amounts,
 )
+from .services.recipes import generate_slug as _generate_slug
 
 
 mcp = FastMCP(
     "MadeForSeconds Recipe Creator",
     stateless_http=True,
 )
-
-
-def _generate_slug(title: str) -> str:
-    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", title.lower()))
 
 
 # ── Expense helpers ──────────────────────────────────────────────────────────
@@ -377,17 +374,19 @@ class _BearerAuthMiddleware:
             ]
             scope = {**scope, "headers": headers}
 
-            if settings.mcp_api_key:
-                auth = dict(headers).get(b"authorization", b"").decode()
-                if auth != f"Bearer {settings.mcp_api_key}":
-                    response = b'{"error": "Unauthorized"}'
-                    await send({
-                        "type": "http.response.start",
-                        "status": 401,
-                        "headers": [(b"content-type", b"application/json")],
-                    })
-                    await send({"type": "http.response.body", "body": response})
-                    return
+            # Fail closed: an empty MCP_API_KEY rejects every request rather
+            # than disabling auth (config validation also blocks prod startup).
+            key = settings.mcp_api_key
+            auth = dict(headers).get(b"authorization", b"").decode()
+            if not key or not hmac.compare_digest(auth, f"Bearer {key}"):
+                response = b'{"error": "Unauthorized"}'
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [(b"content-type", b"application/json")],
+                })
+                await send({"type": "http.response.body", "body": response})
+                return
         await self.app(scope, receive, send)
 
 
