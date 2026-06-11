@@ -275,6 +275,45 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 
 ---
 
+## MCP server (recipe/expense automation)
+
+The backend exposes an MCP server at `https://<cloud-run-url>/mcp` (Streamable
+HTTP, bearer auth with `MCP_API_KEY`). Production startup fails if the key is
+unset — the endpoint never runs unauthenticated.
+
+Claude Code client config (`claude mcp add` or `.claude.json`):
+
+```json
+{
+  "type": "http",
+  "url": "https://<cloud-run-url>/mcp",
+  "headers": { "Authorization": "Bearer <MCP_API_KEY>" }
+}
+```
+
+Set `MCP_TIMEOUT=30000` in the client environment — the backend scales to
+zero, so the first call after idle takes ~10s while Cloud Run cold-starts.
+If a call times out, retry once.
+
+**Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
+`update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
+`request_image_upload`, `upload_image_from_url`, `create_expense`.
+
+**Recipe workflow**: `create_recipe` saves an unpublished draft (duplicate
+titles return a `slug_conflict` pointer instead of writing a second copy) →
+iterate with `update_recipe` → attach a photo → `publish_recipe`.
+
+**Image/receipt uploads** go directly to GCS via short-lived signed PUT URLs:
+`request_image_upload(filename, content_type, kind)` returns `upload_url` +
+a ready-to-run `curl_example`; after the PUT, pass `final_url` to
+`update_recipe(image_url=…)` or `create_expense(receipt_url=…)`. Signed URLs
+require the `iamcredentials` API and the backend SA's
+`roles/iam.serviceAccountTokenCreator` self-grant (both in Terraform — run
+`terraform apply` once after upgrading). `upload_image_from_url` copies an
+already-hosted https image instead.
+
+---
+
 ## GCP free tier summary
 
 | Service | Free allowance | Expected usage |

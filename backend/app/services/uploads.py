@@ -5,10 +5,15 @@ carry no private key — signing is routed through the IAM signBlob API by
 passing service_account_email + access_token to generate_signed_url.
 """
 
+import ipaddress
 import re
+import socket
+import urllib.parse
 from datetime import timedelta
+from uuid import uuid4
 
 import google.auth
+import httpx
 from google.auth import credentials as google_auth_credentials
 from google.auth.transport import requests as google_auth_requests
 from google.cloud import storage
@@ -97,6 +102,63 @@ def signed_get_url(bucket_name: str, blob_name: str, *, expires_minutes: int = 1
         method="GET",
         **_signing_kwargs(),
     )
+
+
+def fetch_image_to_gcs(source_url: str) -> str:
+    """Fetch an image from a public https URL into the images bucket.
+
+    SSRF guards: https only, the resolved address must be public, redirects
+    are not followed, content-type must be an allowed image type, and the
+    body is capped at MAX_UPLOAD_BYTES. (DNS-rebinding TOCTOU between the
+    resolution check and the fetch is accepted risk — the tool sits behind
+    MCP bearer auth and is only invoked by the admin.)
+
+    Returns the public URL of the stored image. Raises ValueError on any
+    rejected input.
+    """
+    parsed = urllib.parse.urlparse(source_url)
+    if parsed.scheme != "https":
+        raise ValueError("Only https:// URLs are allowed")
+    if not parsed.hostname:
+        raise ValueError("Invalid URL: no hostname")
+
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise ValueError(f"Could not resolve host: {exc}")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified
+        ):
+            raise ValueError("URL resolves to a non-public address")
+
+    data = b""
+    with httpx.Client(follow_redirects=False, timeout=10.0) as client:
+        with client.stream("GET", source_url) as resp:
+            if resp.status_code != 200:
+                raise ValueError(f"Fetch failed: HTTP {resp.status_code} (redirects are not followed)")
+            content_type = resp.headers.get("content-type", "").split(";")[0].strip()
+            if content_type not in ALLOWED_IMAGE_TYPES:
+                raise ValueError(
+                    f"Unsupported content type '{content_type}'. Allowed: {', '.join(sorted(ALLOWED_IMAGE_TYPES))}"
+                )
+            for chunk in resp.iter_bytes():
+                data += chunk
+                if len(data) > MAX_UPLOAD_BYTES:
+                    raise ValueError(f"Image exceeds {MAX_UPLOAD_BYTES // 1024 // 1024}MB limit")
+
+    filename = sanitize_filename(parsed.path.rsplit("/", 1)[-1] or "image")
+    blob_name = f"{uuid4()}-{filename}"
+
+    if settings.is_dev or not settings.gcs_bucket_name:
+        return f"https://placehold.co/800x400?text={blob_name}"
+
+    storage.Client().bucket(settings.gcs_bucket_name).blob(blob_name).upload_from_string(
+        data, content_type=content_type
+    )
+    return f"https://storage.googleapis.com/{settings.gcs_bucket_name}/{blob_name}"
 
 
 def signed_put_url(
