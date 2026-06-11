@@ -66,6 +66,10 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
+    contents = await file.read()
+    if len(contents) > uploads.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+
     filename = f"{uuid.uuid4()}-{file.filename}"
 
     if settings.is_dev or not settings.gcs_bucket_name:
@@ -75,9 +79,7 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
         client = storage.Client()
         bucket = client.bucket(settings.gcs_bucket_name)
         blob = bucket.blob(filename)
-
-        # Stream upload directly from the file object - bypasses memory
-        blob.upload_from_file(file.file, content_type=file.content_type)
+        blob.upload_from_string(contents, content_type=file.content_type)
 
         # Construct a reliable public URL
         url = f"https://storage.googleapis.com/{settings.gcs_bucket_name}/{filename}"
@@ -89,12 +91,15 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
 @router.post("/upload-receipt")
 async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
     """Upload a purchase receipt photo or PDF for a recipe."""
-    _ALLOWED_RECEIPT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "application/pdf"}
-    if file.content_type not in _ALLOWED_RECEIPT_TYPES:
+    if file.content_type not in uploads.ALLOWED_RECEIPT_TYPES:
         raise HTTPException(
             status_code=400,
             detail=f"Receipt must be an image or PDF. Got: {file.content_type}",
         )
+
+    contents = await file.read()
+    if len(contents) > uploads.MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
 
     filename = f"{uuid.uuid4()}-{file.filename}"
 
@@ -104,7 +109,7 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
     try:
         client = storage.Client()
         blob = client.bucket(settings.gcs_receipts_bucket_name).blob(filename)
-        blob.upload_from_file(file.file, content_type=file.content_type)
+        blob.upload_from_string(contents, content_type=file.content_type)
         url = f"https://storage.googleapis.com/{settings.gcs_receipts_bucket_name}/{filename}"
         return {"url": url}
     except Exception as exc:

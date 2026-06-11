@@ -126,3 +126,23 @@ def test_admin_upload_image_dev_mode(authenticated_client):
         response = authenticated_client.post("/api/admin/upload-image", files=file_data)
         assert response.status_code == 200
         assert "placehold.co" in response.json()["url"]
+
+def test_admin_upload_image_rejects_oversize(authenticated_client):
+    """Uploads over 10MB are rejected before touching storage."""
+    with patch("app.routes.admin.settings") as mock_settings:
+        mock_settings.is_dev = True
+        big = b"x" * (10 * 1024 * 1024 + 1)
+        response = authenticated_client.post(
+            "/api/admin/upload-image", files={"file": ("big.jpg", big, "image/jpeg")}
+        )
+    assert response.status_code == 413
+
+def test_admin_upload_receipt_rejects_oversize(authenticated_client):
+    """Recipe receipt uploads over 10MB are rejected."""
+    with patch("app.routes.admin.settings") as mock_settings:
+        mock_settings.is_dev = True
+        big = b"x" * (10 * 1024 * 1024 + 1)
+        response = authenticated_client.post(
+            "/api/admin/upload-receipt", files={"file": ("big.pdf", big, "application/pdf")}
+        )
+    assert response.status_code == 413

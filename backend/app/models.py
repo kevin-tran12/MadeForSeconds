@@ -1,85 +1,93 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# Input bounds — generous for real recipes, tight enough that a malformed or
+# hostile payload can't balloon a Firestore doc toward its 1 MiB limit.
+Title = Annotated[str, Field(min_length=1, max_length=200)]
+ShortText = Annotated[str, Field(max_length=2000)]
+LongText = Annotated[str, Field(max_length=10_000)]
+Url = Annotated[str, Field(max_length=2000)]
+Minutes = Annotated[int, Field(ge=0, le=100_000)]
 
 
 class Ingredient(BaseModel):
-    item: str
-    amount: str
-    unit: str
-    group: str | None = None
+    item: Annotated[str, Field(max_length=300)]
+    amount: Annotated[str, Field(max_length=50)]
+    unit: Annotated[str, Field(max_length=50)]
+    group: Annotated[str, Field(max_length=100)] | None = None
 
 
 class Instruction(BaseModel):
     step: int
-    text: str
-    tip: str | None = None
+    text: ShortText
+    tip: Annotated[str, Field(max_length=1000)] | None = None
 
 
 class NutritionEntry(BaseModel):
-    label: str
+    label: Annotated[str, Field(max_length=100)]
     value: float
-    unit: str = ""
+    unit: Annotated[str, Field(max_length=20)] = ""
 
 
 class RecipeSecret(BaseModel):
-    title: str
-    body: str
+    title: Annotated[str, Field(max_length=200)]
+    body: LongText
 
 
 class RecipeComponent(BaseModel):
     """A sub-recipe within a multi-component dish (e.g. the rice in Hainanese Chicken Rice)."""
-    title: str
-    description: str | None = None
-    ingredients: list[Ingredient] = []
-    prep_steps: list[Instruction] = []
-    instructions: list[Instruction] = []
-    prep_time_minutes: int | None = None
-    cook_time_minutes: int | None = None
-    yield_description: str | None = None  # e.g. "About ½–¾ cup" for sauces
+    title: Annotated[str, Field(max_length=200)]
+    description: ShortText | None = None
+    ingredients: Annotated[list[Ingredient], Field(max_length=100)] = []
+    prep_steps: Annotated[list[Instruction], Field(max_length=50)] = []
+    instructions: Annotated[list[Instruction], Field(max_length=100)] = []
+    prep_time_minutes: Minutes | None = None
+    cook_time_minutes: Minutes | None = None
+    yield_description: Annotated[str, Field(max_length=200)] | None = None  # e.g. "About ½–¾ cup" for sauces
 
 
 class RecipeCreate(BaseModel):
-    title: str
-    description: str = ""
-    about: str | None = None
-    ingredients: list[Ingredient] = []
-    prep_steps: list[Instruction] = []
-    instructions: list[Instruction] = []
-    prep_time_minutes: int = 0
-    cook_time_minutes: int = 0
-    servings: int = 1
+    title: Title
+    description: ShortText = ""
+    about: LongText | None = None
+    ingredients: Annotated[list[Ingredient], Field(max_length=100)] = []
+    prep_steps: Annotated[list[Instruction], Field(max_length=50)] = []
+    instructions: Annotated[list[Instruction], Field(max_length=100)] = []
+    prep_time_minutes: Minutes = 0
+    cook_time_minutes: Minutes = 0
+    servings: Annotated[int, Field(ge=1, le=1000)] = 1
     difficulty: Literal["easy", "medium", "hard"] = "easy"
-    categories: list[str] = []
-    image_url: str | None = None
+    categories: Annotated[list[str], Field(max_length=20)] = []
+    image_url: Url | None = None
     published: bool = False
-    nutrition: list[NutritionEntry] = []
-    components: list[RecipeComponent] | None = None
-    receipt_urls: list[str] = []
-    labels: list[str] = []
-    secrets: list[RecipeSecret] = []
+    nutrition: Annotated[list[NutritionEntry], Field(max_length=30)] = []
+    components: Annotated[list[RecipeComponent], Field(max_length=5)] | None = None
+    receipt_urls: Annotated[list[Url], Field(max_length=20)] = []
+    labels: Annotated[list[str], Field(max_length=30)] = []
+    secrets: Annotated[list[RecipeSecret], Field(max_length=20)] = []
 
 
 class RecipeUpdate(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    about: str | None = None
-    ingredients: list[Ingredient] | None = None
-    prep_steps: list[Instruction] | None = None
-    instructions: list[Instruction] | None = None
-    prep_time_minutes: int | None = None
-    cook_time_minutes: int | None = None
-    servings: int | None = None
+    title: Title | None = None
+    description: ShortText | None = None
+    about: LongText | None = None
+    ingredients: Annotated[list[Ingredient], Field(max_length=100)] | None = None
+    prep_steps: Annotated[list[Instruction], Field(max_length=50)] | None = None
+    instructions: Annotated[list[Instruction], Field(max_length=100)] | None = None
+    prep_time_minutes: Minutes | None = None
+    cook_time_minutes: Minutes | None = None
+    servings: Annotated[int, Field(ge=1, le=1000)] | None = None
     difficulty: Literal["easy", "medium", "hard"] | None = None
-    categories: list[str] | None = None
-    image_url: str | None = None
+    categories: Annotated[list[str], Field(max_length=20)] | None = None
+    image_url: Url | None = None
     published: bool | None = None
-    nutrition: list[NutritionEntry] | None = None
-    components: list[RecipeComponent] | None = None
-    receipt_urls: list[str] | None = None
-    labels: list[str] | None = None
-    secrets: list[RecipeSecret] | None = None
+    nutrition: Annotated[list[NutritionEntry], Field(max_length=30)] | None = None
+    components: Annotated[list[RecipeComponent], Field(max_length=5)] | None = None
+    receipt_urls: Annotated[list[Url], Field(max_length=20)] | None = None
+    labels: Annotated[list[str], Field(max_length=30)] | None = None
+    secrets: Annotated[list[RecipeSecret], Field(max_length=20)] | None = None
 
 
 class Recipe(BaseModel):
