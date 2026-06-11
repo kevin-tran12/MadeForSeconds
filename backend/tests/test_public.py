@@ -135,3 +135,29 @@ def test_feed_xml(client, mock_db, sample_recipe_doc):
     assert "application/rss+xml" in response.headers["Content-Type"]
     assert "Test Recipe" in response.text
     assert "Test Desc" in response.text
+
+def test_sitemap_urls_use_frontend_host_and_trailing_slashes(client, mock_db):
+    """Sitemap entries point at the SPA's canonical (trailing-slash) URLs."""
+    doc = MagicMock()
+    doc.to_dict.return_value = {"slug": "tom-yum", "updated_at": datetime(2026, 1, 2)}
+    mock_db.stream.return_value = iter([doc])
+
+    response = client.get("/api/sitemap.xml")
+
+    assert response.status_code == 200
+    assert "xml" in response.headers["content-type"]
+    body = response.text
+    assert "<loc>http://localhost:5173/recipes/</loc>" in body
+    assert "<loc>http://localhost:5173/recipes/tom-yum/</loc>" in body
+    assert "<lastmod>2026-01-02</lastmod>" in body
+
+def test_feed_self_link_points_at_api_host(client, mock_db, sample_recipe_doc):
+    """The RSS self link must reference the backend host (frontend has no /api)."""
+    mock_db.stream.return_value = iter([sample_recipe_doc(id="r1", title="Pho")])
+
+    response = client.get("/api/feed.xml")
+
+    assert response.status_code == 200
+    body = response.text
+    assert 'href="http://testserver/api/feed.xml" rel="self"' in body
+    assert "<link>http://localhost:5173/recipes/test-recipe/</link>" in body

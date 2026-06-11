@@ -3,18 +3,29 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from email.utils import formatdate
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 from ..cache import cache
+from ..config import settings
 from ..firestore import get_db
 from ..models import CategoryGroup, GroupedRecipes, PaginatedRecipes, Recipe
 from ..services.recipes import doc_to_recipe as _doc_to_recipe
 
 router = APIRouter(prefix="/api")
 
-SITE_URL = "https://madeforseconds.pages.dev"
+SITE_URL = settings.frontend_url.rstrip("/")
+
+
+def _self_base(request: Request) -> str:
+    """Base URL of this backend for self-referencing links (sitemap/feed live
+    on the API host, not the frontend). Cloud Run terminates TLS upstream, so
+    force https outside dev."""
+    base = str(request.base_url).rstrip("/")
+    if not settings.is_dev and base.startswith("http://"):
+        base = "https://" + base[len("http://"):]
+    return base
 
 
 @router.get("/recipes", response_model=PaginatedRecipes)
@@ -191,10 +202,12 @@ async def sitemap():
         .stream()
     )
 
+    # Trailing slashes match the SPA router's canonical form (it redirects
+    # slash-less paths, and redirected sitemap URLs hurt crawl efficiency)
     static_urls = [
         f"<url><loc>{SITE_URL}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>",
-        f"<url><loc>{SITE_URL}/recipes</loc><changefreq>daily</changefreq><priority>0.9</priority></url>",
-        f"<url><loc>{SITE_URL}/about</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>",
+        f"<url><loc>{SITE_URL}/recipes/</loc><changefreq>daily</changefreq><priority>0.9</priority></url>",
+        f"<url><loc>{SITE_URL}/about/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>",
     ]
 
     recipe_urls = []
@@ -203,7 +216,7 @@ async def sitemap():
         slug = d.get("slug", "")
         updated = d.get("updated_at")
         lastmod = updated.strftime("%Y-%m-%d") if updated else ""
-        url = f"<url><loc>{SITE_URL}/recipes/{slug}</loc>"
+        url = f"<url><loc>{SITE_URL}/recipes/{slug}/</loc>"
         if lastmod:
             url += f"<lastmod>{lastmod}</lastmod>"
         url += "<changefreq>monthly</changefreq><priority>0.8</priority></url>"
@@ -219,7 +232,7 @@ async def sitemap():
 
 
 @router.get("/feed.xml")
-async def rss_feed():
+async def rss_feed(request: Request):
     db = get_db()
     docs = (
         db.collection("recipes")
@@ -239,7 +252,7 @@ async def rss_feed():
 
     items = []
     for r in recipes:
-        url = f"{SITE_URL}/recipes/{r.slug}"
+        url = f"{SITE_URL}/recipes/{r.slug}/"
         desc = xml_escape(r.description)
         title = xml_escape(r.title)
         item = (
@@ -266,7 +279,8 @@ async def rss_feed():
         "<description>High-effort, high-reward. A collection of layered, heavy-hitting Asian classics.</description>"
         "<language>en-us</language>"
         f"<lastBuildDate>{pub_date}</lastBuildDate>"
-        f'<atom:link href="{SITE_URL}/api/feed.xml" rel="self" type="application/rss+xml"/>'
+        # Self link must point at this API host — the frontend host doesn't serve /api
+        f'<atom:link href="{_self_base(request)}/api/feed.xml" rel="self" type="application/rss+xml"/>'
         + "".join(items)
         + "</channel></rss>"
     )
