@@ -295,6 +295,9 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         <img
           src={recipe.image_url ?? PLACEHOLDER}
           alt={recipe.title}
+          // Hero is the LCP element — load eagerly at high priority
+          fetchPriority="high"
+          decoding="async"
           onError={(e) => { e.currentTarget.src = PLACEHOLDER }}
           className="h-72 w-full object-cover transition-transform duration-700 group-hover:scale-105 md:h-[450px]"
         />

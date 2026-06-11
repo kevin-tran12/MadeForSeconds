@@ -23,6 +23,8 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
         <img
           src={recipe.image_url ?? PLACEHOLDER}
           alt={recipe.title}
+          loading="lazy"
+          decoding="async"
           onError={(e) => { e.currentTarget.src = PLACEHOLDER }}
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
         />

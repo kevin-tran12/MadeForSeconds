@@ -1,25 +1,30 @@
+import { lazy, Suspense } from 'react'
 import { createBrowserRouter, RouterProvider, useLocation, Navigate, Outlet } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { Layout } from './components/layout/Layout'
 import { AdminRoute } from './components/admin/AdminRoute'
 import { TotpGate } from './components/admin/TotpGate'
+import { LoadingSpinner } from './components/ui/LoadingSpinner'
 import { HomePage } from './pages/HomePage'
 import { RecipesPage } from './pages/RecipesPage'
 import { RecipeDetailPage } from './pages/RecipeDetailPage'
-import { AdminDashboardPage } from './pages/AdminDashboardPage'
-import { AdminRecipeEditPage } from './pages/AdminRecipeEditPage'
-import { AdminCategoriesPage } from './pages/AdminCategoriesPage'
-import { AdminPagesPage } from './pages/AdminPagesPage'
-import { AdminPageEditPage } from './pages/AdminPageEditPage'
-import { AdminExpensesPage } from './pages/AdminExpensesPage'
-import { AdminExpenseEditPage } from './pages/AdminExpenseEditPage'
-import { AdminReportsPage } from './pages/AdminReportsPage'
-import { AdminRecipePreviewPage } from './pages/AdminRecipePreviewPage'
 import { AboutPage } from './pages/AboutPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { SupportPage } from './pages/SupportPage'
 import { SupportSuccessPage } from './pages/SupportSuccessPage'
 import { SupportCancelPage } from './pages/SupportCancelPage'
+
+// Admin pages are lazy-loaded so the editor/expenses/reports code never ships
+// to public visitors
+const AdminDashboardPage = lazy(() => import('./pages/AdminDashboardPage').then((m) => ({ default: m.AdminDashboardPage })))
+const AdminRecipeEditPage = lazy(() => import('./pages/AdminRecipeEditPage').then((m) => ({ default: m.AdminRecipeEditPage })))
+const AdminRecipePreviewPage = lazy(() => import('./pages/AdminRecipePreviewPage').then((m) => ({ default: m.AdminRecipePreviewPage })))
+const AdminCategoriesPage = lazy(() => import('./pages/AdminCategoriesPage').then((m) => ({ default: m.AdminCategoriesPage })))
+const AdminPagesPage = lazy(() => import('./pages/AdminPagesPage').then((m) => ({ default: m.AdminPagesPage })))
+const AdminPageEditPage = lazy(() => import('./pages/AdminPageEditPage').then((m) => ({ default: m.AdminPageEditPage })))
+const AdminExpensesPage = lazy(() => import('./pages/AdminExpensesPage').then((m) => ({ default: m.AdminExpensesPage })))
+const AdminExpenseEditPage = lazy(() => import('./pages/AdminExpenseEditPage').then((m) => ({ default: m.AdminExpenseEditPage })))
+const AdminReportsPage = lazy(() => import('./pages/AdminReportsPage').then((m) => ({ default: m.AdminReportsPage })))
 
 function EnsureTrailingSlash() {
   const { pathname, search, hash } = useLocation()
@@ -27,6 +32,20 @@ function EnsureTrailingSlash() {
     return <Navigate to={`${pathname}/${search}${hash}`} replace />
   }
   return <Outlet />
+}
+
+function AdminSuspense() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-20">
+          <LoadingSpinner />
+        </div>
+      }
+    >
+      <Outlet />
+    </Suspense>
+  )
 }
 
 const router = createBrowserRouter([
@@ -49,20 +68,25 @@ const router = createBrowserRouter([
             path: 'admin/',
             element: <AdminRoute />,
             children: [
-              { index: true, element: <AdminDashboardPage /> },
-              { path: 'new/', element: <AdminRecipeEditPage /> },
-              { path: 'edit/:id/', element: <AdminRecipeEditPage /> },
-              { path: 'preview/:id/', element: <AdminRecipePreviewPage /> },
-              { path: 'categories/', element: <AdminCategoriesPage /> },
-              { path: 'pages/', element: <AdminPagesPage /> },
-              { path: 'pages/:pageId/', element: <AdminPageEditPage /> },
               {
-                element: <TotpGate />,
+                element: <AdminSuspense />,
                 children: [
-                  { path: 'expenses/', element: <AdminExpensesPage /> },
-                  { path: 'expenses/new/', element: <AdminExpenseEditPage /> },
-                  { path: 'expenses/reports/', element: <AdminReportsPage /> },
-                  { path: 'expenses/:id/', element: <AdminExpenseEditPage /> },
+                  { index: true, element: <AdminDashboardPage /> },
+                  { path: 'new/', element: <AdminRecipeEditPage /> },
+                  { path: 'edit/:id/', element: <AdminRecipeEditPage /> },
+                  { path: 'preview/:id/', element: <AdminRecipePreviewPage /> },
+                  { path: 'categories/', element: <AdminCategoriesPage /> },
+                  { path: 'pages/', element: <AdminPagesPage /> },
+                  { path: 'pages/:pageId/', element: <AdminPageEditPage /> },
+                  {
+                    element: <TotpGate />,
+                    children: [
+                      { path: 'expenses/', element: <AdminExpensesPage /> },
+                      { path: 'expenses/new/', element: <AdminExpenseEditPage /> },
+                      { path: 'expenses/reports/', element: <AdminReportsPage /> },
+                      { path: 'expenses/:id/', element: <AdminExpenseEditPage /> },
+                    ],
+                  },
                 ],
               },
             ],

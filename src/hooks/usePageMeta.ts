@@ -24,11 +24,22 @@ function setMeta(name: string, content: string, property = false) {
   el.setAttribute('content', content)
 }
 
+function setLink(rel: string, href: string) {
+  let el = document.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`)
+  if (!el) {
+    el = document.createElement('link')
+    el.setAttribute('rel', rel)
+    document.head.appendChild(el)
+  }
+  el.setAttribute('href', href)
+}
+
 export function usePageMeta({ title, description, image, url, type = 'website' }: PageMeta) {
   useEffect(() => {
     const fullTitle = title ? `${title} — MadeForSeconds` : DEFAULT_TITLE
     const desc = description ?? DEFAULT_DESCRIPTION
-    const pageUrl = url ?? SITE_URL
+    // Router enforces trailing slashes, so pathname is already canonical
+    const pageUrl = url ?? `${SITE_URL}${window.location.pathname}`
 
     document.title = fullTitle
 
@@ -41,6 +52,8 @@ export function usePageMeta({ title, description, image, url, type = 'website' }
     setMeta('og:description', desc, true)
     setMeta('og:url', pageUrl, true)
     if (image) setMeta('og:image', image, true)
+
+    setLink('canonical', pageUrl)
 
     // Twitter Card
     setMeta('twitter:card', image ? 'summary_large_image' : 'summary')
