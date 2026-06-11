@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: .dark on <html> set by the init script in index.html */
+@variant dark (&:where(.dark, .dark *));
+
 @theme {
   /* Brand colors */
   --color-primary-50: #fff7ed;
@@ -12,8 +15,9 @@
   --color-primary-700: #c2410c;
   --color-primary-800: #9a3412;
   --color-primary-900: #7c2d12;
+  --color-primary-950: #431407;
 
-  /* Surface/background */
+  /* Surface/background (light mode) */
   --color-surface: #fefae0;
   --color-surface-dark: #faedcd;
   --color-surface-darker: #f0d9a0;
@@ -26,6 +30,14 @@
 body {
   background-color: var(--color-surface);
   font-family: var(--font-family-sans);
+}
+
+/* Dark mode: override surface tokens (all bg-surface-* classes pick this up automatically) */
+.dark {
+  --color-surface: #1c1917;
+  --color-surface-dark: #292524;
+  --color-surface-darker: #44403c;
+  color-scheme: dark;
 }
 
 /* Search dropdown entry animation */
@@ -51,4 +63,47 @@ body {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* ─── Print styles ────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide site chrome and interactive-only controls */
+  header,
+  footer,
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Strip decorative shadows */
+  * {
+    box-shadow: none !important;
+  }
+
+  /* Ingredient checkboxes: remove strikethrough so all items read clearly */
+  li .line-through {
+    text-decoration: none !important;
+    opacity: 1 !important;
+    color: inherit !important;
+  }
+
+  /* Avoid orphaned instruction steps */
+  ol > li,
+  ul > li {
+    break-inside: avoid;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  @page {
+    margin: 1.5cm;
+  }
 }
