@@ -25,28 +25,28 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/37</span>
+                <span class='fraction'>0/39</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/25</span>
+                <span class='fraction'>0/33</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/11</span>
+                <span class='fraction'>0/12</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/33</span>
+                <span class='fraction'>0/35</span>
             </div>
         
             
@@ -147,7 +147,9 @@
 <a name='L82'></a><a href='#L82'>82</a>
 <a name='L83'></a><a href='#L83'>83</a>
 <a name='L84'></a><a href='#L84'>84</a>
-<a name='L85'></a><a href='#L85'>85</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L85'></a><a href='#L85'>85</a>
+<a name='L86'></a><a href='#L86'>86</a>
+<a name='L87'></a><a href='#L87'>87</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -216,7 +218,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -242,9 +246,9 @@ let fetchPromise: Promise&lt;Recipe[]&gt; | null = <span class="cstat-no" title=
 function <span class="fstat-no" title="function not covered" >getAllRecipes(): Promise&lt;Recipe[]&gt; {</span>
 <span class="cstat-no" title="statement not covered" >  if (cachedRecipes) <span class="cstat-no" title="statement not covered" >return Promise.resolve(cachedRecipes)</span></span>
 <span class="cstat-no" title="statement not covered" >  if (!fetchPromise) {</span>
-<span class="cstat-no" title="statement not covered" >    fetchPromise = listPublicRecipes().then(<span class="fstat-no" title="function not covered" >(r</span>ecipes) =&gt; {</span>
-<span class="cstat-no" title="statement not covered" >      cachedRecipes = recipes</span>
-<span class="cstat-no" title="statement not covered" >      return recipes</span>
+<span class="cstat-no" title="statement not covered" >    fetchPromise = listPublicRecipes(undefined, undefined, undefined, 50).then(<span class="fstat-no" title="function not covered" >(d</span>ata) =&gt; {</span>
+<span class="cstat-no" title="statement not covered" >      cachedRecipes = data.recipes</span>
+<span class="cstat-no" title="statement not covered" >      return data.recipes</span>
     })
   }
 <span class="cstat-no" title="statement not covered" >  return fetchPromise</span>
@@ -298,12 +302,14 @@ export function <span class="fstat-no" title="function not covered" >useSearchSu
               .map(<span class="fstat-no" title="function not covered" >(i</span>ng) =&gt; <span class="cstat-no" title="statement not covered" >ing.item)</span>
           : []
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (matchesName || matchedIngredients.length &gt; 0) {</span>
-        // Only surface ingredient matches when the title didn't already match,
-        // so the label isn't redundant on a name hit.
+      const <span class="cstat-no" title="statement not covered" >matchesLabel =</span>
+        (searchBy === 'all' || searchBy === 'label') &amp;&amp;
+        (recipe.labels ?? []).some(<span class="fstat-no" title="function not covered" >(l</span>bl) =&gt; <span class="cstat-no" title="statement not covered" >lbl.toLowerCase().includes(q))</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >      if (matchesName || matchedIngredients.length &gt; 0 || matchesLabel) {</span>
 <span class="cstat-no" title="statement not covered" >        results.push({</span>
           recipe,
-          matchedIngredients: matchesName ? [] : matchedIngredients,
+          matchedIngredients: matchesName || matchesLabel ? [] : matchedIngredients,
         })
       }
 &nbsp;
@@ -322,7 +328,7 @@ export function <span class="fstat-no" title="function not covered" >useSearchSu
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-19T04:17:06.842Z
+                at 2026-06-11T20:52:01.165Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

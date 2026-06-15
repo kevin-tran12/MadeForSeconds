@@ -25,28 +25,28 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/30</span>
+                <span class='fraction'>0/37</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/18</span>
+                <span class='fraction'>0/20</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/4</span>
+                <span class='fraction'>0/5</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/28</span>
+                <span class='fraction'>0/35</span>
             </div>
         
             
@@ -118,7 +118,20 @@
 <a name='L53'></a><a href='#L53'>53</a>
 <a name='L54'></a><a href='#L54'>54</a>
 <a name='L55'></a><a href='#L55'>55</a>
-<a name='L56'></a><a href='#L56'>56</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L56'></a><a href='#L56'>56</a>
+<a name='L57'></a><a href='#L57'>57</a>
+<a name='L58'></a><a href='#L58'>58</a>
+<a name='L59'></a><a href='#L59'>59</a>
+<a name='L60'></a><a href='#L60'>60</a>
+<a name='L61'></a><a href='#L61'>61</a>
+<a name='L62'></a><a href='#L62'>62</a>
+<a name='L63'></a><a href='#L63'>63</a>
+<a name='L64'></a><a href='#L64'>64</a>
+<a name='L65'></a><a href='#L65'>65</a>
+<a name='L66'></a><a href='#L66'>66</a>
+<a name='L67'></a><a href='#L67'>67</a>
+<a name='L68'></a><a href='#L68'>68</a>
+<a name='L69'></a><a href='#L69'>69</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -149,17 +162,30 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -186,7 +212,7 @@ interface PageMeta {
 const DEFAULT_TITLE = <span class="cstat-no" title="statement not covered" >'MadeForSeconds'</span>
 const DEFAULT_DESCRIPTION =
 <span class="cstat-no" title="statement not covered" >  'The kitchen\'s a mess. The food\'s good.'</span>
-const SITE_URL = <span class="cstat-no" title="statement not covered" >'https://madeforseconds.com'</span>
+const SITE_URL = <span class="cstat-no" title="statement not covered" >'https://madeforseconds.pages.dev'</span>
 &nbsp;
 function <span class="fstat-no" title="function not covered" >setMeta(n</span>ame: string, content: string, property = <span class="branch-0 cbranch-no" title="branch not covered" >false) {</span>
   const attr = <span class="cstat-no" title="statement not covered" >property ? 'property' : 'name'</span>
@@ -199,11 +225,22 @@ function <span class="fstat-no" title="function not covered" >setMeta(n</span>am
 <span class="cstat-no" title="statement not covered" >  el.setAttribute('content', content)</span>
 }
 &nbsp;
+function <span class="fstat-no" title="function not covered" >setLink(r</span>el: string, href: string) {
+  let el = <span class="cstat-no" title="statement not covered" >document.querySelector&lt;HTMLLinkElement&gt;(`link[rel="${rel}"]`)</span>
+<span class="cstat-no" title="statement not covered" >  if (!el) {</span>
+<span class="cstat-no" title="statement not covered" >    el = document.createElement('link')</span>
+<span class="cstat-no" title="statement not covered" >    el.setAttribute('rel', rel)</span>
+<span class="cstat-no" title="statement not covered" >    document.head.appendChild(el)</span>
+  }
+<span class="cstat-no" title="statement not covered" >  el.setAttribute('href', href)</span>
+}
+&nbsp;
 export function <span class="fstat-no" title="function not covered" >usePageMeta({</span> title, description, image, url, type = <span class="branch-0 cbranch-no" title="branch not covered" >'website' }</span>: PageMeta) {
 <span class="cstat-no" title="statement not covered" >  useEffect(<span class="fstat-no" title="function not covered" >() =&gt; {</span></span>
     const fullTitle = <span class="cstat-no" title="statement not covered" >title ? `${title} — MadeForSeconds` : DEFAULT_TITLE</span>
     const desc = <span class="cstat-no" title="statement not covered" >description ?? DEFAULT_DESCRIPTION</span>
-    const pageUrl = <span class="cstat-no" title="statement not covered" >url ?? SITE_URL</span>
+    // Router enforces trailing slashes, so pathname is already canonical
+    const pageUrl = <span class="cstat-no" title="statement not covered" >url ?? `${SITE_URL}${window.location.pathname}`</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >    document.title = fullTitle</span>
 &nbsp;
@@ -216,6 +253,8 @@ export function <span class="fstat-no" title="function not covered" >usePageMeta
 <span class="cstat-no" title="statement not covered" >    setMeta('og:description', desc, true)</span>
 <span class="cstat-no" title="statement not covered" >    setMeta('og:url', pageUrl, true)</span>
 <span class="cstat-no" title="statement not covered" >    if (image) <span class="cstat-no" title="statement not covered" >setMeta('og:image', image, true)</span></span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    setLink('canonical', pageUrl)</span>
 &nbsp;
     // Twitter Card
 <span class="cstat-no" title="statement not covered" >    setMeta('twitter:card', image ? 'summary_large_image' : 'summary')</span>
@@ -235,7 +274,7 @@ export function <span class="fstat-no" title="function not covered" >usePageMeta
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-19T04:17:06.842Z
+                at 2026-06-11T20:52:01.165Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

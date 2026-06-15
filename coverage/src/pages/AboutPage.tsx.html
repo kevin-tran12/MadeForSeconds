@@ -25,7 +25,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/6</span>
+                <span class='fraction'>0/9</span>
             </div>
         
             
@@ -39,14 +39,14 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/5</span>
+                <span class='fraction'>0/6</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/5</span>
+                <span class='fraction'>0/8</span>
             </div>
         
             
@@ -223,11 +223,31 @@
 <a name='L158'></a><a href='#L158'>158</a>
 <a name='L159'></a><a href='#L159'>159</a>
 <a name='L160'></a><a href='#L160'>160</a>
-<a name='L161'></a><a href='#L161'>161</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L161'></a><a href='#L161'>161</a>
+<a name='L162'></a><a href='#L162'>162</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -324,25 +344,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -386,9 +388,28 @@
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { subscriberApi } from '../lib/api'
+import { usePageContent } from '../hooks/usePageContent'
+&nbsp;
+const ABOUT_DEFAULTS = <span class="cstat-no" title="statement not covered" >{</span>
+  heading: 'About MadeForSeconds',
+  body: [
+    'MadeForSeconds is where I keep and share the recipes I cook.',
+    "It started as a place to organize my own recipes so they didn't get lost in random notes, screenshots, and half-written documents. Eventually it turned into this site.",
+    'My background is a bit all over the place. I spent most of my early working years in the food and service industry starting at 16, mostly serving and bartending, with some time around kitchens as well. Restaurants teach you a lot about food, but they also teach speed, repetition, and how to handle chaos while people are hungry.',
+    "In my mid-20s I moved into software engineering and spent the next four years building applications. More recently I've been moving deeper into cloud infrastructure.",
+    "This project sits somewhere in the overlap of those worlds. It's a place for recipes I want to keep cooking and also a small technical playground where I can build something real.",
+    "The food here doesn't stick to one cuisine or style. Some recipes are quick things to make on a random night. Others take time. If it tastes good and I want to make it again, it gets written down here.",
+    'No long life stories before the recipe. Just ingredients, steps, and food that works.',
+  ].join('\n\n'),
+  callout_title: 'Why "MadeForSeconds"?',
+  callout_body: 'Because the best compliment a dish can get is someone going back for another plate.',
+  follow_heading: 'Follow the Journey',
+  thank_you_message: 'Thank you to everyone who has supported this site. You help keep it going.',
+}
 &nbsp;
 export function <span class="fstat-no" title="function not covered" >AboutPage() {</span>
   const [supporters, setSupporters<span class="cstat-no" title="statement not covered" >] = useState&lt;{ display_name: string; note?: string }[]&gt;([])</span>
+  const <span class="cstat-no" title="statement not covered" >page = usePageContent('about', ABOUT_DEFAULTS)</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >  useEffect(<span class="fstat-no" title="function not covered" >() =&gt; {</span></span>
 <span class="cstat-no" title="statement not covered" >    subscriberApi.listSupporters().then(<span class="fstat-no" title="function not covered" >(l</span>ist) =&gt; <span class="cstat-no" title="statement not covered" >setSupporters(list.slice(0, 50)))</span>.catch(<span class="fstat-no" title="function not covered" >() =&gt; {</span>})</span>
@@ -403,7 +424,7 @@ export function <span class="fstat-no" title="function not covered" >AboutPage()
 &nbsp;
           {/* Follow */}
           &lt;div className="space-y-4"&gt;
-            &lt;h2 className="font-display text-xl font-bold text-gray-900"&gt;Follow the Journey&lt;/h2&gt;
+            &lt;h2 className="font-display text-xl font-bold text-gray-900"&gt;{page.follow_heading}&lt;/h2&gt;
             &lt;div className="flex flex-col gap-3"&gt;
               &lt;a
                 href="https://instagram.com/madeforseconds"
@@ -438,7 +459,7 @@ export function <span class="fstat-no" title="function not covered" >AboutPage()
             {supporters.length &gt; 0 ? (
               &lt;&gt;
                 &lt;p className="text-sm text-gray-500"&gt;
-                  Thank you to everyone who has supported this site. You help keep it going.
+                  {page.thank_you_message}
                 &lt;/p&gt;
                 &lt;div className="space-y-3"&gt;
                   {supporters.map(<span class="fstat-no" title="function not covered" >(s</span>, i) =&gt; (
@@ -451,7 +472,7 @@ export function <span class="fstat-no" title="function not covered" >AboutPage()
                   ))}
                 &lt;/div&gt;
                 &lt;Link
-                  to="/support"
+                  to="/support/"
                   className="inline-flex rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
                 &gt;
                   Join them
@@ -463,7 +484,7 @@ export function <span class="fstat-no" title="function not covered" >AboutPage()
                   Be the first to support MadeForSeconds.
                 &lt;/p&gt;
                 &lt;Link
-                  to="/support"
+                  to="/support/"
                   className="inline-flex rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
                 &gt;
                   Support us
@@ -478,37 +499,19 @@ export function <span class="fstat-no" title="function not covered" >AboutPage()
         &lt;div className="flex-1 space-y-8"&gt;
           &lt;header&gt;
             &lt;h1 className="font-display text-4xl font-bold text-gray-900 md:text-5xl lg:text-6xl"&gt;
-              About MadeForSeconds
+              {page.heading}
             &lt;/h1&gt;
           &lt;/header&gt;
 &nbsp;
           &lt;div className="space-y-6 text-lg leading-relaxed text-gray-700"&gt;
-            &lt;p&gt;
-              MadeForSeconds is where I keep and share the recipes I cook.
-            &lt;/p&gt;
-            &lt;p&gt;
-              It started as a place to organize my own recipes so they didn't get lost in random notes, screenshots, and half-written documents. Eventually it turned into this site.
-            &lt;/p&gt;
-            &lt;p&gt;
-              My background is a bit all over the place. I spent most of my early working years in the food and service industry starting at 16, mostly serving and bartending, with some time around kitchens as well. Restaurants teach you a lot about food, but they also teach speed, repetition, and how to handle chaos while people are hungry.
-            &lt;/p&gt;
-            &lt;p&gt;
-              In my mid-20s I moved into software engineering and spent the next four years building applications. More recently I've been moving deeper into cloud infrastructure.
-            &lt;/p&gt;
-            &lt;p&gt;
-              This project sits somewhere in the overlap of those worlds. It's a place for recipes I want to keep cooking and also a small technical playground where I can build something real.
-            &lt;/p&gt;
-            &lt;p&gt;
-              The food here doesn't stick to one cuisine or style. Some recipes are quick things to make on a random night. Others take time. If it tastes good and I want to make it again, it gets written down here.
-            &lt;/p&gt;
-            &lt;p&gt;
-              No long life stories before the recipe. Just ingredients, steps, and food that works.
-            &lt;/p&gt;
+            {page.body.split('\n\n').map(<span class="fstat-no" title="function not covered" >(p</span>ara, i) =&gt; (
+<span class="cstat-no" title="statement not covered" >              &lt;p key={i}&gt;{para}&lt;/p&gt;</span>
+            ))}
 &nbsp;
             &lt;div className="rounded-2xl bg-gray-50 p-6 md:p-8 border border-gray-100"&gt;
-              &lt;h2 className="font-display text-2xl font-bold text-gray-900"&gt;Why "MadeForSeconds"?&lt;/h2&gt;
+              &lt;h2 className="font-display text-2xl font-bold text-gray-900"&gt;{page.callout_title}&lt;/h2&gt;
               &lt;p className="mt-4"&gt;
-                Because the best compliment a dish can get is someone going back for another plate.
+                {page.callout_body}
               &lt;/p&gt;
             &lt;/div&gt;
 &nbsp;
@@ -550,7 +553,7 @@ export function <span class="fstat-no" title="function not covered" >AboutPage()
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-19T04:17:06.842Z
+                at 2026-06-11T20:52:01.165Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
