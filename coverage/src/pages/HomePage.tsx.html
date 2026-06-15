@@ -25,7 +25,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/5</span>
+                <span class='fraction'>0/7</span>
             </div>
         
             
@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/5</span>
+                <span class='fraction'>0/7</span>
             </div>
         
             
@@ -156,13 +156,27 @@
 <a name='L91'></a><a href='#L91'>91</a>
 <a name='L92'></a><a href='#L92'>92</a>
 <a name='L93'></a><a href='#L93'>93</a>
-<a name='L94'></a><a href='#L94'>94</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L94'></a><a href='#L94'>94</a>
+<a name='L95'></a><a href='#L95'>95</a>
+<a name='L96'></a><a href='#L96'>96</a>
+<a name='L97'></a><a href='#L97'>97</a>
+<a name='L98'></a><a href='#L98'>98</a>
+<a name='L99'></a><a href='#L99'>99</a>
+<a name='L100'></a><a href='#L100'>100</a>
+<a name='L101'></a><a href='#L101'>101</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -252,12 +266,19 @@
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { Link } from 'react-router-dom'
 import { useRecipes } from '../hooks/useRecipes'
 import { useCategories } from '../hooks/useCategories'
+import { usePageContent } from '../hooks/usePageContent'
 import { RecipeGrid } from '../components/recipe/RecipeGrid'
 import { SearchWithSuggestions } from '../components/search/SearchWithSuggestions'
 &nbsp;
+const HOME_DEFAULTS = <span class="cstat-no" title="statement not covered" >{</span>
+  hero_title: 'Made for Seconds',
+  hero_subtitle: "The kitchen's a mess. The food's good.",
+}
+&nbsp;
 export function <span class="fstat-no" title="function not covered" >HomePage() {</span>
-  const { recipes, loading, error <span class="cstat-no" title="statement not covered" >} = useRecipes()</span>
+  const { recipes, loading, error <span class="cstat-no" title="statement not covered" >} = useRecipes({ forceFlat: true })</span>
   const { categories <span class="cstat-no" title="statement not covered" >} = useCategories()</span>
+  const <span class="cstat-no" title="statement not covered" >page = usePageContent('home', HOME_DEFAULTS)</span>
   const featured = <span class="cstat-no" title="statement not covered" >recipes.slice(0, 6)</span>
 &nbsp;
 <span class="cstat-no" title="statement not covered" >  return (</span>
@@ -272,10 +293,10 @@ export function <span class="fstat-no" title="function not covered" >HomePage() 
 &nbsp;
         &lt;div className="relative mx-auto max-w-4xl px-4 text-center"&gt;
           &lt;h1 className="font-display text-5xl font-bold tracking-tight text-white md:text-7xl"&gt;
-            Made for &lt;span className="text-primary-300"&gt;Seconds&lt;/span&gt;
+            {page.hero_title}
           &lt;/h1&gt;
           &lt;p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/85 md:text-xl"&gt;
-            The kitchen's a mess. The food's good.
+            {page.hero_subtitle}
           &lt;/p&gt;
 &nbsp;
           {/* Hero search */}
@@ -285,13 +306,13 @@ export function <span class="fstat-no" title="function not covered" >HomePage() 
 &nbsp;
           &lt;div className="mt-6 flex flex-col items-center justify-center gap-4 sm:flex-row"&gt;
             &lt;Link
-              to="/recipes"
+              to="/recipes/"
               className="rounded-xl bg-primary-500 px-8 py-4 text-lg font-semibold text-white shadow-lg shadow-black/30 transition-all hover:bg-primary-400 hover:shadow-xl active:scale-95"
             &gt;
               Browse recipes
             &lt;/Link&gt;
             &lt;Link
-              to="/about"
+              to="/about/"
               className="rounded-xl border border-white/50 px-8 py-4 text-lg font-semibold text-white transition-all hover:bg-white/10 active:scale-95"
             &gt;
               Learn more
@@ -313,7 +334,7 @@ export function <span class="fstat-no" title="function not covered" >HomePage() 
             {categories.map(<span class="fstat-no" title="function not covered" >(c</span>at) =&gt; (
 <span class="cstat-no" title="statement not covered" >              &lt;Link</span>
                 key={cat}
-                to={`/recipes?category=${encodeURIComponent(cat)}`}
+                to={`/recipes/?category=${encodeURIComponent(cat)}`}
                 className="group flex items-center gap-2 rounded-2xl bg-surface-dark border border-surface-darker px-6 py-3 text-base font-medium capitalize text-gray-700 transition-all hover:bg-primary-600 hover:text-white hover:shadow-lg hover:shadow-primary-100 active:scale-95"
               &gt;
                 {cat}
@@ -327,7 +348,7 @@ export function <span class="fstat-no" title="function not covered" >HomePage() 
       &lt;section className="mx-auto max-w-6xl px-4 pb-24"&gt;
         &lt;div className="mb-8 flex items-center justify-between border-b border-gray-100 pb-4"&gt;
           &lt;h2 className="font-display text-2xl font-bold text-gray-900 md:text-3xl"&gt;Latest recipes&lt;/h2&gt;
-          &lt;Link to="/recipes" className="group flex items-center gap-1 text-sm font-bold text-primary-600 transition-colors hover:text-primary-700"&gt;
+          &lt;Link to="/recipes/" className="group flex items-center gap-1 text-sm font-bold text-primary-600 transition-colors hover:text-primary-700"&gt;
             View all 
             &lt;svg className="h-4 w-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"&gt;
               &lt;path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /&gt;
@@ -349,7 +370,7 @@ export function <span class="fstat-no" title="function not covered" >HomePage() 
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-03-19T04:17:06.842Z
+                at 2026-06-11T20:52:01.165Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

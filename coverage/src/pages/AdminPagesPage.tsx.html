@@ -3,15 +3,15 @@
 <html lang="en">
 
 <head>
-    <title>Code coverage report for src/components/ui/Input.tsx</title>
+    <title>Code coverage report for src/pages/AdminPagesPage.tsx</title>
     <meta charset="utf-8" />
-    <link rel="stylesheet" href="../../../prettify.css" />
-    <link rel="stylesheet" href="../../../base.css" />
-    <link rel="shortcut icon" type="image/x-icon" href="../../../favicon.png" />
+    <link rel="stylesheet" href="../../prettify.css" />
+    <link rel="stylesheet" href="../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style type='text/css'>
         .coverage-summary .sorter {
-            background-image: url(../../../sort-arrow-sprite.png);
+            background-image: url(../../sort-arrow-sprite.png);
         }
     </style>
 </head>
@@ -19,34 +19,34 @@
 <body>
 <div class='wrapper'>
     <div class='pad1'>
-        <h1><a href="../../../index.html">All files</a> / <a href="index.html">src/components/ui</a> Input.tsx</h1>
+        <h1><a href="../../index.html">All files</a> / <a href="index.html">src/pages</a> AdminPagesPage.tsx</h1>
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/1</span>
+                <span class='fraction'>0/3</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/7</span>
+                <span class='fraction'>0/0</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/1</span>
+                <span class='fraction'>0/2</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/1</span>
+                <span class='fraction'>0/3</span>
             </div>
         
             
@@ -95,7 +95,20 @@
 <a name='L30'></a><a href='#L30'>30</a>
 <a name='L31'></a><a href='#L31'>31</a>
 <a name='L32'></a><a href='#L32'>32</a>
-<a name='L33'></a><a href='#L33'>33</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L33'></a><a href='#L33'>33</a>
+<a name='L34'></a><a href='#L34'>34</a>
+<a name='L35'></a><a href='#L35'>35</a>
+<a name='L36'></a><a href='#L36'>36</a>
+<a name='L37'></a><a href='#L37'>37</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -122,40 +135,39 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import type { InputHTMLAttributes } from 'react'
+<span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { Link } from 'react-router-dom'
 &nbsp;
-interface InputProps extends InputHTMLAttributes&lt;HTMLInputElement&gt; {
-  label?: string
-  error?: string
-  id: string
-}
+const PAGES = <span class="cstat-no" title="statement not covered" >[</span>
+  { id: 'home', label: 'Home', description: 'Hero title and subtitle shown on the landing page.' },
+  { id: 'about', label: 'About', description: 'Heading, body paragraphs, callout box, and sidebar text.' },
+]
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >Input({</span> label, error, id, className = <span class="branch-0 cbranch-no" title="branch not covered" >'', .</span>..props }: InputProps) {
+export function <span class="fstat-no" title="function not covered" >AdminPagesPage() {</span>
 <span class="cstat-no" title="statement not covered" >  return (</span>
-    &lt;div className="flex flex-col gap-1"&gt;
-      {label &amp;&amp; (
-        &lt;label htmlFor={id} className="text-sm font-medium text-gray-700"&gt;
-          {label}
-        &lt;/label&gt;
-      )}
-      &lt;input
-        id={id}
-        className={[
-          'rounded-lg border px-3 py-2 text-sm outline-none transition-colors',
-          'bg-white placeholder:text-gray-400',
-          error
-            ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-200'
-            : 'border-gray-300 focus:border-primary-500 focus:ring-2 focus:ring-primary-100',
-          className,
-        ].join(' ')}
-        {...props}
-      /&gt;
-      {error &amp;&amp; &lt;p className="text-xs text-red-600"&gt;{error}&lt;/p&gt;}
+    &lt;div className="mx-auto max-w-2xl px-4 py-10"&gt;
+      &lt;div className="mb-6 flex items-center gap-3"&gt;
+        &lt;Link to="/admin/" className="text-sm text-gray-500 hover:text-gray-700"&gt;← Dashboard&lt;/Link&gt;
+        &lt;span className="text-gray-300"&gt;/&lt;/span&gt;
+        &lt;h1 className="font-display text-2xl font-bold text-gray-900"&gt;Pages&lt;/h1&gt;
+      &lt;/div&gt;
+&nbsp;
+      &lt;div className="space-y-3"&gt;
+        {PAGES.map(<span class="fstat-no" title="function not covered" >(p</span>age) =&gt; (
+<span class="cstat-no" title="statement not covered" >          &lt;Link</span>
+            key={page.id}
+            to={`/admin/pages/${page.id}/`}
+            className="flex items-center justify-between rounded-xl border border-surface-darker bg-white px-5 py-4 transition-colors hover:border-primary-200 hover:bg-primary-50/30"
+          &gt;
+            &lt;div&gt;
+              &lt;p className="font-semibold text-gray-900"&gt;{page.label}&lt;/p&gt;
+              &lt;p className="text-sm text-gray-500 mt-0.5"&gt;{page.description}&lt;/p&gt;
+            &lt;/div&gt;
+            &lt;svg className="h-5 w-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"&gt;
+              &lt;path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /&gt;
+            &lt;/svg&gt;
+          &lt;/Link&gt;
+        ))}
+      &lt;/div&gt;
     &lt;/div&gt;
   )
 }
@@ -168,14 +180,14 @@ export function <span class="fstat-no" title="function not covered" >Input({</sp
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
                 at 2026-06-11T20:52:01.165Z
             </div>
-        <script src="../../../prettify.js"></script>
+        <script src="../../prettify.js"></script>
         <script>
             window.onload = function () {
                 prettyPrint();
             };
         </script>
-        <script src="../../../sorter.js"></script>
-        <script src="../../../block-navigation.js"></script>
+        <script src="../../sorter.js"></script>
+        <script src="../../block-navigation.js"></script>
     </body>
 </html>
     
