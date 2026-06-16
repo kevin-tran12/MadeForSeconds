@@ -66,7 +66,8 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    contents = await file.read()
+    # Bounded read: cap memory at the limit instead of buffering the whole upload
+    contents = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
     if len(contents) > uploads.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10MB)")
 
@@ -97,7 +98,8 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
             detail=f"Receipt must be an image or PDF. Got: {file.content_type}",
         )
 
-    contents = await file.read()
+    # Bounded read: cap memory at the limit instead of buffering the whole upload
+    contents = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
     if len(contents) > uploads.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10MB)")
 

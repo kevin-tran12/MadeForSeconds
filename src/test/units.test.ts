@@ -60,18 +60,18 @@ describe('formatIngredient', () => {
 
   it('converts oz to g', () => {
     const result = formatIngredient('2', 'oz', 1, 'metric')
-    expect(result).toEqual({ amount: '56', unit: 'g' })
+    expect(result).toEqual({ amount: '57', unit: 'g' }) // 2 * 28.3495 = 56.7 → rounds to 57
   })
 
   it('converts lb to g', () => {
     const result = formatIngredient('1', 'lb', 1, 'metric')
-    expect(result).toEqual({ amount: '453', unit: 'g' })
+    expect(result).toEqual({ amount: '454', unit: 'g' }) // 453.592 → rounds to 454
   })
 
   it('converts lbs to g', () => {
     const result = formatIngredient('0.5', 'lbs', 1, 'metric')
     expect(result.unit).toBe('g')
-    expect(result.amount).toBe('227') // 0.5 * 453 = 226.5 → rounds to 227
+    expect(result.amount).toBe('227') // 0.5 * 453.592 = 226.8 → rounds to 227
   })
 
   // ── Metric → imperial (round-trip) ────────────────────────────────────────

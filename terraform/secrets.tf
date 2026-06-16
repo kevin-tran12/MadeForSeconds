@@ -49,27 +49,6 @@ resource "google_secret_manager_secret_version" "mcp_api_key_initial" {
   }
 }
 
-# Anthropic API key — used by the recipe parser endpoint
-resource "google_secret_manager_secret" "anthropic_api_key" {
-  project   = var.gcp_project_id
-  secret_id = "anthropic-api-key"
-
-  replication {
-    auto {}
-  }
-
-  depends_on = [google_project_service.required_apis]
-}
-
-resource "google_secret_manager_secret_version" "anthropic_api_key_initial" {
-  secret      = google_secret_manager_secret.anthropic_api_key.id
-  secret_data = var.anthropic_api_key
-
-  lifecycle {
-    ignore_changes = [secret_data]
-  }
-}
-
 # Redis URL — contains embedded credentials; only created when redis_url is provided
 resource "google_secret_manager_secret" "redis_url" {
   count     = var.redis_url != "" ? 1 : 0

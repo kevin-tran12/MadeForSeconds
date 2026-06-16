@@ -40,7 +40,6 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `backend_image` | Leave as-is — Cloud Build pushes to this path |
 | `github_owner` | Your GitHub username or org |
 | `github_repo` | Repository name (e.g. `MadeForSeconds`) |
-| `anthropic_api_key` | Anthropic API key for the recipe parser |
 | `mcp_api_key` | Bearer token for Claude Projects MCP integration |
 | `stripe_secret_key` | Stripe secret key (`sk_live_…`) |
 | `stripe_webhook_secret` | Stripe webhook signing secret (`whsec_…`) |
@@ -291,7 +290,6 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `STRIPE_PRODUCT_ID` | GCP Secret Manager | Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | GCP Secret Manager | Secret for signing cancel link JWTs (32+ chars) |
 | `RESEND_API_KEY` | GCP Secret Manager | Resend API key for cancellation emails |
-| `ANTHROPIC_API_KEY` | GCP Secret Manager | Claude API key for recipe parsing |
 | `MCP_API_KEY` | GCP Secret Manager | Bearer token for Claude Projects MCP integration |
 | `REDIS_URL` | GCP Secret Manager (optional) | Upstash Redis URL for caching |
 | `GCS_BUCKET_NAME` | Set by Terraform | Cloud Storage bucket for recipe images |

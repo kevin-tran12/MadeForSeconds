@@ -11,16 +11,15 @@ const CONVERSIONS: Conv[] = [
   { imp: 'cups',   met: 'ml', factor: 240  },
   { imp: 'tbsp',   met: 'ml', factor: 15   },
   { imp: 'tsp',    met: 'ml', factor: 5    },
-  { imp: 'oz',     met: 'g',  factor: 28   },
-  { imp: 'lb',     met: 'g',  factor: 453  },
-  { imp: 'lbs',    met: 'g',  factor: 453  },
+  { imp: 'oz',     met: 'g',  factor: 28.3495 },
+  { imp: 'lb',     met: 'g',  factor: 453.592 },
+  { imp: 'lbs',    met: 'g',  factor: 453.592 },
   { imp: 'fl oz',  met: 'ml', factor: 30   },
   { imp: 'pt',     met: 'ml', factor: 473  },
   { imp: 'qt',     met: 'ml', factor: 946  },
 ]
 
 function fmt(n: number): string {
-  if (n >= 100) return Math.round(n).toString()
   if (n >= 10) return Math.round(n).toString()
   const r = Math.round(n * 10) / 10
   return Number.isInteger(r) ? r.toString() : r.toFixed(1)

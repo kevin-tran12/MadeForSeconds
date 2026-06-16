@@ -25,28 +25,28 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/51</span>
+                <span class='fraction'>0/46</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/32</span>
+                <span class='fraction'>0/30</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/23</span>
+                <span class='fraction'>0/20</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/45</span>
+                <span class='fraction'>0/40</span>
             </div>
         
             
@@ -228,24 +228,7 @@
 <a name='L163'></a><a href='#L163'>163</a>
 <a name='L164'></a><a href='#L164'>164</a>
 <a name='L165'></a><a href='#L165'>165</a>
-<a name='L166'></a><a href='#L166'>166</a>
-<a name='L167'></a><a href='#L167'>167</a>
-<a name='L168'></a><a href='#L168'>168</a>
-<a name='L169'></a><a href='#L169'>169</a>
-<a name='L170'></a><a href='#L170'>170</a>
-<a name='L171'></a><a href='#L171'>171</a>
-<a name='L172'></a><a href='#L172'>172</a>
-<a name='L173'></a><a href='#L173'>173</a>
-<a name='L174'></a><a href='#L174'>174</a>
-<a name='L175'></a><a href='#L175'>175</a>
-<a name='L176'></a><a href='#L176'>176</a>
-<a name='L177'></a><a href='#L177'>177</a>
-<a name='L178'></a><a href='#L178'>178</a>
-<a name='L179'></a><a href='#L179'>179</a>
-<a name='L180'></a><a href='#L180'>180</a>
-<a name='L181'></a><a href='#L181'>181</a>
-<a name='L182'></a><a href='#L182'>182</a>
-<a name='L183'></a><a href='#L183'>183</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L166'></a><a href='#L166'>166</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -257,8 +240,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -312,11 +293,6 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -350,9 +326,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -406,13 +379,6 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -430,11 +396,10 @@
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { adminApi, adminSupporterApi } from '../lib/api'
-import type { Recipe, RecipeFormData } from '../lib/types'
+import type { Recipe } from '../lib/types'
 import { RecipeTable } from '../components/admin/RecipeTable'
 import { SupporterModerationPanel } from '../components/admin/SupporterModerationPanel'
 import { Button } from '../components/ui/Button'
-import { ImportRecipeModal } from '../components/admin/ImportRecipeModal'
 import { RecipePreviewPanel } from '../components/admin/RecipePreviewPanel'
 &nbsp;
 type Tab = 'recipes' | 'supporters' | 'expenses' | 'categories' | 'pages'
@@ -445,7 +410,6 @@ export function <span class="fstat-no" title="function not covered" >AdminDashbo
   const [recipes, setRecipes<span class="cstat-no" title="statement not covered" >] = useState&lt;Recipe[]&gt;([])</span>
   const [loading, setLoading<span class="cstat-no" title="statement not covered" >] = useState(true)</span>
   const [error, setError<span class="cstat-no" title="statement not covered" >] = useState&lt;string | null&gt;(null)</span>
-  const [showImport, setShowImport<span class="cstat-no" title="statement not covered" >] = useState(false)</span>
   const [pendingCount, setPendingCount<span class="cstat-no" title="statement not covered" >] = useState(0)</span>
   const [previewRecipe, setPreviewRecipe<span class="cstat-no" title="statement not covered" >] = useState&lt;Recipe | null&gt;(null)</span>
   const [showPreviewPanel, setShowPreviewPanel<span class="cstat-no" title="statement not covered" >] = useState(false)</span>
@@ -494,11 +458,6 @@ export function <span class="fstat-no" title="function not covered" >AdminDashbo
 <span class="cstat-no" title="statement not covered" >    window.open(`/admin/preview/${previewRecipe.id}/`, '_blank')?.focus()</span>
   }
 &nbsp;
-  function <span class="fstat-no" title="function not covered" >handleImportSuccess(d</span>ata: RecipeFormData) {
-<span class="cstat-no" title="statement not covered" >    setShowImport(false)</span>
-<span class="cstat-no" title="statement not covered" >    navigate('/admin/new/', { state: { prefill: data } })</span>
-  }
-&nbsp;
   const tabClass = <span class="cstat-no" title="statement not covered" ><span class="fstat-no" title="function not covered" >(t</span>: Tab) =&gt;</span>
 <span class="cstat-no" title="statement not covered" >    `px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${</span>
       tab === t
@@ -533,12 +492,9 @@ export function <span class="fstat-no" title="function not covered" >AdminDashbo
         &lt;/div&gt;
 &nbsp;
         {tab === 'recipes' &amp;&amp; (
-          &lt;div className="flex gap-2"&gt;
-            &lt;Button variant="secondary" onClick={<span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >s</span>etShowImport(true)}&gt;I</span>mport recipe&lt;/Button&gt;
-            &lt;Link to="/admin/new/"&gt;
-              &lt;Button&gt;+ New recipe&lt;/Button&gt;
-            &lt;/Link&gt;
-          &lt;/div&gt;
+          &lt;Link to="/admin/new/"&gt;
+            &lt;Button&gt;+ New recipe&lt;/Button&gt;
+          &lt;/Link&gt;
         )}
       &lt;/div&gt;
 &nbsp;
@@ -591,13 +547,6 @@ export function <span class="fstat-no" title="function not covered" >AdminDashbo
         &lt;/div&gt;
       )}
 &nbsp;
-      {showImport &amp;&amp; (
-        &lt;ImportRecipeModal
-          onSuccess={handleImportSuccess}
-          onClose={<span class="fstat-no" title="function not covered" >() =&gt; <span class="cstat-no" title="statement not covered" >s</span>etShowImport(false)}</span>
-        /&gt;
-      )}
-&nbsp;
       {previewRecipe &amp;&amp; (
         &lt;RecipePreviewPanel
           recipe={previewRecipe}
@@ -616,7 +565,7 @@ export function <span class="fstat-no" title="function not covered" >AdminDashbo
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-06-11T20:52:01.165Z
+                at 2026-06-15T22:47:39.681Z
             </div>
         <script src="../../prettify.js"></script>
         <script>
