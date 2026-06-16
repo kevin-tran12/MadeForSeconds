@@ -8,7 +8,7 @@ from google.cloud import logging as cloud_logging
 
 from .config import settings, validate_production_settings
 from .mcp_server import create_mcp_app
-from .routes import admin, expenses, parse, public, reports, subscriptions, totp
+from .routes import admin, expenses, public, reports, subscriptions, totp
 
 validate_production_settings(settings)
 
@@ -109,7 +109,6 @@ app.add_middleware(
 
 app.include_router(public.router)
 app.include_router(admin.router)
-app.include_router(parse.router)
 app.include_router(subscriptions.router)
 app.include_router(expenses.router)
 app.include_router(reports.router)

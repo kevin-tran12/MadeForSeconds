@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { adminApi, adminSupporterApi } from '../lib/api'
-import type { Recipe, RecipeFormData } from '../lib/types'
+import type { Recipe } from '../lib/types'
 import { RecipeTable } from '../components/admin/RecipeTable'
 import { SupporterModerationPanel } from '../components/admin/SupporterModerationPanel'
 import { Button } from '../components/ui/Button'
-import { ImportRecipeModal } from '../components/admin/ImportRecipeModal'
 import { RecipePreviewPanel } from '../components/admin/RecipePreviewPanel'
 
 type Tab = 'recipes' | 'supporters' | 'expenses' | 'categories' | 'pages'
@@ -16,7 +15,6 @@ export function AdminDashboardPage() {
   const [recipes, setRecipes] = useState<Recipe[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showImport, setShowImport] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [previewRecipe, setPreviewRecipe] = useState<Recipe | null>(null)
   const [showPreviewPanel, setShowPreviewPanel] = useState(false)
@@ -65,11 +63,6 @@ export function AdminDashboardPage() {
     window.open(`/admin/preview/${previewRecipe.id}/`, '_blank')?.focus()
   }
 
-  function handleImportSuccess(data: RecipeFormData) {
-    setShowImport(false)
-    navigate('/admin/new/', { state: { prefill: data } })
-  }
-
   const tabClass = (t: Tab) =>
     `px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
       tab === t
@@ -104,12 +97,9 @@ export function AdminDashboardPage() {
         </div>
 
         {tab === 'recipes' && (
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => setShowImport(true)}>Import recipe</Button>
-            <Link to="/admin/new/">
-              <Button>+ New recipe</Button>
-            </Link>
-          </div>
+          <Link to="/admin/new/">
+            <Button>+ New recipe</Button>
+          </Link>
         )}
       </div>
 
@@ -160,13 +150,6 @@ export function AdminDashboardPage() {
             <Button>Edit Pages</Button>
           </Link>
         </div>
-      )}
-
-      {showImport && (
-        <ImportRecipeModal
-          onSuccess={handleImportSuccess}
-          onClose={() => setShowImport(false)}
-        />
       )}
 
       {previewRecipe && (

@@ -59,13 +59,6 @@ export const adminApi = {
     return apiUpload('/api/admin/upload-image', formData)
   },
 
-  parseRecipe: (input: { file?: File; text?: string }): Promise<RecipeFormData> => {
-    const formData = new FormData()
-    if (input.file) formData.append('file', input.file)
-    if (input.text) formData.append('text', input.text)
-    return apiUpload('/api/admin/parse-recipe', formData)
-  },
-
   getCategories: (): Promise<string[]> =>
     apiFetch('/api/admin/categories'),
 

@@ -12,7 +12,7 @@ A personal recipe collection with integrated supporter subscriptions, expense tr
 | Auth | Google Identity Platform (Firebase) |
 | Payments | Stripe (one-time and recurring donations) |
 | Email | Resend |
-| Recipe parsing | Anthropic Claude API |
+| Recipe import | Claude (Desktop/Projects) via MCP tools |
 | Caching | Upstash Redis (optional, falls back to in-memory) |
 | Backend hosting | GCP Cloud Run (scale to zero) |
 | Frontend hosting | Cloudflare Pages |
@@ -37,7 +37,6 @@ All GCP services stay within the always-free tier for personal/low-traffic use.
 ### Admin
 - Create, edit, and delete recipes with rich structured fields (ingredients, instructions, components, nutrition)
 - Upload recipe images to Cloud Storage
-- Parse recipes from PDF or text using Claude (structured extraction via tool calls)
 - Manage subscriber and donor display names/notes (approve, reject, toggle visibility)
 - Expense ledger (TOTP 2FA protected): create, edit, void expenses with receipt uploads
 - Expense reports: monthly/yearly summaries by category, CSV and PDF export
@@ -70,7 +69,6 @@ All GCP services stay within the always-free tier for personal/low-traffic use.
 │   │       ├── subscriptions.py Stripe checkout, webhooks, cancel flow
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
-│   │       ├── parse.py        Recipe parsing via Claude API
 │   │       └── totp.py         TOTP setup, verify, session endpoints
 │   ├── tests/                  Pytest test suite (74 tests)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
@@ -125,7 +123,6 @@ Optional (needed for full local feature testing):
 - `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` — Stripe test keys
 - `STRIPE_PRODUCT_ID` — (Optional) Legacy Stripe Product ID
 - `SUBSCRIBER_JWT_SECRET` — any 32+ character string
-- `ANTHROPIC_API_KEY` — for recipe parsing
 
 **3. Start all services**
 ```bash
@@ -198,7 +195,6 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 | PUT | `/api/admin/recipes/{id}` | Update recipe |
 | DELETE | `/api/admin/recipes/{id}` | Delete recipe |
 | POST | `/api/admin/upload-image` | Upload image to GCS |
-| POST | `/api/admin/parse-recipe` | Parse recipe from PDF/text via Claude |
 
 ### Admin — supporters (requires auth)
 
@@ -341,6 +337,5 @@ Or push to `main` — Cloud Build runs these steps automatically if the trigger 
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_…`) |
 | `STRIPE_PRODUCT_ID` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | 32+ char secret for cancel link JWTs |
-| `ANTHROPIC_API_KEY` | Claude API key (recipe parsing) |
 | `RESEND_API_KEY` | Resend API key (cancel emails) |
 | `REDIS_URL` | Upstash Redis URL (optional — falls back to in-memory) |

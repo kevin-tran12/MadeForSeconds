@@ -38,14 +38,6 @@ resource "google_secret_manager_secret_iam_member" "backend_mcp_key_access" {
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
-# Grant access to read the Anthropic API key secret
-resource "google_secret_manager_secret_iam_member" "backend_anthropic_key_access" {
-  project   = var.gcp_project_id
-  secret_id = google_secret_manager_secret.anthropic_api_key.secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.backend.email}"
-}
-
 # Allow Cloud Build (running as mfs-backend SA) to deploy Cloud Run services
 # that also run as mfs-backend SA — requires actAs permission on itself
 resource "google_service_account_iam_member" "backend_act_as_self" {
