@@ -49,6 +49,26 @@ class TestValidateProductionSettings:
             validate_production_settings(_settings(mcp_resource_url=""))
 
 
+# ── workos_issuer_url normalization ───────────────────────────────────────────
+
+class TestWorkosIssuerUrl:
+    def test_full_url_unchanged(self):
+        s = _settings(workos_authkit_domain="https://slug.authkit.app")
+        assert s.workos_issuer_url == "https://slug.authkit.app"
+
+    def test_bare_hostname_gets_https(self):
+        s = _settings(workos_authkit_domain="slug.authkit.app")
+        assert s.workos_issuer_url == "https://slug.authkit.app"
+
+    def test_trailing_slash_stripped(self):
+        s = _settings(workos_authkit_domain="https://slug.authkit.app/")
+        assert s.workos_issuer_url == "https://slug.authkit.app"
+
+    def test_jwks_url_uses_issuer(self):
+        s = _settings(workos_authkit_domain="slug.authkit.app")
+        assert s.workos_jwks_url == "https://slug.authkit.app/oauth2/jwks"
+
+
 # ── WorkOSTokenVerifier ───────────────────────────────────────────────────────
 
 async def _verify(claims=None, decode_exc=None, admins={"kevin@example.com"}):
@@ -60,7 +80,7 @@ async def _verify(claims=None, decode_exc=None, admins={"kevin@example.com"}):
         patch("app.mcp_auth.settings") as mock_settings,
     ):
         mock_settings.admin_email_set = admins
-        mock_settings.workos_authkit_domain = "https://example.authkit.app"
+        mock_settings.workos_issuer_url = "https://example.authkit.app"
         mock_jwks.return_value.get_signing_key_from_jwt.return_value.key = "signing-key"
         if decode_exc is not None:
             mock_decode.side_effect = decode_exc

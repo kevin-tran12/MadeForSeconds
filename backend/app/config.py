@@ -33,9 +33,17 @@ class Settings(BaseSettings):
         return self.environment == "development"
 
     @property
+    def workos_issuer_url(self) -> str:
+        """Normalized WorkOS issuer URL — always has https:// scheme."""
+        d = self.workos_authkit_domain.strip().rstrip("/")
+        if d and not d.startswith(("https://", "http://")):
+            return f"https://{d}"
+        return d
+
+    @property
     def workos_jwks_url(self) -> str:
         """JWKS endpoint for verifying WorkOS-issued access tokens."""
-        return f"{self.workos_authkit_domain.rstrip('/')}/oauth2/jwks"
+        return f"{self.workos_issuer_url}/oauth2/jwks"
 
     model_config = {"env_file": ".env"}
 
