@@ -50,6 +50,9 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       FRONTEND_URL: http://localhost:5173
       GCS_RECEIPTS_BUCKET_NAME: ""
+      # Instagram (optional local testing; dev mode no-ops publishing regardless)
+      INSTAGRAM_USER_ID: ${INSTAGRAM_USER_ID:-}
+      INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN:-}
     depends_on:
       firestore-emulator:
         condition: service_healthy

@@ -93,6 +93,21 @@ variable "frontend_url" {
   default     = "https://madeforseconds.pages.dev"
 }
 
+# ─── Instagram (MCP publishing) ─────────────────────────────────────────────
+
+variable "instagram_user_id" {
+  description = "Instagram Business/Creator account numeric id (for MCP publishing)"
+  type        = string
+  default     = ""
+}
+
+variable "instagram_access_token" {
+  description = "Initial long-lived Instagram access token — seeds the secret; thereafter auto-rotated"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ─── Cost Protection ────────────────────────────────────────────────────────
 
 variable "billing_account" {

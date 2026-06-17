@@ -150,6 +150,22 @@ resource "google_cloud_run_v2_service" "backend" {
         value = var.frontend_url
       }
 
+      # Instagram (MCP publishing). The access token is NOT injected here — it is
+      # read from Secret Manager at runtime so auto-rotated versions are picked up
+      # without redeploying. These are non-secret config values.
+      env {
+        name  = "INSTAGRAM_USER_ID"
+        value = var.instagram_user_id
+      }
+      env {
+        name  = "INSTAGRAM_REFRESH_INVOKER_EMAIL"
+        value = google_service_account.backend.email
+      }
+      env {
+        name  = "INSTAGRAM_REFRESH_AUDIENCE"
+        value = local.instagram_refresh_url
+      }
+
       resources {
         limits = {
           # 512Mi: Better buffer for FastAPI + image processing, still well within free tier

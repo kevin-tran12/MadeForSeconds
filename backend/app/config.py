@@ -19,10 +19,28 @@ class Settings(BaseSettings):
     subscriber_jwt_secret: str = "dev-subscriber-secret-change-in-prod"
     resend_api_key: str = ""  # Resend API key for sending cancellation emails
     frontend_url: str = "http://localhost:5173"  # Frontend URL for building links in emails
+    # Instagram (Meta Graph API, "Instagram API with Instagram Login" path).
+    instagram_user_id: str = ""  # IG Business/Creator account numeric id
+    # instagram_access_token is the dev/local token AND the initial seed for the
+    # Secret Manager secret. In production the live (auto-rotated) token is read
+    # from Secret Manager at runtime — see services/instagram.get_access_token.
+    instagram_access_token: str = ""
+    instagram_token_secret_id: str = "instagram-access-token"  # Secret Manager secret id
+    instagram_refresh_invoker_email: str = ""  # SA allowed to call the refresh endpoint (OIDC)
+    instagram_refresh_audience: str = ""  # Expected OIDC audience for the refresh endpoint
 
     @property
     def admin_email_set(self) -> set[str]:
         return {e.strip() for e in self.admin_emails.split(",") if e.strip()}
+
+    @property
+    def instagram_configured(self) -> bool:
+        """True when an Instagram account id is configured.
+
+        The token is resolved at runtime (env var in dev, Secret Manager in
+        prod), so it is not part of this check — see services/instagram.
+        """
+        return bool(self.instagram_user_id)
 
     @property
     def cors_origins(self) -> list[str]:

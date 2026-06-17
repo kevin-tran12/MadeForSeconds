@@ -144,3 +144,28 @@ resource "google_secret_manager_secret_version" "resend_api_key_initial" {
     ignore_changes = [secret_data]
   }
 }
+
+# Instagram access token — seeded once from tfvars, then auto-rotated by the
+# backend (Cloud Scheduler → /api/internal/instagram/refresh-token adds new
+# versions). ignore_changes keeps Terraform from clobbering rotated values.
+resource "google_secret_manager_secret" "instagram_access_token" {
+  count     = var.instagram_access_token != "" ? 1 : 0
+  project   = var.gcp_project_id
+  secret_id = "instagram-access-token"
+
+  replication {
+    auto {}
+  }
+
+  depends_on = [google_project_service.required_apis]
+}
+
+resource "google_secret_manager_secret_version" "instagram_access_token_initial" {
+  count       = var.instagram_access_token != "" ? 1 : 0
+  secret      = google_secret_manager_secret.instagram_access_token[0].id
+  secret_data = var.instagram_access_token
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}

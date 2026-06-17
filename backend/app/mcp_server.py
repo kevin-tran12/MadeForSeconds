@@ -37,6 +37,7 @@ from .models_expense import (
     ExpenseItem,
     recalculate_project_amounts,
 )
+from .services import instagram
 from .services import recipes as recipe_service
 from .services import uploads
 
@@ -125,6 +126,11 @@ def _tool_errors(fn):
             return {"error": "not_publishable", "problems": exc.problems}
         except recipe_service.RecipeServiceError as exc:
             return {"error": "invalid_request", "message": str(exc)}
+        except instagram.InstagramError as exc:
+            return {
+                "error": "instagram_auth" if exc.auth else "instagram",
+                "message": str(exc),
+            }
         except ValueError as exc:
             return {"error": "invalid_request", "message": str(exc)}
         except Exception as exc:
@@ -184,10 +190,11 @@ def list_recipes(published: bool | None = None, search: str = "", limit: int = 2
     return {"recipes": items, "count": len(items)}
 
 
-@mcp.tool()
-@_tool_errors
-def get_recipe(recipe_id: str = "", slug: str = "") -> dict:
-    """Fetch a full recipe by id or slug (drafts included)."""
+def _lookup_recipe(recipe_id: str = "", slug: str = ""):
+    """Fetch a recipe document by id or slug (drafts included).
+
+    Returns the parsed Recipe model. Raises RecipeNotFound / ValueError.
+    """
     db = get_db()
     if recipe_id:
         doc = db.collection("recipes").document(recipe_id).get()
@@ -205,7 +212,14 @@ def get_recipe(recipe_id: str = "", slug: str = "") -> dict:
             raise recipe_service.RecipeNotFound(slug)
     else:
         raise ValueError("Provide recipe_id or slug")
-    return recipe_service.doc_to_recipe(doc).model_dump(mode="json")
+    return recipe_service.doc_to_recipe(doc)
+
+
+@mcp.tool()
+@_tool_errors
+def get_recipe(recipe_id: str = "", slug: str = "") -> dict:
+    """Fetch a full recipe by id or slug (drafts included)."""
+    return _lookup_recipe(recipe_id, slug).model_dump(mode="json")
 
 
 @mcp.tool()
@@ -494,6 +508,67 @@ def upload_image_from_url(source_url: str) -> dict:
     image_url = uploads.fetch_image_to_gcs(source_url)
     logger.info("MCP upload_image_from_url: %s", image_url)
     return {"image_url": image_url}
+
+
+# ── Instagram publishing ──────────────────────────────────────────────────────
+
+
+def _hashtag(text: str) -> str:
+    """Turn a category/label into a bare hashtag word (alnum, lowercase)."""
+    return "".join(c for c in text.lower() if c.isalnum())
+
+
+def _build_recipe_caption(recipe) -> str:
+    """Compose a default caption from a recipe: title, blurb, link, hashtags."""
+    link = f"{settings.frontend_url.rstrip('/')}/recipes/{recipe.slug}/"
+    tags = ["madeforseconds"]
+    for raw in [*recipe.categories, *recipe.labels]:
+        tag = _hashtag(raw)
+        if tag and tag not in tags:
+            tags.append(tag)
+        if len(tags) >= 8:
+            break
+    parts = [recipe.title]
+    if recipe.description:
+        parts.append(recipe.description)
+    parts.append(f"Full recipe: {link}")
+    parts.append(" ".join(f"#{t}" for t in tags))
+    return "\n\n".join(parts)
+
+
+@mcp.tool()
+@_tool_errors
+def publish_instagram_post(image_url: str, caption: str = "") -> dict:
+    """Publish a single image to the linked Instagram account.
+
+    image_url must be a public https JPEG (recipe images in the site's GCS
+    bucket work directly). caption <= 2200 chars and <= 30 hashtags. Returns
+    the new media id and permalink. Subject to Instagram's 25-posts/24h limit;
+    PNG/WebP images may be rejected by Instagram — prefer JPEG.
+    """
+    result = instagram.publish_image(image_url, caption)
+    logger.info("MCP publish_instagram_post: media=%s", result.get("id"))
+    return {**result, "message": "Posted to Instagram."}
+
+
+@mcp.tool()
+@_tool_errors
+def publish_recipe_to_instagram(
+    slug: str = "", recipe_id: str = "", caption: str | None = None
+) -> dict:
+    """Publish a recipe's photo to Instagram, building a caption if omitted.
+
+    Looks up the recipe by slug or id, requires it to have an image, and posts
+    it. When caption is None a caption is built from the recipe's title,
+    description, link, and hashtags. Pass an explicit caption to override.
+    """
+    recipe = _lookup_recipe(recipe_id=recipe_id, slug=slug)
+    if not recipe.image_url:
+        raise ValueError("recipe has no image; attach one first (request_image_upload)")
+    text = caption if caption is not None else _build_recipe_caption(recipe)
+    result = instagram.publish_image(recipe.image_url, text)
+    logger.info("MCP publish_recipe_to_instagram: recipe=%s media=%s", recipe.slug, result.get("id"))
+    return {**result, "slug": recipe.slug, "title": recipe.title, "message": "Posted to Instagram."}
 
 
 # ── Expense helpers ───────────────────────────────────────────────────────────
