@@ -19,6 +19,9 @@
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.0.0"
   },
+  "overrides": {
+    "ws": ">=8.21.0"
+  },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.28.0",
     "@playwright/test": "^1.49.1",
