@@ -50,7 +50,7 @@ class WorkOSTokenVerifier(TokenVerifier):
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
-                issuer=settings.workos_authkit_domain,
+                issuer=settings.workos_issuer_url,
                 # WorkOS access-token audiences vary by config; issuer + signature
                 # already bind the token to our AuthKit env, and the admin-email
                 # gate below restricts who is accepted.

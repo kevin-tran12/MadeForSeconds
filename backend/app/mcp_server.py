@@ -64,7 +64,7 @@ if settings.is_dev:
     _transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 else:
     _auth = AuthSettings(
-        issuer_url=settings.workos_authkit_domain,
+        issuer_url=settings.workos_issuer_url,
         resource_server_url=settings.mcp_resource_url,
         required_scopes=None,
     )
