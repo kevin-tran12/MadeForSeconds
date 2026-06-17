@@ -49,6 +49,8 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `resend_api_key` | Resend API key for cancellation emails |
 | `frontend_url` | Your production frontend URL (used in email links) |
 | `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
+| `instagram_user_id` | Instagram Creator account numeric ID (optional — leave blank to skip) |
+| `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy) |
 
 > `terraform.tfvars` is gitignored — never commit it.
 
@@ -67,7 +69,8 @@ This provisions:
 - Cloud Storage buckets (images — public, receipts — private + versioned)
 - Identity Platform (Firebase Auth) for admin login
 - Cloud Build CI/CD trigger
-- GCP Secret Manager secrets (Stripe keys, JWT secret, API keys)
+- GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, Instagram token)
+- Cloud Scheduler job for weekly Instagram token rotation (when `instagram_access_token` is set)
 - Cloudflare DNS record for the API subdomain
 - All required GCP APIs and IAM service accounts
 
@@ -296,6 +299,10 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `REDIS_URL` | GCP Secret Manager (optional) | Upstash Redis URL for caching |
 | `GCS_BUCKET_NAME` | Set by Terraform | Cloud Storage bucket for recipe images |
 | `GCS_RECEIPTS_BUCKET_NAME` | Set by Terraform | Cloud Storage bucket for expense receipts |
+| `INSTAGRAM_USER_ID` | `terraform.tfvars → instagram_user_id` | Instagram Creator account numeric ID |
+| `INSTAGRAM_REFRESH_INVOKER_EMAIL` | Set by Terraform (backend SA email) | SA email the refresh endpoint accepts OIDC tokens from |
+| `INSTAGRAM_REFRESH_AUDIENCE` | Set by Terraform (refresh endpoint URL) | Expected OIDC audience for the refresh endpoint |
+| `instagram-access-token` (Secret Manager) | Initial value from `terraform.tfvars → instagram_access_token`; rotated by Cloud Scheduler | Instagram long-lived token — never injected as env var; read at runtime |
 
 ---
 
@@ -330,7 +337,8 @@ WorkOS dependency), matching the `require_admin` dev bypass.
 
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
-`request_image_upload`, `upload_image_from_url`, `create_expense`.
+`request_image_upload`, `upload_image_from_url`, `create_expense`,
+`publish_instagram_post`, `publish_recipe_to_instagram`.
 
 **Recipe workflow**: `create_recipe` saves an unpublished draft (duplicate
 titles return a `slug_conflict` pointer instead of writing a second copy) →
@@ -344,6 +352,28 @@ require the `iamcredentials` API and the backend SA's
 `roles/iam.serviceAccountTokenCreator` self-grant (both in Terraform — run
 `terraform apply` once after upgrading). `upload_image_from_url` copies an
 already-hosted https image instead.
+
+**Instagram publishing**: `publish_recipe_to_instagram(slug)` posts the
+recipe's GCS image to Instagram and auto-builds a caption from the title,
+description, link, and hashtags (pass `caption=` to override).
+`publish_instagram_post(image_url, caption)` is the generic primitive for any
+public HTTPS JPEG. Constraints: caption ≤ 2200 chars, ≤ 30 hashtags, 25
+posts/24h; PNG/WebP may be rejected by Instagram — prefer JPEG.
+
+> **One-time Meta setup** (do before setting `instagram_access_token` in tfvars):
+> 1. Connect the Instagram Creator account via **Meta for Developers** → create an app → add the Instagram product → request scopes `instagram_business_basic` + `instagram_business_content_publish`.
+> 2. Complete the OAuth exchange once to obtain the Creator account's numeric user ID and an initial long-lived token (short-lived → exchange via `GET graph.instagram.com/v23.0/access_token`).
+> 3. Set `instagram_user_id` + `instagram_access_token` in `terraform.tfvars` and run `terraform apply`.
+
+**Automatic token rotation**: The Instagram long-lived token expires after
+60 days. After the first `terraform apply` with the token set, a Cloud
+Scheduler job runs every Monday at 04:00 UTC, calling
+`POST /api/internal/instagram/refresh-token`. The endpoint exchanges the
+current token for a fresh one and writes it as a new Secret Manager version.
+The backend reads `latest` at request time (short in-process cache), so
+rotation is fully hands-off. Residual risk: if the scheduler is disabled for
+60+ days the token lapses; a manual one-time re-auth (repeat step 2 above) is
+then required.
 
 ---
 

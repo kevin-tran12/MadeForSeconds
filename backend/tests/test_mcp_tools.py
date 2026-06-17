@@ -431,3 +431,89 @@ class TestCreateExpenseReceiptUrl:
         result = mcp_server.create_expense(**self._BASE)
         assert result["receipt_uploaded"] is False
         assert result["item_count"] == 1
+
+
+# ── publish_instagram_post ────────────────────────────────────────────────────
+
+class TestPublishInstagramPost:
+    def test_dev_mode_returns_no_op(self):
+        # settings.is_dev is True in the test environment
+        result = mcp_server.publish_instagram_post(
+            "https://storage.googleapis.com/b/img.jpg", "Caption"
+        )
+        assert result["id"] == "dev-ig-media"
+        assert result["message"] == "Posted to Instagram."
+
+    def test_instagram_error_maps_to_instagram_dict(self):
+        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+            mock_pub.side_effect = mcp_server.instagram.InstagramError("API failure")
+            result = mcp_server.publish_instagram_post("https://example.com/img.jpg")
+        assert result["error"] == "instagram"
+        assert "API failure" in result["message"]
+
+    def test_instagram_auth_error_maps_to_instagram_auth_dict(self):
+        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+            mock_pub.side_effect = mcp_server.instagram.InstagramError(
+                "bad token", auth=True
+            )
+            result = mcp_server.publish_instagram_post("https://example.com/img.jpg")
+        assert result["error"] == "instagram_auth"
+
+    def test_value_error_maps_to_invalid_request(self):
+        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+            mock_pub.side_effect = ValueError("image_url must be a public https URL")
+            result = mcp_server.publish_instagram_post("http://not-https.com/img.jpg")
+        assert result["error"] == "invalid_request"
+        assert "https" in result["message"]
+
+
+# ── publish_recipe_to_instagram ───────────────────────────────────────────────
+
+class TestPublishRecipeToInstagram:
+    def test_recipe_with_image_returns_permalink(self, db):
+        db.stream.return_value = iter([_doc()])
+        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+            mock_pub.return_value = {
+                "id": "ig-123",
+                "permalink": "https://www.instagram.com/p/abc/",
+            }
+            result = mcp_server.publish_recipe_to_instagram(slug="test-recipe")
+        assert result["id"] == "ig-123"
+        assert result["slug"] == "test-recipe"
+        assert result["title"] == "Test Recipe"
+        assert result["message"] == "Posted to Instagram."
+
+    def test_auto_caption_contains_title_and_link(self, db):
+        db.stream.return_value = iter([_doc()])
+        with (
+            patch("app.mcp_server.instagram.publish_image") as mock_pub,
+            patch("app.mcp_server.settings") as mock_settings,
+        ):
+            mock_settings.frontend_url = "https://madeforseconds.com"
+            mock_pub.return_value = {"id": "ig-123", "permalink": ""}
+            mcp_server.publish_recipe_to_instagram(slug="test-recipe")
+        caption = mock_pub.call_args[0][1]
+        assert "Test Recipe" in caption
+        assert "madeforseconds.com" in caption
+        assert "#madeforseconds" in caption
+
+    def test_explicit_caption_overrides_auto_caption(self, db):
+        db.stream.return_value = iter([_doc()])
+        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+            mock_pub.return_value = {"id": "ig-123", "permalink": ""}
+            mcp_server.publish_recipe_to_instagram(
+                slug="test-recipe", caption="My custom caption"
+            )
+        caption = mock_pub.call_args[0][1]
+        assert caption == "My custom caption"
+
+    def test_recipe_without_image_returns_invalid_request(self, db):
+        db.stream.return_value = iter([_doc(image_url=None)])
+        result = mcp_server.publish_recipe_to_instagram(slug="test-recipe")
+        assert result["error"] == "invalid_request"
+        assert "image" in result["message"]
+
+    def test_unknown_slug_returns_not_found(self, db):
+        db.stream.return_value = iter([])
+        result = mcp_server.publish_recipe_to_instagram(slug="nonexistent")
+        assert result["error"] == "not_found"

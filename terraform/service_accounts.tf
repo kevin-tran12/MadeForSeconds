@@ -55,3 +55,21 @@ resource "google_secret_manager_secret_iam_member" "backend_redis_url_access" {
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
+
+# Instagram token: the backend reads the latest version at runtime (accessor)
+# and writes refreshed versions during rotation (versionAdder).
+resource "google_secret_manager_secret_iam_member" "backend_instagram_token_access" {
+  count     = var.instagram_access_token != "" ? 1 : 0
+  project   = var.gcp_project_id
+  secret_id = google_secret_manager_secret.instagram_access_token[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "backend_instagram_token_adder" {
+  count     = var.instagram_access_token != "" ? 1 : 0
+  project   = var.gcp_project_id
+  secret_id = google_secret_manager_secret.instagram_access_token[0].secret_id
+  role      = "roles/secretmanager.secretVersionAdder"
+  member    = "serviceAccount:${google_service_account.backend.email}"
+}
