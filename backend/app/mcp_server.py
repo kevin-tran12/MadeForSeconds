@@ -17,16 +17,19 @@ PUT the file, then pass the returned ``final_url`` to ``create_expense``.
 """
 
 import functools
-import hmac
 import logging
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from google.cloud.firestore_v1.base_query import FieldFilter
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import ValidationError
 
 from .config import settings
+from .mcp_auth import WorkOSTokenVerifier
 from .firestore import get_db
 from .models import RecipeCreate, RecipeUpdate
 from .models_expense import (
@@ -50,10 +53,35 @@ pointer to the existing recipe.
 Note: the backend scales to zero; the first call after idle may take ~10s.
 If a call times out, retry once before reporting an error."""
 
+# OAuth: WorkOS AuthKit is the authorization server; this MCP server is the resource
+# server. When auth is configured the SDK serves /.well-known/oauth-protected-resource,
+# enforces tokens on /mcp, and emits a compliant WWW-Authenticate challenge on 401.
+# Dev runs unauthenticated (no WorkOS dependency), matching the require_admin dev bypass.
+if settings.is_dev:
+    _auth = None
+    _token_verifier = None
+    # No DNS-rebinding host restriction locally — requests arrive as localhost:8000.
+    _transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+else:
+    _auth = AuthSettings(
+        issuer_url=settings.workos_authkit_domain,
+        resource_server_url=settings.mcp_resource_url,
+        required_scopes=None,
+    )
+    _token_verifier = WorkOSTokenVerifier()
+    _resource_host = urlparse(settings.mcp_resource_url).netloc
+    _transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[_resource_host, f"{_resource_host}:*", "localhost", "localhost:*"],
+    )
+
 mcp = FastMCP(
     "MadeForSeconds Recipe Creator",
     stateless_http=True,
     instructions=_INSTRUCTIONS,
+    auth=_auth,
+    token_verifier=_token_verifier,
+    transport_security=_transport_security,
 )
 
 
@@ -682,48 +710,13 @@ def create_expense(
     }
 
 
-class _BearerAuthMiddleware:
-    """ASGI middleware that validates Authorization: Bearer <token> against MCP_API_KEY."""
-
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            # The MCP SDK validates that requests arrive on localhost and rejects
-            # anything else (e.g. the Cloud Run service hostname or a Cloudflare
-            # proxy host).  Rewriting the Host header here satisfies that check
-            # without changing the actual network path.  If the SDK removes this
-            # restriction in a future release, this rewrite can be dropped.
-            server = scope.get("server") or ("localhost", 8000)
-            host_value = f"localhost:{server[1]}".encode()
-            headers = [
-                (b"host", host_value) if k == b"host" else (k, v)
-                for k, v in scope.get("headers", [])
-            ]
-            scope = {**scope, "headers": headers}
-
-            # Fail closed: an empty MCP_API_KEY rejects every request rather
-            # than disabling auth (config validation also blocks prod startup).
-            key = settings.mcp_api_key
-            auth = dict(headers).get(b"authorization", b"").decode()
-            if not key or not hmac.compare_digest(auth, f"Bearer {key}"):
-                response = b'{"error": "Unauthorized"}'
-                await send({
-                    "type": "http.response.start",
-                    "status": 401,
-                    "headers": [(b"content-type", b"application/json")],
-                })
-                await send({"type": "http.response.body", "body": response})
-                return
-        await self.app(scope, receive, send)
-
-
 def create_mcp_app():
     """Create the ASGI app for mounting on FastAPI.
 
-    Returns (inner_app, wrapped_app) — inner_app exposes .lifespan for FastAPI,
-    wrapped_app adds bearer token auth and is what gets mounted.
+    Auth is handled by the SDK (OAuth resource server) when configured — see the
+    FastMCP construction above. Returns (inner_app, mounted_app); both are the
+    same Starlette app — the first exposes ``.router.lifespan_context`` for
+    FastAPI's lifespan, the second is what gets mounted at ``/``.
     """
-    inner = mcp.streamable_http_app()
-    return inner, _BearerAuthMiddleware(inner)
+    app = mcp.streamable_http_app()
+    return app, app

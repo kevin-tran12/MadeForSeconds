@@ -8,7 +8,10 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173"  # comma-separated list
     gcs_bucket_name: str | None = None
     gcs_receipts_bucket_name: str | None = None
-    mcp_api_key: str = ""  # Bearer token for MCP endpoint auth
+    # MCP OAuth (WorkOS AuthKit is the authorization server; the MCP server is a resource
+    # server that only validates tokens). workos_authkit_domain is the OAuth issuer URL.
+    workos_authkit_domain: str = ""  # e.g. https://<slug>.authkit.app
+    mcp_resource_url: str = ""  # public URL of the MCP resource, e.g. https://<backend>/mcp
     redis_url: str | None = None  # e.g. rediss://default:TOKEN@host.upstash.io:6379
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
@@ -29,6 +32,11 @@ class Settings(BaseSettings):
     def is_dev(self) -> bool:
         return self.environment == "development"
 
+    @property
+    def workos_jwks_url(self) -> str:
+        """JWKS endpoint for verifying WorkOS-issued access tokens."""
+        return f"{self.workos_authkit_domain.rstrip('/')}/oauth2/jwks"
+
     model_config = {"env_file": ".env"}
 
 
@@ -43,10 +51,15 @@ def validate_production_settings(s: "Settings") -> None:
         )
     if len(s.subscriber_jwt_secret) < 32:
         raise RuntimeError("SUBSCRIBER_JWT_SECRET must be at least 32 characters in production")
-    if len(s.mcp_api_key) < 16:
+    if not s.workos_authkit_domain:
         raise RuntimeError(
-            "MCP_API_KEY must be set (at least 16 characters) in production — "
-            "without it the /mcp endpoint would accept unauthenticated requests"
+            "WORKOS_AUTHKIT_DOMAIN must be set in production — without it the /mcp endpoint "
+            "cannot validate OAuth tokens and would reject every request"
+        )
+    if not s.mcp_resource_url:
+        raise RuntimeError(
+            "MCP_RESOURCE_URL must be set in production (the public https URL of the /mcp "
+            "endpoint) so OAuth resource metadata and token audiences line up"
         )
 
 

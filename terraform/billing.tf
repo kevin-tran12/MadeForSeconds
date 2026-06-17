@@ -26,6 +26,17 @@ resource "google_pubsub_topic" "budget_alert" {
   depends_on = [google_project_service.required_apis]
 }
 
+# Grant the Cloud Billing Budgets service agent permission to publish to this
+# topic. GCP auto-creates this binding when the budget is associated with the
+# topic, but without this resource Terraform would silently drop it if the
+# topic is ever recreated.
+resource "google_pubsub_topic_iam_member" "budget_alert_publisher" {
+  project = var.gcp_project_id
+  topic   = google_pubsub_topic.budget_alert.name
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:billing-budget-alert@system.gserviceaccount.com"
+}
+
 # ─── Budget ──────────────────────────────────────────────────────────────────
 
 data "google_billing_account" "account" {
@@ -149,13 +160,45 @@ resource "google_cloudfunctions2_function" "budget_killer" {
   }
 
   event_trigger {
-    trigger_region = var.gcp_region
-    event_type     = "google.cloud.pubsub.topic.v1.messagePublished"
-    pubsub_topic   = google_pubsub_topic.budget_alert.id
+    trigger_region        = var.gcp_region
+    event_type            = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic          = google_pubsub_topic.budget_alert.id
+    service_account_email = google_service_account.budget_killer.email
     # Retry on failure — this function is the cost backstop; a dropped
     # message must not silently skip the shutdown
     retry_policy = "RETRY_POLICY_RETRY"
   }
 
   depends_on = [google_project_service.required_apis]
+}
+
+# ─── IAM for Eventarc custom trigger SA ──────────────────────────────────────
+# Three grants are required when pinning a custom SA on a Pub/Sub event trigger.
+# All three must be present or Pub/Sub push delivery fails silently.
+
+# 1. Custom SA must be able to invoke the function's own backing Cloud Run service.
+resource "google_cloud_run_v2_service_iam_member" "budget_killer_invoker" {
+  project  = var.gcp_project_id
+  location = var.gcp_region
+  name     = "budget-killer"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.budget_killer.email}"
+
+  depends_on = [google_cloudfunctions2_function.budget_killer]
+}
+
+# 2. Custom SA must be able to receive Eventarc events.
+resource "google_project_iam_member" "budget_killer_eventarc" {
+  project = var.gcp_project_id
+  role    = "roles/eventarc.eventReceiver"
+  member  = "serviceAccount:${google_service_account.budget_killer.email}"
+}
+
+# 3. Pub/Sub service agent must be able to mint tokens as the custom SA so it
+#    can authenticate push delivery to the Cloud Run backing service.
+#    Uses data.google_project.project from cloudbuild.tf — no duplicate data source.
+resource "google_service_account_iam_member" "pubsub_token_creator" {
+  service_account_id = google_service_account.budget_killer.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }

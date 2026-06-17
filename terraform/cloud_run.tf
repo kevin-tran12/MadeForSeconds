@@ -53,15 +53,16 @@ resource "google_cloud_run_v2_service" "backend" {
         }
       }
 
-      # MCP_API_KEY — bearer token for Claude Projects MCP integration
+      # MCP OAuth — WorkOS AuthKit is the authorization server; the MCP server
+      # only validates tokens (public-key JWKS), so no secret is needed here.
       env {
-        name = "MCP_API_KEY"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.mcp_api_key.secret_id
-            version = "latest"
-          }
-        }
+        name  = "WORKOS_AUTHKIT_DOMAIN"
+        value = var.workos_authkit_domain
+      }
+
+      env {
+        name  = "MCP_RESOURCE_URL"
+        value = var.mcp_resource_url
       }
 
       # REDIS_URL — read from Secret Manager; only injected when redis_url is provided
