@@ -28,26 +28,7 @@ resource "google_secret_manager_secret_version" "admin_emails_initial" {
   }
 }
 
-# MCP API key — bearer token for Claude Projects to create recipes via MCP
-resource "google_secret_manager_secret" "mcp_api_key" {
-  project   = var.gcp_project_id
-  secret_id = "mcp-api-key"
-
-  replication {
-    auto {}
-  }
-
-  depends_on = [google_project_service.required_apis]
-}
-
-resource "google_secret_manager_secret_version" "mcp_api_key_initial" {
-  secret      = google_secret_manager_secret.mcp_api_key.id
-  secret_data = var.mcp_api_key
-
-  lifecycle {
-    ignore_changes = [secret_data]
-  }
-}
+# MCP auth uses WorkOS OAuth (public-key JWKS validation) — no secret required.
 
 # Redis URL — contains embedded credentials; only created when redis_url is provided
 resource "google_secret_manager_secret" "redis_url" {

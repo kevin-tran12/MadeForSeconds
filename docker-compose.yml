@@ -42,7 +42,6 @@ services:
       ADMIN_EMAILS: dev@local
       ENVIRONMENT: development
       ALLOWED_ORIGINS: http://localhost:5173,http://mfs-app:5173,http://localhost:8000
-      MCP_API_KEY: dev-mcp-key
       REDIS_URL: redis://redis:6379
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}

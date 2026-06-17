@@ -34,10 +34,16 @@ variable "github_repo" {
   type        = string
 }
 
-variable "mcp_api_key" {
-  description = "Bearer token for MCP endpoint authentication (Claude Projects)"
+variable "workos_authkit_domain" {
+  description = "WorkOS AuthKit domain — the OAuth issuer for MCP auth (e.g. https://<slug>.authkit.app)"
   type        = string
-  sensitive   = true
+  default     = ""
+}
+
+variable "mcp_resource_url" {
+  description = "Public URL of the MCP resource endpoint (e.g. https://<cloud-run-url>/mcp)"
+  type        = string
+  default     = ""
 }
 
 variable "redis_url" {

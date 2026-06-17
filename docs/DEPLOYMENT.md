@@ -40,7 +40,8 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `backend_image` | Leave as-is — Cloud Build pushes to this path |
 | `github_owner` | Your GitHub username or org |
 | `github_repo` | Repository name (e.g. `MadeForSeconds`) |
-| `mcp_api_key` | Bearer token for Claude Projects MCP integration |
+| `workos_authkit_domain` | WorkOS AuthKit domain — OAuth issuer for MCP (e.g. `https://<slug>.authkit.app`) |
+| `mcp_resource_url` | Public URL of the MCP endpoint (e.g. `https://<cloud-run-url>/mcp`) |
 | `stripe_secret_key` | Stripe secret key (`sk_live_…`) |
 | `stripe_webhook_secret` | Stripe webhook signing secret (`whsec_…`) |
 | `stripe_product_id` | (Optional) Legacy Stripe Product ID (`prod_…`) |
@@ -290,7 +291,8 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `STRIPE_PRODUCT_ID` | GCP Secret Manager | Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | GCP Secret Manager | Secret for signing cancel link JWTs (32+ chars) |
 | `RESEND_API_KEY` | GCP Secret Manager | Resend API key for cancellation emails |
-| `MCP_API_KEY` | GCP Secret Manager | Bearer token for Claude Projects MCP integration |
+| `WORKOS_AUTHKIT_DOMAIN` | Plain env (Terraform) | WorkOS AuthKit domain — OAuth issuer for MCP auth |
+| `MCP_RESOURCE_URL` | Plain env (Terraform) | Public URL of the `/mcp` endpoint (OAuth resource) |
 | `REDIS_URL` | GCP Secret Manager (optional) | Upstash Redis URL for caching |
 | `GCS_BUCKET_NAME` | Set by Terraform | Cloud Storage bucket for recipe images |
 | `GCS_RECEIPTS_BUCKET_NAME` | Set by Terraform | Cloud Storage bucket for expense receipts |
@@ -300,22 +302,31 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 ## MCP server (recipe/expense automation)
 
 The backend exposes an MCP server at `https://<cloud-run-url>/mcp` (Streamable
-HTTP, bearer auth with `MCP_API_KEY`). Production startup fails if the key is
-unset — the endpoint never runs unauthenticated.
+HTTP). Auth is **OAuth 2.1** — the MCP server is a *resource server* that only
+validates tokens; **WorkOS AuthKit** is the authorization server (login, consent,
+PKCE, Dynamic Client Registration). The SDK serves
+`/.well-known/oauth-protected-resource/mcp` so clients auto-discover WorkOS.
+Access is gated to `ADMIN_EMAILS`. Production startup fails if
+`WORKOS_AUTHKIT_DOMAIN` / `MCP_RESOURCE_URL` are unset.
 
-Claude Code client config (`claude mcp add` or `.claude.json`):
+**WorkOS one-time setup:** create an AuthKit-enabled environment, enable Dynamic
+Client Registration, and restrict sign-in to the admin email. Set
+`workos_authkit_domain` (the issuer, `https://<slug>.authkit.app`) and
+`mcp_resource_url` (`https://<cloud-run-url>/mcp`) in `terraform.tfvars`.
 
-```json
-{
-  "type": "http",
-  "url": "https://<cloud-run-url>/mcp",
-  "headers": { "Authorization": "Bearer <MCP_API_KEY>" }
-}
-```
+**claude.ai custom connector:** add the URL `https://<cloud-run-url>/mcp/`,
+leave the OAuth Client ID/Secret **blank** (DCR handles registration), then
+complete the WorkOS login as the admin.
+
+**Claude Code:** `claude mcp add --transport http madeforseconds https://<cloud-run-url>/mcp/`,
+then run `/mcp` to authenticate via the browser. No static token needed.
 
 Set `MCP_TIMEOUT=30000` in the client environment — the backend scales to
 zero, so the first call after idle takes ~10s while Cloud Run cold-starts.
 If a call times out, retry once.
+
+Local dev (`docker compose up`) runs the MCP server **unauthenticated** (no
+WorkOS dependency), matching the `require_admin` dev bypass.
 
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,

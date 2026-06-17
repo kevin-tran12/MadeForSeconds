@@ -8,11 +8,11 @@ pydantic-settings==2.7.1
 python-multipart>=0.0.22
 redis>=5.0.0
 stripe>=8.0.0
-PyJWT>=2.0.0
+PyJWT[crypto]>=2.0.0
 reportlab>=4.0.0
 pyotp>=2.9.0
 qrcode[pil]>=7.4.0
-mcp[cli]>=1.8.0
+mcp[cli]>=1.28.0
 pytest==9.1.0
 httpx==0.28.1
 pytest-asyncio==1.4.0
