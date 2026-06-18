@@ -35,6 +35,15 @@ def test_prod_no_invoker_configured_returns_403(client):
     assert response.status_code == 403
 
 
+def test_prod_no_audience_configured_returns_503(client):
+    with patch("app.routes.internal.settings") as mock_settings:
+        mock_settings.is_dev = False
+        mock_settings.instagram_refresh_invoker_email = _INVOKER
+        mock_settings.instagram_refresh_audience = ""
+        response = client.post(REFRESH_URL, headers={"Authorization": "Bearer some-token"})
+    assert response.status_code == 503
+
+
 def test_prod_missing_bearer_returns_401(client):
     with patch("app.routes.internal.settings") as mock_settings:
         mock_settings.is_dev = False
