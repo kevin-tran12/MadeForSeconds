@@ -37,12 +37,12 @@ def _verify_oidc_caller(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = auth[7:]
 
+    audience = settings.instagram_refresh_audience
+    if not audience:
+        raise HTTPException(status_code=503, detail="Refresh endpoint audience not configured")
+
     try:
-        claims = id_token.verify_oauth2_token(
-            token,
-            _google_request,
-            audience=settings.instagram_refresh_audience or None,
-        )
+        claims = id_token.verify_oauth2_token(token, _google_request, audience=audience)
     except Exception as exc:
         raise HTTPException(status_code=403, detail=f"Invalid OIDC token: {exc}")
 

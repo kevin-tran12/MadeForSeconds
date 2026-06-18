@@ -32,10 +32,10 @@ class TestPublishImageDev:
         assert result["id"] == "dev-ig-media"
         assert "Dev mode" in result["note"]
 
-    def test_skips_validation_in_dev(self):
-        # Non-https URL is accepted without error in dev mode
-        result = ig.publish_image("http://not-https.com/img.jpg", "Caption")
-        assert result["id"] == "dev-ig-media"
+    def test_validation_runs_in_dev(self):
+        # Validation now runs before the dev short-circuit so bad inputs are caught everywhere
+        with pytest.raises(ValueError, match="https"):
+            ig.publish_image("http://not-https.com/img.jpg", "Caption")
 
 
 # ── publish_image: prod ───────────────────────────────────────────────────────

@@ -87,6 +87,16 @@ def validate_production_settings(s: "Settings") -> None:
             "MCP_RESOURCE_URL must be set in production (the public https URL of the /mcp "
             "endpoint) so OAuth resource metadata and token audiences line up"
         )
+    if s.instagram_user_id and not s.instagram_refresh_invoker_email:
+        raise RuntimeError(
+            "INSTAGRAM_REFRESH_INVOKER_EMAIL must be set in production when Instagram is "
+            "configured — it is the service account email the OIDC gate checks"
+        )
+    if s.instagram_user_id and not s.instagram_refresh_audience:
+        raise RuntimeError(
+            "INSTAGRAM_REFRESH_AUDIENCE must be set in production when Instagram is configured "
+            "— without it the refresh endpoint skips OIDC audience validation"
+        )
 
 
 settings = Settings()

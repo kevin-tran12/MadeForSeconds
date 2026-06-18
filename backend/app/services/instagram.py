@@ -30,8 +30,8 @@ GRAPH_VERSION = "v23.0"
 MAX_CAPTION_CHARS = 2200
 MAX_HASHTAGS = 30
 
-_HTTP_TIMEOUT = 15.0
-_POLL_ATTEMPTS = 6
+_HTTP_TIMEOUT = 10.0
+_POLL_ATTEMPTS = 5
 _POLL_DELAY_SECONDS = 2
 _TOKEN_CACHE_TTL = 600  # 10 minutes
 
@@ -138,7 +138,8 @@ def _graph_request(client: httpx.Client, method: str, url: str, **kwargs) -> dic
         pass
 
     if resp.status_code >= 400 or "error" in data:
-        err = data.get("error", {}) if isinstance(data, dict) else {}
+        raw_err = data.get("error") if isinstance(data, dict) else None
+        err = raw_err if isinstance(raw_err, dict) else {}
         message = err.get("message") or f"HTTP {resp.status_code}"
         code = err.get("code")
         logger.warning(
@@ -153,10 +154,12 @@ def _graph_request(client: httpx.Client, method: str, url: str, **kwargs) -> dic
 
 def _create_container(client, user_id: str, token: str, image_url: str, caption: str) -> str:
     url = f"{GRAPH_BASE}/{GRAPH_VERSION}/{user_id}/media"
-    params = {"image_url": image_url, "access_token": token}
+    params = {"image_url": image_url}
     if caption:
         params["caption"] = caption
-    data = _graph_request(client, "POST", url, params=params)
+    data = _graph_request(
+        client, "POST", url, params=params, headers={"Authorization": f"Bearer {token}"}
+    )
     container_id = data.get("id")
     if not container_id:
         raise InstagramError("Instagram did not return a media container id")
@@ -168,7 +171,9 @@ def _wait_until_finished(client, container_id: str, token: str) -> None:
     url = f"{GRAPH_BASE}/{GRAPH_VERSION}/{container_id}"
     for attempt in range(_POLL_ATTEMPTS):
         data = _graph_request(
-            client, "GET", url, params={"fields": "status_code", "access_token": token}
+            client, "GET", url,
+            params={"fields": "status_code"},
+            headers={"Authorization": f"Bearer {token}"},
         )
         status = data.get("status_code")
         if status == "FINISHED":
@@ -183,7 +188,9 @@ def _wait_until_finished(client, container_id: str, token: str) -> None:
 def _publish_container(client, user_id: str, token: str, container_id: str) -> str:
     url = f"{GRAPH_BASE}/{GRAPH_VERSION}/{user_id}/media_publish"
     data = _graph_request(
-        client, "POST", url, params={"creation_id": container_id, "access_token": token}
+        client, "POST", url,
+        params={"creation_id": container_id},
+        headers={"Authorization": f"Bearer {token}"},
     )
     media_id = data.get("id")
     if not media_id:
@@ -196,7 +203,9 @@ def _fetch_permalink(client, media_id: str, token: str) -> str:
     url = f"{GRAPH_BASE}/{GRAPH_VERSION}/{media_id}"
     try:
         data = _graph_request(
-            client, "GET", url, params={"fields": "permalink", "access_token": token}
+            client, "GET", url,
+            params={"fields": "permalink"},
+            headers={"Authorization": f"Bearer {token}"},
         )
         return data.get("permalink", "")
     except InstagramError:
@@ -229,6 +238,9 @@ def publish_image(image_url: str, caption: str = "") -> dict:
     unconfigured state and ``InstagramError`` for API failures. The image must
     be a public https JPEG; PNG/WebP may be rejected by Instagram.
     """
+    _validate_image_url(image_url)
+    _validate_caption(caption)
+
     if settings.is_dev:
         logger.info("Instagram publish (dev no-op)")
         return {
@@ -243,8 +255,6 @@ def publish_image(image_url: str, caption: str = "") -> dict:
         raise ValueError(
             "Instagram is not configured (set INSTAGRAM_USER_ID and the access token)"
         )
-    _validate_image_url(image_url)
-    _validate_caption(caption)
 
     with httpx.Client(timeout=_HTTP_TIMEOUT) as client:
         container_id = _create_container(client, user_id, token, image_url, caption)
@@ -274,7 +284,8 @@ def refresh_token() -> dict:
             client,
             "GET",
             f"{GRAPH_BASE}/refresh_access_token",
-            params={"grant_type": "ig_refresh_token", "access_token": current},
+            params={"grant_type": "ig_refresh_token"},
+            headers={"Authorization": f"Bearer {current}"},
         )
 
     new_token = data.get("access_token")

@@ -10,16 +10,26 @@
 # Terraform self-reference cycle in the Cloud Run env block.
 
 locals {
-  instagram_refresh_url = "${replace(var.mcp_resource_url, "/mcp", "")}/api/internal/instagram/refresh-token"
+  instagram_refresh_url = "${trimsuffix(var.mcp_resource_url, "/mcp")}/api/internal/instagram/refresh-token"
+}
+
+# Provision the Cloud Scheduler service agent explicitly — GCP only creates it
+# lazily on first job creation, so the IAM grant below would fail without this.
+resource "google_project_service_identity" "cloudscheduler" {
+  provider = google-beta
+  count    = var.instagram_access_token != "" ? 1 : 0
+  project  = var.gcp_project_id
+  service  = "cloudscheduler.googleapis.com"
 }
 
 # Cloud Scheduler's service agent must be allowed to mint OIDC tokens as the
-# backend SA. (Created via API/Terraform, so grant it explicitly.)
+# backend SA so it can authenticate against the refresh endpoint.
 resource "google_service_account_iam_member" "scheduler_mints_backend_oidc" {
   count              = var.instagram_access_token != "" ? 1 : 0
   service_account_id = google_service_account.backend.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-cloudscheduler.iam.gserviceaccount.com"
+  member             = "serviceAccount:${google_project_service_identity.cloudscheduler[0].email}"
+  depends_on         = [google_project_service_identity.cloudscheduler]
 }
 
 resource "google_cloud_scheduler_job" "instagram_token_refresh" {
