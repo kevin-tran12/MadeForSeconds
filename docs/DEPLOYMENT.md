@@ -257,6 +257,13 @@ rm terraform.tfstate terraform.tfstate.backup
   `gcloud firestore databases restore`.
 - **Uptime**: a Cloud Monitoring check hits `/api/health` every 15 minutes
   and emails the alert address after ~20 minutes of failures.
+- **App errors**: a log-based metric + alert policy
+  (`google_logging_metric.backend_errors`) emails the alert address after
+  more than 5 ERROR-severity log entries in a 15-minute window.
+- **5xx responses**: a log-based metric + alert policy
+  (`google_logging_metric.backend_5xx`) emails the alert address after more
+  than 5 HTTP 5xx responses in a 15-minute window, using Cloud Run's
+  automatic per-request logs.
 
 ### Viewing backend logs
 
