@@ -7,12 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import logging as cloud_logging
 
 from .config import settings, validate_production_settings
-from .mcp_server import create_mcp_app
-from .routes import admin, expenses, internal, public, reports, subscriptions, totp
 
 validate_production_settings(settings)
 
-# Setup Cloud Logging
+# Logging must be configured BEFORE the route/MCP imports below. Those pull in
+# app.cache, which decides Redis-vs-memory at import time and logs the outcome.
+# Configure it afterwards and that record is emitted with no handler attached
+# and silently dropped — which is how a dead Redis went unnoticed for weeks.
 if not settings.is_dev:
     client = cloud_logging.Client()
     client.setup_logging()
@@ -20,6 +21,18 @@ else:
     logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
+
+# ruff: noqa: E402 — deliberately after logging setup, see above.
+from .mcp_server import create_mcp_app  # noqa: E402
+from .routes import (  # noqa: E402
+    admin,
+    expenses,
+    internal,
+    public,
+    reports,
+    subscriptions,
+    totp,
+)
 
 mcp_inner, mcp_app = create_mcp_app()
 
