@@ -274,8 +274,6 @@ npm run test:e2e:ui          # interactive
 ```
 Covers: home page, public recipe browsing, recipe detail, admin recipe CRUD, navigation, support page.
 
-See [TEST_PLAN.md](TEST_PLAN.md) for the full test plan and coverage targets.
-
 ---
 
 ## Branching & deployment workflow
