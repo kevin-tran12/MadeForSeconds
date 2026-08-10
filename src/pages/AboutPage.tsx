@@ -37,13 +37,13 @@ export function AboutPage() {
 
           {/* Follow */}
           <div className="space-y-4">
-            <h2 className="font-display text-xl font-bold text-gray-900">{page.follow_heading}</h2>
+            <h2 className="font-display text-xl font-bold text-gray-900 dark:text-stone-100">{page.follow_heading}</h2>
             <div className="flex flex-col gap-3">
               <a
                 href="https://instagram.com/madeforseconds"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-sm font-medium text-gray-700 transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm"
+                className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-sm font-medium text-gray-700 transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:border-primary-800 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
               >
                 Instagram
               </a>
@@ -51,7 +51,7 @@ export function AboutPage() {
                 href="https://tiktok.com/@madeforseconds"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-sm font-medium text-gray-700 transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm"
+                className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-sm font-medium text-gray-700 transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:border-primary-800 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
               >
                 TikTok
               </a>
@@ -59,7 +59,7 @@ export function AboutPage() {
                 href="https://linktr.ee/madeforseconds"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-sm font-medium text-gray-700 transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm"
+                className="flex items-center gap-3 rounded-xl border border-gray-200 bg-white p-3 text-sm font-medium text-gray-700 transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 dark:hover:border-primary-800 dark:hover:bg-primary-950/40 dark:hover:text-primary-300"
               >
                 Linktree
               </a>
@@ -68,18 +68,18 @@ export function AboutPage() {
 
           {/* Supporters */}
           <div id="supporters" className="space-y-4">
-            <h2 className="font-display text-xl font-bold text-gray-900">Supporters</h2>
+            <h2 className="font-display text-xl font-bold text-gray-900 dark:text-stone-100">Supporters</h2>
             {supporters.length > 0 ? (
               <>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-stone-400">
                   {page.thank_you_message}
                 </p>
                 <div className="space-y-3">
                   {supporters.map((s, i) => (
                     <div key={i}>
-                      <p className="text-sm font-semibold text-gray-800">{s.display_name}</p>
+                      <p className="text-sm font-semibold text-gray-800 dark:text-stone-200">{s.display_name}</p>
                       {s.note && (
-                        <p className="text-xs italic text-gray-500 mt-0.5">&ldquo;{s.note}&rdquo;</p>
+                        <p className="text-xs italic text-gray-500 dark:text-stone-400 mt-0.5">&ldquo;{s.note}&rdquo;</p>
                       )}
                     </div>
                   ))}
@@ -93,7 +93,7 @@ export function AboutPage() {
               </>
             ) : (
               <>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-stone-400">
                   Be the first to support MadeForSeconds.
                 </p>
                 <Link
@@ -111,29 +111,29 @@ export function AboutPage() {
         {/* Right column: main content */}
         <div className="flex-1 space-y-8">
           <header>
-            <h1 className="font-display text-4xl font-bold text-gray-900 md:text-5xl lg:text-6xl">
+            <h1 className="font-display text-4xl font-bold text-gray-900 dark:text-stone-100 md:text-5xl lg:text-6xl">
               {page.heading}
             </h1>
           </header>
 
-          <div className="space-y-6 text-lg leading-relaxed text-gray-700">
+          <div className="space-y-6 text-lg leading-relaxed text-gray-700 dark:text-stone-300">
             {page.body.split('\n\n').map((para, i) => (
               <p key={i}>{para}</p>
             ))}
 
-            <div className="rounded-2xl bg-gray-50 p-6 md:p-8 border border-gray-100">
-              <h2 className="font-display text-2xl font-bold text-gray-900">{page.callout_title}</h2>
+            <div className="rounded-2xl bg-gray-50 p-6 md:p-8 border border-gray-100 dark:bg-stone-800 dark:border-stone-700">
+              <h2 className="font-display text-2xl font-bold text-gray-900 dark:text-stone-100">{page.callout_title}</h2>
               <p className="mt-4">
                 {page.callout_body}
               </p>
             </div>
 
             <div className="pt-4">
-              <h2 className="font-display text-2xl font-bold text-gray-900">The Stack</h2>
-              <p className="mt-4 text-base text-gray-600">
+              <h2 className="font-display text-2xl font-bold text-gray-900 dark:text-stone-100">The Stack</h2>
+              <p className="mt-4 text-base text-gray-600 dark:text-stone-400">
                 This site also doubles as a place where I experiment with cloud infrastructure.
               </p>
-              <ul className="mt-4 grid grid-cols-2 gap-4 text-sm font-medium text-gray-500">
+              <ul className="mt-4 grid grid-cols-2 gap-4 text-sm font-medium text-gray-500 dark:text-stone-400">
                 <li className="flex items-center gap-2">
                   <span className="h-1.5 w-1.5 rounded-full bg-primary-400"></span>
                   React + TypeScript
