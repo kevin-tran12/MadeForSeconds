@@ -49,10 +49,15 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `resend_api_key` | Resend API key for cancellation emails |
 | `frontend_url` | Your production frontend URL (used in email links) |
 | `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
+| `billing_account` | GCP billing account ID, for the budget alert |
+| `monthly_budget_amount` | Budget threshold in USD that triggers the alert |
+| `alert_email` | Address that receives budget and uptime alerts |
 | `instagram_user_id` | Instagram Creator account numeric ID (optional — leave blank to skip) |
 | `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy) |
 
-> `terraform.tfvars` is gitignored — never commit it.
+> `terraform.tfvars` is gitignored — never commit it. It holds live Stripe keys
+> and the billing account ID in plaintext. CI runs gitleaks over the full git
+> history on every PR as a backstop, but the gitignore is the real defence.
 
 ### Step 2 — Initialize and apply Terraform
 
@@ -142,6 +147,8 @@ gcloud run services update mfs-backend \
 
 5. Repeat for the **Preview** environment so branch previews can reach the backend.
 
+Security headers are applied automatically from [`public/_headers`](../public/_headers), which Cloudflare reads at deploy time — no dashboard configuration needed.
+
 ### Step 8 — Verify
 
 ```bash
@@ -151,6 +158,17 @@ curl https://$(cd terraform && terraform output -raw cloud_run_url)/api/health
 # Recipes endpoint
 curl https://api.yourdomain.com/api/recipes
 ```
+
+Confirm the frontend security headers made it through:
+
+```bash
+curl -sI https://yourdomain.com | grep -iE 'content-security-policy|strict-transport-security|x-frame-options'
+```
+
+Then load the site and check the browser console for CSP violations. The usual
+cause of a broken deploy here is an edited inline script in `index.html`
+invalidating the `script-src` hash — `public/_headers` documents how to
+recompute it.
 
 Open your domain, click **Admin login**, and sign in with the Identity Platform account from Step 6.
 
