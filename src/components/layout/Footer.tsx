@@ -17,18 +17,18 @@ export function Footer() {
 
         {topSupporters.length > 0 && (
           <div className="mb-6 text-center">
-            <p className="mb-1.5 text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-stone-500">
+            <p className="mb-1.5 text-xs font-bold uppercase tracking-widest text-content-muted">
               Supported by
             </p>
-            <p className="text-sm text-gray-600 dark:text-stone-400">{topSupporters.join(' · ')}</p>
-            <Link to="/about/#supporters" className="mt-0.5 inline-block text-xs text-gray-400 dark:text-stone-500 hover:text-gray-600 dark:hover:text-stone-300 transition-colors">
+            <p className="text-sm text-content-muted">{topSupporters.join(' · ')}</p>
+            <Link to="/about/#supporters" className="mt-0.5 inline-block text-xs text-content-muted hover:text-gray-600 dark:hover:text-stone-300 transition-colors">
               See all →
             </Link>
           </div>
         )}
 
         {/* Copyright — truly centered */}
-        <p className="mb-5 text-center text-xs text-gray-400 dark:text-stone-500">
+        <p className="mb-5 text-center text-xs text-content-muted">
           &copy; {new Date().getFullYear()} MadeForSeconds · Recipes worth making again.
         </p>
 
@@ -38,7 +38,7 @@ export function Footer() {
             href="https://linktr.ee/madeforseconds"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 rounded-lg bg-white dark:bg-stone-800 px-4 py-2 text-sm font-medium text-gray-700 dark:text-stone-300 shadow-sm transition-all hover:bg-gray-50 dark:hover:bg-stone-700 hover:shadow"
+            className="flex items-center gap-2 rounded-lg bg-white dark:bg-stone-800 px-4 py-2 text-sm font-medium text-content-body shadow-sm transition-all hover:bg-gray-50 dark:hover:bg-stone-700 hover:shadow"
           >
             <svg className="h-4 w-4 text-primary-600" fill="currentColor" viewBox="0 0 24 24">
               <path d="M13.511 5.833L17.5 1.2h-3.132l-2.47 2.871L9.421 1.2H6.289l3.989 4.633L6.289 10.43h3.132l2.477-2.871 2.477 2.871h3.132l-3.998-4.597zM12 10.43V22.8h3V10.43h-3z" />
@@ -50,13 +50,13 @@ export function Footer() {
           <div className="flex items-center gap-2">
             <Link
               to="/support/"
-              className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
+              className="rounded-md bg-cta px-3 py-1.5 text-xs font-semibold text-cta-content hover:bg-cta-hover transition-colors"
             >
               Donate
             </Link>
             <Link
               to="/support/cancel/"
-              className="rounded-md border border-gray-300 dark:border-stone-600 bg-white dark:bg-stone-800 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-stone-400 hover:border-gray-400 dark:hover:border-stone-500 hover:text-gray-900 dark:hover:text-stone-200 transition-colors"
+              className="rounded-md border border-gray-300 dark:border-stone-600 bg-white dark:bg-stone-800 px-3 py-1.5 text-xs font-medium text-content-muted hover:border-gray-400 dark:hover:border-stone-500 hover:text-gray-900 dark:hover:text-stone-200 transition-colors"
             >
               Cancel recurring donation
             </Link>

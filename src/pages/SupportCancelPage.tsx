@@ -53,17 +53,17 @@ export function SupportCancelPage() {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         {confirming ? (
-          <p className="text-gray-500">Canceling your donation...</p>
+          <p className="text-content-muted">Canceling your donation...</p>
         ) : confirmed ? (
           <>
             <div className="mb-6 text-5xl">&#x1F44B;</div>
-            <h1 className="font-display text-2xl font-bold text-gray-900 mb-3">
+            <h1 className="font-display text-2xl font-bold text-content mb-3">
               Donation Canceled
             </h1>
-            <p className="text-gray-600 mb-8">{confirmMessage}</p>
+            <p className="text-content-muted mb-8">{confirmMessage}</p>
             <Link
               to="/recipes/"
-              className="inline-flex rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors"
+              className="inline-flex rounded-xl bg-cta px-6 py-3 text-sm font-semibold text-cta-content shadow-sm hover:bg-cta-hover transition-colors"
             >
               Browse recipes
             </Link>
@@ -71,13 +71,13 @@ export function SupportCancelPage() {
         ) : (
           <>
             <div className="mb-6 text-5xl">&#x26A0;&#xFE0F;</div>
-            <h1 className="font-display text-2xl font-bold text-gray-900 mb-3">
+            <h1 className="font-display text-2xl font-bold text-content mb-3">
               Cancellation Failed
             </h1>
-            <p className="text-gray-600 mb-4">{confirmError}</p>
+            <p className="text-content-muted mb-4">{confirmError}</p>
             <Link
               to="/support/cancel/"
-              className="text-sm font-medium text-amber-600 hover:text-amber-700 transition-colors"
+              className="text-sm font-medium text-accent hover:text-accent-hover transition-colors"
             >
               Try again
             </Link>
@@ -91,25 +91,25 @@ export function SupportCancelPage() {
   return (
     <div className="mx-auto max-w-lg px-4 py-16">
       <div className="text-center mb-10">
-        <h1 className="font-display text-2xl font-bold text-gray-900 mb-3">
+        <h1 className="font-display text-2xl font-bold text-content mb-3">
           Cancel Recurring Donation
         </h1>
-        <p className="text-gray-600">
+        <p className="text-content-muted">
           Enter the email address you used when donating. We'll send you a
           confirmation link to complete the cancellation.
         </p>
       </div>
 
       {submitted ? (
-        <div className="rounded-2xl border border-green-200 bg-green-50 p-6 text-center">
-          <p className="text-sm text-green-700 mb-2 font-semibold">Check your email</p>
-          <p className="text-sm text-green-600">
+        <div className="rounded-2xl border border-success-border bg-success-surface p-6 text-center">
+          <p className="text-sm text-success mb-2 font-semibold">Check your email</p>
+          <p className="text-sm text-success">
             If an active recurring donation exists for this email, we've sent a confirmation link.
             The link expires in 1 hour.
           </p>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="rounded-2xl border border-gray-200 bg-white p-6">
+        <form onSubmit={handleSubmit} className="rounded-2xl border border-card-border bg-card p-6">
           <input
             type="email"
             value={email}
@@ -117,11 +117,11 @@ export function SupportCancelPage() {
             placeholder="your@email.com"
             required
             autoFocus
-            className="mb-4 w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+            className="mb-4 w-full rounded-lg border border-card-border px-3 py-2.5 text-sm outline-none focus:border-cta focus:ring-2 focus:ring-cta/40"
           />
 
           {error && (
-            <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">
+            <div className="mb-4 rounded-lg bg-danger-surface border border-danger-border px-3 py-2 text-sm text-danger">
               {error}
             </div>
           )}
@@ -129,21 +129,21 @@ export function SupportCancelPage() {
           <button
             type="submit"
             disabled={submitting || !email.trim()}
-            className="w-full rounded-xl bg-gray-800 py-3 text-sm font-bold text-white hover:bg-gray-900 transition-colors disabled:opacity-50"
+            className="w-full rounded-xl bg-neutral py-3 text-sm font-bold text-neutral-content hover:bg-neutral-hover transition-colors disabled:opacity-50"
           >
             {submitting ? 'Sending...' : 'Send cancellation link'}
           </button>
 
-          <p className="mt-4 text-center text-xs text-gray-400">
+          <p className="mt-4 text-center text-xs text-content-muted">
             We'll email you a confirmation link. Your donation stays active until you click it.
           </p>
         </form>
       )}
 
-      <div className="mt-8 rounded-xl bg-gray-50 border border-gray-200 p-4">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Other ways to cancel</p>
-        <ul className="text-sm text-gray-600 space-y-1.5 list-disc list-inside">
-          <li>Log in to <a href="https://billing.stripe.com" target="_blank" rel="noopener noreferrer" className="text-amber-600 hover:underline">Stripe's billing portal</a> directly using your email</li>
+      <div className="mt-8 rounded-xl bg-card-muted border border-card-border p-4">
+        <p className="text-xs font-semibold text-content-muted uppercase tracking-wide mb-2">Other ways to cancel</p>
+        <ul className="text-sm text-content-muted space-y-1.5 list-disc list-inside">
+          <li>Log in to <a href="https://billing.stripe.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">Stripe's billing portal</a> directly using your email</li>
           <li>Contact your bank or card provider to stop the recurring gift</li>
         </ul>
       </div>

@@ -13,7 +13,7 @@ export function Header() {
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `text-sm font-medium transition-colors ${
-      isActive ? 'text-primary-600' : 'text-gray-700 dark:text-stone-300 hover:text-primary-600'
+      isActive ? 'text-primary-600' : 'text-content-body hover:text-primary-600'
     }`
 
   return (
@@ -71,7 +71,7 @@ export function Header() {
             className={`rounded-lg p-1.5 transition-all duration-200 ${
               searchOpen
                 ? 'text-primary-600'
-                : 'text-gray-500 dark:text-stone-400 hover:text-primary-600'
+                : 'text-content-muted hover:text-primary-600'
             }`}
             aria-label={searchOpen ? 'Close search' : 'Open search'}
           >
@@ -110,7 +110,7 @@ export function Header() {
         {/* Dark mode toggle (desktop) */}
         <button
           onClick={toggleDark}
-          className="hidden md:flex items-center justify-center rounded-lg p-1.5 text-gray-500 dark:text-stone-400 transition-colors hover:text-primary-600 dark:hover:text-primary-400"
+          className="hidden md:flex items-center justify-center rounded-lg p-1.5 text-content-muted transition-colors hover:text-primary-600 dark:hover:text-primary-400"
           aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
           title={isDark ? 'Light mode' : 'Dark mode'}
         >
@@ -129,7 +129,7 @@ export function Header() {
         <div className="hidden md:flex items-center gap-2">
           <Link
             to="/support/"
-            className="rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-600 transition-colors"
+            className="rounded-full bg-cta px-3 py-1 text-xs font-semibold text-cta-content hover:bg-cta-hover transition-colors"
           >
             Donate
           </Link>
@@ -143,7 +143,7 @@ export function Header() {
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden p-2 text-gray-600 dark:text-stone-400 hover:text-gray-900 dark:hover:text-stone-100"
+          className="md:hidden p-2 text-content-muted hover:text-gray-900 dark:hover:text-stone-100"
           onClick={() => setMobileOpen((v) => !v)}
           aria-label="Toggle menu"
         >
@@ -169,7 +169,7 @@ export function Header() {
             {/* Dark mode toggle (mobile) */}
             <button
               onClick={toggleDark}
-              className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-stone-300 hover:text-primary-600"
+              className="flex items-center gap-2 text-sm font-medium text-content-body hover:text-primary-600"
             >
               {isDark ? (
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -200,7 +200,7 @@ export function Header() {
               <Link
                 to="/support/"
                 onClick={() => setMobileOpen(false)}
-                className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white text-center hover:bg-amber-600 transition-colors"
+                className="rounded-lg bg-cta px-3 py-2 text-sm font-semibold text-cta-content text-center hover:bg-cta-hover transition-colors"
               >
                 Donate
               </Link>

@@ -22,6 +22,67 @@
   --color-surface-dark: #faedcd;
   --color-surface-darker: #f0d9a0;
 
+  /* ── Semantic content colors ────────────────────────────────────────────
+     Use these instead of text-gray-*. They are redefined under .dark below,
+     so `text-content` is correct in both themes and needs no dark: variant.
+     Every pairing below clears WCAG AA (4.5:1) against both the page
+     background and a card, in both themes — see docs in README.
+
+       text-content        headings, emphasis     min 13.9:1
+       text-content-body   body copy              min  9.8:1
+       text-content-muted  captions, meta, hints  min  6.0:1
+
+     content-muted is gray-600, not gray-500. gray-500 measures 4.60:1 on the
+     page but only 4.16:1 on surface-dark, which is what the footer uses — so
+     it failed there while passing everywhere else. The values above hold on
+     every surface that actually carries text (page, surface-dark, card,
+     card-muted). surface-darker is excluded because it exists only as a
+     button hover state, and the text on it is content, never muted.
+
+     There is deliberately no fainter tier: gray-400/stone-500 bottoms out
+     at 2.4:1 and cannot be used for text. Reach for content-muted instead. */
+  --color-content: #111827;
+  --color-content-body: #374151;
+  --color-content-muted: #4b5563;
+
+  /* Raised surfaces (cards, panels) that sit on top of the page background */
+  --color-card: #ffffff;
+  --color-card-muted: #f9fafb;
+  --color-card-border: #e5e7eb;
+
+  /* Call to action (donate / support). The amber is identical in both themes;
+     the label is near-black rather than white because white-on-amber is only
+     2.15:1. Near-black gives 8.14:1 and keeps the brand colour untouched. */
+  --color-cta: #f59e0b;
+  --color-cta-hover: #d97706;
+  --color-cta-content: #1c1917;
+
+  /* Label colour for a filled brand-orange button (primary-500). White gives
+     only 2.80:1 on that orange; near-black gives 6.24:1. */
+  --color-on-brand: #1c1917;
+
+  /* Amber used as *text* (inline links, selected labels) rather than as a fill.
+     No single amber shade clears AA in both themes — amber-600 is 3.03:1 on the
+     cream page, amber-700 is 3.48:1 on the dark one — so this pair flips. */
+  --color-accent: #b45309;
+  --color-accent-hover: #92400e;
+
+  /* Neutral solid button (secondary submits). Inverts between themes: a dark
+     button on the light page, a light button on the dark one. Keeping it dark
+     in both would make it disappear against #1c1917. */
+  --color-neutral: #1f2937;
+  --color-neutral-hover: #111827;
+  --color-neutral-content: #ffffff;
+
+  /* Status banners. The tinted fills are near-white in light mode, so they need
+     genuinely dark counterparts rather than an opacity tweak. */
+  --color-danger: #b91c1c;
+  --color-danger-surface: #fef2f2;
+  --color-danger-border: #fecaca;
+  --color-success: #15803d;
+  --color-success-surface: #f0fdf4;
+  --color-success-border: #bbf7d0;
+
   /* Typography */
   --font-family-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-family-display: 'Playfair Display', ui-serif, Georgia, serif;
@@ -32,11 +93,42 @@ body {
   font-family: var(--font-family-sans);
 }
 
-/* Dark mode: override surface tokens (all bg-surface-* classes pick this up automatically) */
+/* Dark mode: override the tokens. Every bg-surface-*, text-content-*, bg-card-*
+   and bg-cta class picks this up automatically — no dark: variant required at
+   the call site. Adding a `dark:` override to one of these is a smell; fix the
+   token here instead so both themes stay in sync. */
 .dark {
   --color-surface: #1c1917;
   --color-surface-dark: #292524;
   --color-surface-darker: #44403c;
+
+  --color-content: #f5f5f4;
+  --color-content-body: #d6d3d1;
+  --color-content-muted: #a8a29e;
+
+  --color-card: #292524;
+  --color-card-muted: #292524;
+  --color-card-border: #44403c;
+
+  /* --color-cta-* intentionally not overridden: the amber reads correctly on
+     both backgrounds (8.14:1 against the dark page), and flipping it would
+     make the primary CTA look like two different buttons. */
+
+  /* Accent text must flip — a dark amber is unreadable here. */
+  --color-accent: #fbbf24;
+  --color-accent-hover: #fcd34d;
+
+  --color-neutral: #e7e5e4;
+  --color-neutral-hover: #f5f5f4;
+  --color-neutral-content: #1c1917;
+
+  --color-danger: #fca5a5;
+  --color-danger-surface: #450a0a;
+  --color-danger-border: #7f1d1d;
+  --color-success: #86efac;
+  --color-success-surface: #052e16;
+  --color-success-border: #166534;
+
   color-scheme: dark;
 }
 
