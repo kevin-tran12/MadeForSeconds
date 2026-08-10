@@ -29,9 +29,9 @@ resource "google_project_service_identity" "cloudscheduler" {
 # weekly usage report).
 resource "google_service_account_iam_member" "scheduler_mints_backend_oidc" {
   service_account_id = google_service_account.backend.name
-  role                = "roles/iam.serviceAccountTokenCreator"
-  member              = "serviceAccount:${google_project_service_identity.cloudscheduler.email}"
-  depends_on          = [google_project_service_identity.cloudscheduler]
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_project_service_identity.cloudscheduler.email}"
+  depends_on         = [google_project_service_identity.cloudscheduler]
 }
 
 resource "google_cloud_scheduler_job" "instagram_token_refresh" {
