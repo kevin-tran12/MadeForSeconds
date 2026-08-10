@@ -2,6 +2,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime
 
+from conftest import JPEG_BYTES, NOT_A_MEDIA_FILE, PDF_BYTES
+
 def test_admin_list_recipes(authenticated_client, mock_db):
     """Verifies that the admin can list all recipes."""
     mock_query = mock_db.collection.return_value.order_by.return_value.stream
@@ -122,7 +124,7 @@ def test_admin_upload_image_dev_mode(authenticated_client):
     """Verifies mock URL returned in dev mode."""
     with patch("app.routes.admin.settings") as mock_settings:
         mock_settings.is_dev = True
-        file_data = {"file": ("test.jpg", b"fake-image-content", "image/jpeg")}
+        file_data = {"file": ("test.jpg", JPEG_BYTES, "image/jpeg")}
         response = authenticated_client.post("/api/admin/upload-image", files=file_data)
         assert response.status_code == 200
         assert "placehold.co" in response.json()["url"]

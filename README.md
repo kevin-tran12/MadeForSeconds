@@ -1,6 +1,9 @@
 # MadeForSeconds
 
-A personal recipe collection with integrated supporter subscriptions, expense tracking, and a Claude-powered recipe parser — built to run entirely on GCP's free tier.
+A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger, and a remote MCP server that lets Claude author and publish recipes over OAuth 2.1 — built to run entirely on GCP's free tier.
+
+[![CI](https://github.com/kevin-tran12/MadeForSeconds/actions/workflows/ci.yml/badge.svg)](https://github.com/kevin-tran12/MadeForSeconds/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Stack
 
@@ -10,9 +13,10 @@ A personal recipe collection with integrated supporter subscriptions, expense tr
 | Backend | FastAPI (Python 3.12) |
 | Database | Cloud Firestore |
 | Auth | Google Identity Platform (Firebase) |
+| Admin 2FA | TOTP (pyotp) gating the expense ledger |
 | Payments | Stripe (one-time and recurring donations) |
 | Email | Resend |
-| Recipe import | Claude (Desktop/Projects) via MCP tools |
+| Agent interface | Remote MCP server (Streamable HTTP), OAuth 2.1 via WorkOS AuthKit |
 | Caching | Upstash Redis (optional, falls back to in-memory) |
 | Backend hosting | GCP Cloud Run (scale to zero) |
 | Frontend hosting | Cloudflare Pages |
@@ -23,6 +27,51 @@ A personal recipe collection with integrated supporter subscriptions, expense tr
 All GCP services stay within the always-free tier for personal/low-traffic use.
 
 > **First-time production setup?** See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph client[" "]
+        B["Browser"]
+        C["Claude<br/>(Code / Projects)"]
+    end
+
+    subgraph edge["Cloudflare"]
+        CF["Pages / Workers<br/>static React bundle<br/>CSP + HSTS via _headers"]
+    end
+
+    subgraph gcp["Google Cloud Platform"]
+        CR["Cloud Run — FastAPI<br/>scales to zero"]
+        FS[("Firestore")]
+        GCS[("Cloud Storage<br/>images · receipts")]
+        SM[("Secret Manager")]
+    end
+
+    subgraph ext["External"]
+        WOS["WorkOS AuthKit<br/>OAuth 2.1 AS"]
+        IDP["Identity Platform<br/>admin JWT"]
+        ST["Stripe"]
+        RD[("Upstash Redis<br/>optional cache")]
+    end
+
+    B -->|"static assets"| CF
+    B -->|"REST /api/*"| CR
+    B -.->|"Google sign-in"| IDP
+    C -->|"MCP /mcp<br/>Streamable HTTP"| CR
+
+    CR -->|"validate RS256 JWT<br/>against JWKS"| WOS
+    CR -->|"verify admin JWT"| IDP
+    CR --> FS
+    CR --> GCS
+    CR --> SM
+    CR <--> RD
+    ST -->|"signed webhook"| CR
+```
+
+The browser never touches Firestore. Every read and write goes through FastAPI, which is the only component holding credentials. Three independent auth paths converge on it: Identity Platform JWTs for the admin UI, WorkOS-issued OAuth tokens for MCP clients, and Google-signed OIDC tokens for scheduled internal jobs.
 
 ---
 
@@ -46,6 +95,58 @@ All GCP services stay within the always-free tier for personal/low-traffic use.
 - Post-payment profile setup (display name + note, subject to admin approval)
 - Self-service cancellation via signed email link
 
+### Agent interface (MCP)
+- Author, revise, and publish recipes from a Claude conversation — no admin UI needed
+- OAuth 2.1 with PKCE and dynamic client registration; no static API key anywhere
+
+---
+
+## MCP server
+
+The backend doubles as a remote [Model Context Protocol](https://modelcontextprotocol.io) server mounted at `/mcp`, so recipes can be written and published from a Claude conversation.
+
+### Auth model
+
+The interesting part is that **the MCP server holds no credentials of its own.** It is an OAuth 2.1 *resource server*; [WorkOS AuthKit](https://www.authkit.com/) is the authorization server and owns login, consent, PKCE, and dynamic client registration.
+
+```
+Claude ──── 1. GET /mcp (no token) ─────────────►  FastAPI
+       ◄─── 401 + WWW-Authenticate ──────────────
+            (points at protected-resource metadata)
+
+Claude ──── 2. discover + register + PKCE ──────►  WorkOS AuthKit
+       ◄─── 3. access token (RS256 JWT) ─────────
+
+Claude ──── 4. GET /mcp + Bearer token ─────────►  FastAPI
+                                                   ├─ fetch JWKS (cached)
+                                                   ├─ verify RS256 signature
+                                                   ├─ check issuer, exp
+                                                   └─ email ∈ ADMIN_EMAILS
+```
+
+Verification lives in [`backend/app/mcp_auth.py`](backend/app/mcp_auth.py). It pins `algorithms=["RS256"]`, so `alg: none` and symmetric-key confusion attacks are both rejected, and gates on `ADMIN_EMAILS` as defense-in-depth on top of the WorkOS-side sign-in restriction.
+
+Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev bypass — there is no WorkOS dependency to stand up just to work on tools.
+
+### Tools
+
+| Tool | Purpose |
+|------|---------|
+| `list_categories` | Allowed category list |
+| `list_recipes` | Search/filter existing recipes before creating |
+| `get_recipe` | Full recipe by id or slug |
+| `create_recipe` | Save a draft — duplicate titles return a pointer to the existing recipe instead of writing a second one |
+| `update_recipe` | Revise a draft (array fields are replaced whole) |
+| `request_image_upload` | Signed PUT URL for direct-to-GCS upload |
+| `upload_image_from_url` | Server-side fetch of an already-hosted image, with SSRF guards |
+| `publish_recipe` / `unpublish_recipe` | Toggle visibility; publish refuses incomplete recipes |
+| `delete_recipe` | Requires the title as confirmation |
+| `create_expense` | Add a ledger entry with an attached receipt |
+
+Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` to iterate → `request_image_upload` + `update_recipe(image_url=…)` → `publish_recipe`.
+
+> The backend scales to zero, so the first call after an idle period takes ~10s.
+
 ---
 
 ## Project structure
@@ -62,15 +163,21 @@ All GCP services stay within the always-free tier for personal/low-traffic use.
 │   │   ├── models.py           Pydantic schemas (Recipe, Ingredient, Instruction…)
 │   │   ├── models_expense.py   Pydantic schemas (Expense, ExpenseItem…)
 │   │   ├── totp.py             TOTP 2FA logic and session JWT
-│   │   ├── mcp_server.py       MCP server for Claude Projects integration
+│   │   ├── validation.py       Shared validators (admin routes + MCP)
+│   │   ├── mcp_server.py       MCP server + tool definitions
+│   │   ├── mcp_auth.py         WorkOS OAuth token verification (resource server)
+│   │   ├── services/
+│   │   │   ├── recipes.py      Recipe domain logic shared by routes and MCP
+│   │   │   └── uploads.py      GCS upload, signed URLs, content sniffing
 │   │   └── routes/
 │   │       ├── public.py       GET /api/recipes, /categories, /sitemap.xml, /feed.xml
 │   │       ├── admin.py        Admin recipe CRUD, image upload, supporter moderation
 │   │       ├── subscriptions.py Stripe checkout, webhooks, cancel flow
+│   │       ├── internal.py     Scheduler-invoked jobs (Google OIDC gated)
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest test suite (74 tests)
+│   ├── tests/                  Pytest suite (276 tests across 20 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -87,8 +194,12 @@ All GCP services stay within the always-free tier for personal/low-traffic use.
 │   └── pages/                  Route page components
 ├── tests-e2e/                  Playwright E2E tests (6 spec files)
 ├── terraform/                  GCP + Cloudflare infrastructure as code
+├── public/
+│   ├── _headers                CSP + security headers served by Cloudflare
+│   └── _redirects              sitemap/feed proxying to the backend
 ├── docs/
 │   └── DEPLOYMENT.md           Full production setup guide
+├── .github/workflows/ci.yml    Security scan, tests, terraform, build gate
 ├── vitest.config.ts            Frontend unit test config
 ├── playwright.config.ts        E2E test config
 ├── docker-compose.yml          Local dev stack
@@ -156,7 +267,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (74 tests)
+npm run test:backend                    # Pytest (276 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -179,9 +290,11 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Health / liveness check |
-| GET | `/api/recipes` | List published recipes (`?search=`, `?category=`, `?search_by=`) |
+| GET | `/api/recipes` | List published recipes (`?search=`, `?category=`, `?label=`, `?search_by=`, `?limit=`, `?cursor=`) |
+| GET | `/api/recipes/grouped` | Homepage payload — recent recipes plus per-category groups |
 | GET | `/api/recipes/{slug}` | Single recipe |
 | GET | `/api/categories` | All unique categories |
+| GET | `/api/pages/{page_id}` | Editable page copy (home, about) |
 | GET | `/api/sitemap.xml` | SEO sitemap |
 | GET | `/api/feed.xml` | RSS feed |
 | GET | `/api/subscribe/supporters` | Public supporter list |
@@ -194,7 +307,9 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 | POST | `/api/admin/recipes` | Create recipe (slug auto-generated) |
 | PUT | `/api/admin/recipes/{id}` | Update recipe |
 | DELETE | `/api/admin/recipes/{id}` | Delete recipe |
-| POST | `/api/admin/upload-image` | Upload image to GCS |
+| POST | `/api/admin/upload-image` | Upload image to GCS (magic-byte validated) |
+| GET | `/api/admin/pages/{page_id}` | Read editable page copy |
+| PUT | `/api/admin/pages/{page_id}` | Update editable page copy |
 
 ### Admin — supporters (requires auth)
 
@@ -248,24 +363,31 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 | POST | `/api/subscribe/cancel-request` | Request recurring donation cancellation (sends email) |
 | POST | `/api/subscribe/cancel-confirm` | Confirm cancellation with token |
 
+### Agent (OAuth 2.1 — WorkOS-issued token, admin-gated)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/mcp` | MCP endpoint (Streamable HTTP) |
+| GET | `/.well-known/oauth-protected-resource` | Resource metadata served by the MCP SDK |
+
 ---
 
 ## Testing
 
-The project has three test layers:
+The project has three test layers.
 
-### Backend — pytest (74 tests)
+### Backend — pytest (276 tests, 20 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
 ```
-Covers: auth, models, cache, public routes, admin routes, supporter moderation, subscriptions, expenses, reports, TOTP.
+Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes.
 
-### Frontend unit — vitest (26 tests)
+### Frontend unit — vitest (49 tests, 8 files)
 ```bash
 npm run test:unit
 ```
-Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), Button component.
+Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components.
 
 ### E2E — Playwright (6 spec files)
 ```bash
@@ -274,7 +396,23 @@ npm run test:e2e:ui          # interactive
 ```
 Covers: home page, public recipe browsing, recipe detail, admin recipe CRUD, navigation, support page.
 
-See [TEST_PLAN.md](TEST_PLAN.md) for the full test plan and coverage targets.
+---
+
+## CI/CD
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every PR and every push to `main`:
+
+| Job | What it does |
+|-----|--------------|
+| **Security Scan** | gitleaks over full git history · bandit SAST · pip-audit · `npm audit` on production deps |
+| **Backend Tests** | pytest with coverage |
+| **Frontend Tests** | vitest |
+| **Terraform Validate** | `terraform fmt -check` and `terraform validate` |
+| **Build Check** | `tsc -b && vite build` — gated on all four jobs above |
+
+`main` is protected: a PR cannot merge until every one of these passes and the branch is up to date with `main`. Force pushes and branch deletion are blocked.
+
+Python dependencies carry upper version bounds on purpose. Because CI gates merges, an upstream major release must never be able to turn the build red on its own.
 
 ---
 
@@ -339,3 +477,16 @@ Or push to `main` — Cloud Build runs these steps automatically if the trigger 
 | `SUBSCRIBER_JWT_SECRET` | 32+ char secret for cancel link JWTs |
 | `RESEND_API_KEY` | Resend API key (cancel emails) |
 | `REDIS_URL` | Upstash Redis URL (optional — falls back to in-memory) |
+
+The MCP server needs no configuration locally — it runs unauthenticated in dev. In production `WORKOS_AUTHKIT_DOMAIN` and `MCP_RESOURCE_URL` are both required, and the backend refuses to start without them (see `validate_production_settings` in [`backend/app/config.py`](backend/app/config.py)). Full production variable reference: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+---
+
+## Security
+
+- **No credentials in the repo.** CI runs gitleaks over the full history on every PR; `.env.local` and `terraform.tfvars` are gitignored.
+- **Three separate auth paths**, all verified server-side: Identity Platform JWTs (admin UI), WorkOS OAuth 2.1 tokens (MCP), Google OIDC (scheduled internal jobs). The expense ledger sits behind an additional TOTP session.
+- **Fail-fast configuration.** Production startup aborts on a default or short `SUBSCRIBER_JWT_SECRET`, or missing OAuth settings, rather than silently running insecure.
+- **Uploads are validated by magic bytes**, not by the client's `Content-Type`, and filenames are stripped of path separators before they become GCS object keys.
+- **Security headers** (CSP with a hashed inline script, HSTS, `frame-ancestors 'none'`) ship via [`public/_headers`](public/_headers).
+- **No secrets reach the browser.** The frontend only ever talks to FastAPI; Firestore and GCS credentials live solely on Cloud Run.

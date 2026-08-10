@@ -6,6 +6,9 @@
     "enabled": true
   },
   "assets": {
+    // Vite's build output. Without this, `wrangler dev` and `wrangler deploy`
+    // both abort with "assets property is missing the required directory".
+    "directory": "./dist",
     "not_found_handling": "single-page-application"
   },
   "compatibility_flags": [

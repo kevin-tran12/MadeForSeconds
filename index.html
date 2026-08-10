@@ -13,6 +13,9 @@
     />
   </head>
   <body>
+    <!-- Applies the stored theme before first paint to avoid a light-mode flash.
+         CSP-sensitive: public/_headers whitelists this script by sha256 hash.
+         If you edit it, recompute the hash or it will be blocked silently. -->
     <script>
       (function () {
         var t = localStorage.getItem('theme')

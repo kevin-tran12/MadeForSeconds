@@ -73,6 +73,57 @@ def sanitize_filename(name: str) -> str:
     return cleaned or "upload"
 
 
+# ── Content sniffing ──────────────────────────────────────────────────────────
+
+# HEIC/HEIF brands that may appear at bytes 8..12 of an ISO-BMFF container.
+_HEIF_BRANDS = {b"heic", b"heix", b"hevc", b"hevx", b"mif1", b"msf1", b"heim", b"heis"}
+
+
+def sniff_content_type(data: bytes) -> str | None:
+    """Identify an upload from its magic bytes, ignoring any declared type.
+
+    A browser-supplied Content-Type is attacker-controlled: renaming
+    payload.html to photo.jpg is enough to get "image/jpeg" declared. Since
+    the images bucket is world-readable, a file stored under an image type but
+    holding markup would be served straight back to visitors. Trust the bytes.
+
+    Returns None when the format is not recognised, which callers treat as a
+    rejection rather than a pass.
+    """
+    if len(data) < 12:
+        return None
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[4:8] == b"ftyp" and data[8:12] in _HEIF_BRANDS:
+        return "image/heic"
+    if data[:5] == b"%PDF-":
+        return "application/pdf"
+    return None
+
+
+def verify_upload_type(data: bytes, allowed: set[str]) -> str:
+    """Return the sniffed content type, or raise ValueError if disallowed.
+
+    The returned value — not the client's declared type — is what should be
+    handed to GCS, so the stored object's metadata always matches its bytes.
+    """
+    actual = sniff_content_type(data)
+    if actual is None:
+        raise ValueError(
+            "Unrecognised file format. Allowed: " + ", ".join(sorted(allowed))
+        )
+    if actual not in allowed:
+        raise ValueError(
+            f"File content is {actual}, which is not permitted here. "
+            "Allowed: " + ", ".join(sorted(allowed))
+        )
+    return actual
+
+
 # ── Signed URLs ───────────────────────────────────────────────────────────────
 
 def _signing_kwargs() -> dict:

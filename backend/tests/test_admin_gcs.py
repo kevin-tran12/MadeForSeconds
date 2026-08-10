@@ -16,6 +16,8 @@ from unittest.mock import MagicMock, patch
 
 from app.services.uploads import gcs_blob_name as _gcs_blob_name, delete_gcs_blob as _delete_gcs_blob
 
+from conftest import JPEG_BYTES, NOT_A_MEDIA_FILE, PDF_BYTES, PNG_BYTES, WEBP_BYTES
+
 
 def _delete_with_json(client, url, payload):
     """Helper: send DELETE with a JSON body (TestClient.delete() doesn't accept json=)."""
@@ -288,7 +290,7 @@ class TestUploadReceipt:
         with patch("app.routes.admin.settings") as mock_settings:
             mock_settings.is_dev = True
             mock_settings.gcs_receipts_bucket_name = None
-            file_data = {"file": ("receipt.jpg", b"fake-content", "image/jpeg")}
+            file_data = {"file": ("receipt.jpg", JPEG_BYTES, "image/jpeg")}
             response = authenticated_client.post("/api/admin/upload-receipt", files=file_data)
 
         assert response.status_code == 200
@@ -297,16 +299,20 @@ class TestUploadReceipt:
     def test_accepts_pdf_file(self, authenticated_client):
         with patch("app.routes.admin.settings") as mock_settings:
             mock_settings.is_dev = True
-            file_data = {"file": ("receipt.pdf", b"fake-pdf-content", "application/pdf")}
+            file_data = {"file": ("receipt.pdf", PDF_BYTES, "application/pdf")}
             response = authenticated_client.post("/api/admin/upload-receipt", files=file_data)
 
         assert response.status_code == 200
 
     def test_accepts_image_types(self, authenticated_client):
-        for mime in ["image/jpeg", "image/png", "image/webp"]:
+        for mime, payload in [
+            ("image/jpeg", JPEG_BYTES),
+            ("image/png", PNG_BYTES),
+            ("image/webp", WEBP_BYTES),
+        ]:
             with patch("app.routes.admin.settings") as mock_settings:
                 mock_settings.is_dev = True
-                file_data = {"file": ("r.img", b"data", mime)}
+                file_data = {"file": ("r.img", payload, mime)}
                 response = authenticated_client.post("/api/admin/upload-receipt", files=file_data)
             assert response.status_code == 200, f"Failed for {mime}"
 
@@ -317,7 +323,7 @@ class TestUploadReceipt:
             response = authenticated_client.post("/api/admin/upload-receipt", files=file_data)
 
         assert response.status_code == 400
-        assert "Receipt must be" in response.json()["detail"]
+        assert "Unrecognised file format" in response.json()["detail"]
 
     def test_rejects_text_plain(self, authenticated_client):
         with patch("app.routes.admin.settings") as mock_settings:

@@ -109,7 +109,7 @@ export function SearchWithSuggestions({
     >
       {/* Input row with inline search-by dropdown */}
       <div
-        className={`flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 shadow-sm ring-2 ring-primary-100 focus-within:ring-primary-300 transition-shadow ${inputClassName ?? ''}`}
+        className={`flex items-center gap-2 rounded-xl border border-card-border bg-card px-3 py-1.5 shadow-sm ring-2 ring-primary-100 focus-within:ring-primary-300 transition-shadow ${inputClassName ?? ''}`}
       >
         {/* Search icon / loading spinner */}
         {loading ? (
@@ -118,18 +118,18 @@ export function SearchWithSuggestions({
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
           </svg>
         ) : (
-          <svg className="h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-4 w-4 shrink-0 text-content-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
           </svg>
         )}
 
         {/* Search-by dropdown — inline inside the bar */}
-        <div className="relative flex items-center border-r border-gray-200 pr-5 mr-0.5 shrink-0">
+        <div className="relative flex items-center border-r border-card-border pr-5 mr-0.5 shrink-0">
           <select
             value={searchBy}
             onChange={(e) => setSearchBy(e.target.value)}
             onClick={(e) => e.stopPropagation()}
-            className="appearance-none bg-transparent text-xs font-semibold text-gray-500 outline-none cursor-pointer"
+            className="appearance-none bg-transparent text-xs font-semibold text-content-muted outline-none cursor-pointer"
             aria-label="Search by"
           >
             <option value="all">All</option>
@@ -139,7 +139,7 @@ export function SearchWithSuggestions({
           </select>
           {/* Chevron icon */}
           <svg
-            className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400"
+            className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-content-muted"
             viewBox="0 0 20 20"
             fill="currentColor"
             aria-hidden="true"
@@ -160,7 +160,7 @@ export function SearchWithSuggestions({
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => suggestions.length > 0 && query.trim().length >= 1 && setOpen(true)}
           placeholder="Search recipes…"
-          className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 outline-none min-w-0"
+          className="flex-1 bg-transparent text-sm text-content placeholder-content-muted outline-none min-w-0"
         />
 
         {/* Clear button */}
@@ -168,7 +168,7 @@ export function SearchWithSuggestions({
           <button
             type="button"
             onClick={() => { setQuery(''); setOpen(false) }}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-content-muted hover:text-content-body transition-colors"
             aria-label="Clear"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -181,7 +181,7 @@ export function SearchWithSuggestions({
         <button
           type="button"
           onClick={submit}
-          className="shrink-0 rounded-lg bg-primary-500 px-3 py-1 text-sm font-semibold text-white hover:bg-primary-400 active:scale-95 transition-all"
+          className="shrink-0 rounded-lg bg-primary-500 px-3 py-1 text-sm font-semibold text-on-brand hover:bg-primary-400 active:scale-95 transition-all"
         >
           Go
         </button>
@@ -189,14 +189,14 @@ export function SearchWithSuggestions({
 
       {/* Suggestions dropdown */}
       {open && (
-        <div className="absolute top-full left-0 right-0 z-50 mt-1 overflow-hidden rounded-xl border border-gray-100 bg-white shadow-lg animate-dropdown-in">
+        <div className="absolute top-full left-0 right-0 z-50 mt-1 overflow-hidden rounded-xl border border-card-border bg-card shadow-lg animate-dropdown-in">
           {suggestions.map(({ recipe, matchedIngredients }, i) => (
             <button
               key={recipe.id}
               type="button"
               onClick={() => goToRecipe(recipe)}
               className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
-                i === activeIndex ? 'bg-primary-50' : 'hover:bg-gray-50'
+                i === activeIndex ? 'bg-surface-dark' : 'hover:bg-card-muted'
               }`}
             >
               <img
@@ -206,7 +206,7 @@ export function SearchWithSuggestions({
                 className="h-9 w-9 shrink-0 rounded-md object-cover"
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-gray-900">{recipe.title}</p>
+                <p className="truncate text-sm font-medium text-content">{recipe.title}</p>
                 {matchedIngredients.length > 0 && (
                   <p className="truncate text-xs text-primary-500 mt-0.5">
                     Contains: {matchedIngredients.slice(0, 3).join(', ')}

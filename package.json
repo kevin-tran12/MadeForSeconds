@@ -2,6 +2,7 @@
   "name": "made-for-seconds",
   "private": true,
   "version": "0.1.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,10 +18,16 @@
     "firebase": "^11.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.0.0"
+    "react-router-dom": "^7.18.2"
   },
   "overrides": {
-    "ws": ">=8.21.0"
+    "ws": ">=8.21.0",
+    "websocket-driver": ">=0.7.5",
+    "protobufjs": ">=7.6.5",
+    "nanoid": ">=3.3.17",
+    "postcss": ">=8.5.23",
+    "sharp": ">=0.35.0",
+    "undici": ">=7.28.1"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.28.0",

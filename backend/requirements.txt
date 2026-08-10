@@ -1,4 +1,7 @@
-fastapi>=0.116.0
+# Upper bounds are deliberate: CI gates merges to main, so an upstream major
+# release must never be able to turn the build red on its own. Raise a bound
+# only alongside a run of the test suite against the new major.
+fastapi>=0.116.0,<1.0.0
 uvicorn[standard]==0.34.0
 google-cloud-firestore==2.19.0
 google-cloud-storage==2.19.0
@@ -6,14 +9,16 @@ google-cloud-logging==3.11.2
 google-cloud-secret-manager==2.21.1
 google-auth==2.37.0
 pydantic-settings==2.7.1
-python-multipart>=0.0.22
-redis>=5.0.0
-stripe>=8.0.0
-PyJWT[crypto]>=2.0.0
-reportlab>=4.0.0
-pyotp>=2.9.0
-qrcode[pil]>=7.4.0
-mcp[cli]>=1.28.0
+python-multipart>=0.0.22,<1.0.0
+redis>=5.0.0,<9.0.0
+stripe>=8.0.0,<16.0.0
+PyJWT[crypto]>=2.0.0,<3.0.0
+reportlab>=4.0.0,<6.0.0
+pyotp>=2.9.0,<3.0.0
+qrcode[pil]>=7.4.0,<9.0.0
+# mcp 2.0 removed mcp.server.fastmcp, which app/mcp_server.py imports.
+# Migrating to the 2.x API is tracked separately — pin to 1.x until then.
+mcp[cli]>=1.28.0,<2.0.0
 pytest==9.1.0
 httpx==0.28.1
 pytest-asyncio==1.4.0

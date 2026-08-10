@@ -66,7 +66,7 @@ export function SupportSuccessPage() {
   if (loading) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
-        <p className="text-gray-500">Verifying donation...</p>
+        <p className="text-content-muted">Verifying donation...</p>
       </div>
     )
   }
@@ -75,13 +75,13 @@ export function SupportSuccessPage() {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         <div className="mb-6 text-5xl">&#x2764;&#xFE0F;</div>
-        <h1 className="font-display text-3xl font-bold text-gray-900 mb-3">
+        <h1 className="font-display text-3xl font-bold text-content mb-3">
           Thank you!
         </h1>
-        <p className="text-gray-600 mb-8">{error}</p>
+        <p className="text-content-muted mb-8">{error}</p>
         <Link
           to="/recipes/"
-          className="inline-flex rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors"
+          className="inline-flex rounded-xl bg-cta px-6 py-3 text-sm font-semibold text-cta-content shadow-sm hover:bg-cta-hover transition-colors"
         >
           Browse recipes
         </Link>
@@ -94,14 +94,14 @@ export function SupportSuccessPage() {
   return (
     <div className="mx-auto max-w-lg px-4 py-16 text-center">
       <div className="mb-6 text-5xl">&#x2764;&#xFE0F;</div>
-      <h1 className="font-display text-3xl font-bold text-gray-900 mb-3">
+      <h1 className="font-display text-3xl font-bold text-content mb-3">
         Thank you for your donation!
       </h1>
-      <p className="text-gray-600 mb-2">
+      <p className="text-content-muted mb-2">
         Your voluntary donation means the world and helps keep MadeForSeconds free for everyone.
       </p>
       {sessionInfo && (
-        <p className="text-sm text-gray-500 mb-8">
+        <p className="text-sm text-content-muted mb-8">
           {isSubscription
             ? `${sessionInfo.email} — $${(sessionInfo.amount_cents / 100).toFixed(0)}/month donation`
             : `${sessionInfo.email} — $${(sessionInfo.amount_cents / 100).toFixed(0)} donation`}
@@ -109,12 +109,12 @@ export function SupportSuccessPage() {
       )}
 
       {!saved && !skipped ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 mb-8 text-left">
-          <h2 className="font-display text-lg font-bold text-gray-900 mb-2">
+        <div className="rounded-2xl border border-card-border bg-card p-6 mb-8 text-left">
+          <h2 className="font-display text-lg font-bold text-content mb-2">
             Want a shoutout?
           </h2>
-          <p className="text-sm text-gray-600 mb-4">
-            Add a display name to appear on the <Link to="/about/#supporters" className="underline hover:text-gray-800">supporters wall</Link>. You can also leave a note — it'll appear once reviewed. Totally optional!
+          <p className="text-sm text-content-muted mb-4">
+            Add a display name to appear on the <Link to="/about/#supporters" className="underline hover:text-content">supporters wall</Link>. You can also leave a note — it'll appear once reviewed. Totally optional!
           </p>
           <form onSubmit={handleSave} className="flex flex-col gap-3">
             <input
@@ -124,7 +124,7 @@ export function SupportSuccessPage() {
               placeholder="Your name or nickname"
               maxLength={50}
               autoFocus
-              className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+              className="rounded-lg border border-card-border px-3 py-2.5 text-sm outline-none focus:border-cta focus:ring-2 focus:ring-cta/40"
             />
             <textarea
               value={note}
@@ -132,15 +132,15 @@ export function SupportSuccessPage() {
               placeholder="Leave a note (optional)"
               maxLength={280}
               rows={3}
-              className="rounded-lg border border-gray-300 px-3 py-2.5 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 resize-none"
+              className="rounded-lg border border-card-border px-3 py-2.5 text-sm outline-none focus:border-cta focus:ring-2 focus:ring-cta/40 resize-none"
             />
             {note.trim() && (
-              <label className="flex items-center gap-2 text-sm text-gray-600">
+              <label className="flex items-center gap-2 text-sm text-content-muted">
                 <input
                   type="checkbox"
                   checked={noteIsPublic}
                   onChange={(e) => setNoteIsPublic(e.target.checked)}
-                  className="rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                  className="rounded border-card-border text-accent focus:ring-cta"
                 />
                 Show my note publicly
               </label>
@@ -149,39 +149,39 @@ export function SupportSuccessPage() {
               <button
                 type="submit"
                 disabled={saving || (!displayName.trim() && !note.trim())}
-                className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 transition-colors disabled:opacity-50"
+                className="flex-1 rounded-lg bg-cta px-4 py-2.5 text-sm font-semibold text-cta-content hover:bg-cta-hover transition-colors disabled:opacity-50"
               >
                 {saving ? 'Saving...' : 'Save'}
               </button>
               <button
                 type="button"
                 onClick={() => setSkipped(true)}
-                className="rounded-lg px-4 py-2.5 text-sm font-medium text-gray-500 hover:text-gray-700 transition-colors"
+                className="rounded-lg px-4 py-2.5 text-sm font-medium text-content-muted hover:text-content-body transition-colors"
               >
                 Skip
               </button>
             </div>
             {saveError && (
-              <p className="mt-2 text-sm text-red-600">{saveError}</p>
+              <p className="mt-2 text-sm text-danger">{saveError}</p>
             )}
           </form>
         </div>
       ) : saved ? (
-        <div className="rounded-2xl border border-green-200 bg-green-50 p-6 mb-8">
-          <p className="text-sm text-green-700">
+        <div className="rounded-2xl border border-success-border bg-success-surface p-6 mb-8">
+          <p className="text-sm text-success">
             {displayName.trim()
               ? `You'll appear as "${displayName.trim()}" on the supporters wall. Thanks!`
               : 'All set! Thank you for your donation.'}
           </p>
           {note.trim() && (
-            <p className="mt-1 text-xs text-green-600">Your note will appear once reviewed.</p>
+            <p className="mt-1 text-xs text-success">Your note will appear once reviewed.</p>
           )}
         </div>
       ) : null}
 
       <Link
         to="/recipes/"
-        className="inline-flex rounded-xl bg-amber-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-amber-700 transition-colors"
+        className="inline-flex rounded-xl bg-cta px-6 py-3 text-sm font-semibold text-cta-content shadow-sm hover:bg-cta-hover transition-colors"
       >
         Browse recipes
       </Link>

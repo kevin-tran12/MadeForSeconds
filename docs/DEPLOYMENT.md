@@ -49,10 +49,15 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `resend_api_key` | Resend API key for cancellation emails |
 | `frontend_url` | Your production frontend URL (used in email links) |
 | `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
+| `billing_account` | GCP billing account ID, for the budget alert |
+| `monthly_budget_amount` | Budget threshold in USD that triggers the alert |
+| `alert_email` | Address that receives budget and uptime alerts |
 | `instagram_user_id` | Instagram Creator account numeric ID (optional — leave blank to skip) |
 | `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy) |
 
-> `terraform.tfvars` is gitignored — never commit it.
+> `terraform.tfvars` is gitignored — never commit it. It holds live Stripe keys
+> and the billing account ID in plaintext. CI runs gitleaks over the full git
+> history on every PR as a backstop, but the gitignore is the real defence.
 
 ### Step 2 — Initialize and apply Terraform
 
@@ -117,12 +122,21 @@ gcloud run services update mfs-backend \
   --project YOUR_PROJECT_ID
 ```
 
-### Step 6 — Create an admin user
+### Step 6 — Enable Google sign-in and authorize the admin
 
-1. Go to [GCP console → Identity Platform → Users](https://console.cloud.google.com/customer-identity/users)
-2. Click **Add user**
-3. Enter the email address you put in `admin_emails` and set a password
-4. This is the account you'll use to log in to the admin panel
+The admin panel authenticates only with Google (`GoogleAuthProvider` in
+`src/lib/auth.ts`). Email/password sign-in is deliberately disabled in
+`terraform/identity_platform.tf` — it was an unused code path that kept a live
+password-hashing signer key in the project config.
+
+1. Go to [GCP console → Identity Platform → Providers](https://console.cloud.google.com/customer-identity/providers)
+2. Add the **Google** provider if it is not already present. It is configured
+   here rather than in Terraform because it needs an OAuth client ID/secret.
+3. Make sure the email address you want to use is listed in `admin_emails` in
+   `terraform.tfvars`. Authorization is by email claim — `require_admin` in
+   `backend/app/auth.py` checks the verified token's email against that list, so
+   no user record needs to be pre-created.
+4. Sign in at `/admin` with that Google account.
 
 ### Step 7 — Connect frontend to Cloudflare Pages
 
@@ -142,6 +156,8 @@ gcloud run services update mfs-backend \
 
 5. Repeat for the **Preview** environment so branch previews can reach the backend.
 
+Security headers are applied automatically from [`public/_headers`](../public/_headers), which Cloudflare reads at deploy time — no dashboard configuration needed.
+
 ### Step 8 — Verify
 
 ```bash
@@ -151,6 +167,17 @@ curl https://$(cd terraform && terraform output -raw cloud_run_url)/api/health
 # Recipes endpoint
 curl https://api.yourdomain.com/api/recipes
 ```
+
+Confirm the frontend security headers made it through:
+
+```bash
+curl -sI https://yourdomain.com | grep -iE 'content-security-policy|strict-transport-security|x-frame-options'
+```
+
+Then load the site and check the browser console for CSP violations. The usual
+cause of a broken deploy here is an edited inline script in `index.html`
+invalidating the `script-src` hash — `public/_headers` documents how to
+recompute it.
 
 Open your domain, click **Admin login**, and sign in with the Identity Platform account from Step 6.
 

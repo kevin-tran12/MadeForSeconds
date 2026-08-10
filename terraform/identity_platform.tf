@@ -7,9 +7,18 @@ resource "google_identity_platform_config" "default" {
   sign_in {
     allow_duplicate_emails = false
 
+    # Email/password sign-in is disabled: the admin UI authenticates solely via
+    # GoogleAuthProvider (see src/lib/auth.ts), so the password path was enabled
+    # but unreachable. Leaving it on kept a live SCRYPT signer key in the project
+    # config for a flow nobody used. Existing user records are unaffected — this
+    # disables the sign-in *method*, and Google still resolves the same accounts
+    # by email because allow_duplicate_emails is false.
+    #
+    # Google sign-in itself is configured in the Identity Platform console, not
+    # here, so this change cannot disable it.
     email {
-      enabled           = true
-      password_required = true
+      enabled           = false
+      password_required = false
     }
   }
 
