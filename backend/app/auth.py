@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import Depends, HTTPException, Request
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 _google_request = google_requests.Request()
 
@@ -31,8 +35,10 @@ def require_admin(request: Request) -> str:
 
     try:
         claims = id_token.verify_firebase_token(token, _google_request, audience=settings.gcp_project_id)
-    except Exception as exc:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
+    except Exception:
+        # Log the reason server-side; the caller only learns the token was rejected.
+        logger.warning("Admin token verification failed", exc_info=True)
+        raise HTTPException(status_code=401, detail="Invalid token")
 
     email: str = claims.get("email", "")
     if email not in settings.admin_email_set:

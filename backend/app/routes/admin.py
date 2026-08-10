@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -12,6 +13,8 @@ from ..firestore import get_db
 from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
 from ..services import recipes as recipe_service
 from ..services import uploads
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
@@ -63,15 +66,19 @@ async def admin_delete_recipe(recipe_id: str):
 @router.post("/upload-image")
 async def admin_upload_image(file: Annotated[UploadFile, File()]):
     """Uploads an image to GCS (production) or returns a mock URL (dev)."""
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="File must be an image")
-
     # Bounded read: cap memory at the limit instead of buffering the whole upload
     contents = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
     if len(contents) > uploads.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10MB)")
 
-    filename = f"{uuid.uuid4()}-{file.filename}"
+    # Sniff the real type — the declared content_type is client-controlled and
+    # this bucket is world-readable, so the bytes are the only trustworthy input.
+    try:
+        content_type = uploads.verify_upload_type(contents, uploads.ALLOWED_IMAGE_TYPES)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    filename = f"{uuid.uuid4()}-{uploads.sanitize_filename(file.filename or '')}"
 
     if settings.is_dev or not settings.gcs_bucket_name:
         return {"url": f"https://placehold.co/800x400?text={filename}"}
@@ -80,30 +87,30 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
         client = storage.Client()
         bucket = client.bucket(settings.gcs_bucket_name)
         blob = bucket.blob(filename)
-        blob.upload_from_string(contents, content_type=file.content_type)
+        blob.upload_from_string(contents, content_type=content_type)
 
         # Construct a reliable public URL
         url = f"https://storage.googleapis.com/{settings.gcs_bucket_name}/{filename}"
         return {"url": url}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
+    except Exception:
+        logger.exception("Image upload to GCS failed")
+        raise HTTPException(status_code=500, detail="Upload failed")
 
 
 @router.post("/upload-receipt")
 async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
     """Upload a purchase receipt photo or PDF for a recipe."""
-    if file.content_type not in uploads.ALLOWED_RECEIPT_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Receipt must be an image or PDF. Got: {file.content_type}",
-        )
-
     # Bounded read: cap memory at the limit instead of buffering the whole upload
     contents = await file.read(uploads.MAX_UPLOAD_BYTES + 1)
     if len(contents) > uploads.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 10MB)")
 
-    filename = f"{uuid.uuid4()}-{file.filename}"
+    try:
+        content_type = uploads.verify_upload_type(contents, uploads.ALLOWED_RECEIPT_TYPES)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    filename = f"{uuid.uuid4()}-{uploads.sanitize_filename(file.filename or '')}"
 
     if settings.is_dev or not settings.gcs_receipts_bucket_name:
         return {"url": f"https://placehold.co/400x300?text=receipt-{filename}"}
@@ -111,11 +118,12 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
     try:
         client = storage.Client()
         blob = client.bucket(settings.gcs_receipts_bucket_name).blob(filename)
-        blob.upload_from_string(contents, content_type=file.content_type)
+        blob.upload_from_string(contents, content_type=content_type)
         url = f"https://storage.googleapis.com/{settings.gcs_receipts_bucket_name}/{filename}"
         return {"url": url}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
+    except Exception:
+        logger.exception("Receipt upload to GCS failed")
+        raise HTTPException(status_code=500, detail="Upload failed")
 
 
 @router.delete("/recipes/{recipe_id}/receipts", status_code=204)

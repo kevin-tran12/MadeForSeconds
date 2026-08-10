@@ -1,0 +1,42 @@
+# Security headers for the Cloudflare-hosted frontend.
+# Cloudflare reads this file natively when serving static assets — same
+# mechanism as public/_redirects. No application code is involved.
+#
+# Verify after deploy:  curl -sI https://madeforseconds.com | grep -i -E 'content-security|strict-transport|x-frame'
+#
+# CSP notes — the non-obvious constraints, so nobody relaxes these by accident:
+#
+#  * script-src carries a sha256 hash instead of 'unsafe-inline'. It covers the
+#    inline theme-bootstrap script in index.html, which must run before paint to
+#    avoid a light-mode flash. EDITING THAT SCRIPT INVALIDATES THE HASH and the
+#    browser will silently refuse to run it. Recompute after any change:
+#      npm run build && python3 -c "import re,hashlib,base64;h=open('dist/index.html').read();b=re.search(r'<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>',h,re.S).group(1);print('sha256-'+base64.b64encode(hashlib.sha256(b.encode()).digest()).decode())"
+#
+#  * style-src keeps 'unsafe-inline'. Tailwind v4 and React's style prop both
+#    produce inline styles; hashing them is not practical. Inline styles are a
+#    far smaller risk than inline scripts, which stay locked down.
+#
+#  * Cross-Origin-Opener-Policy is same-origin-allow-popups, NOT same-origin.
+#    Firebase signInWithPopup needs a handle on the popup it opens; plain
+#    same-origin severs it and admin login fails with no console error.
+#
+#  * connect-src allows *.run.app because VITE_API_URL points at the Cloud Run
+#    service. Narrow this to a custom API domain if one is ever configured.
+#    Known local-dev papercut: `npm run preview` serves these same headers, so
+#    a VITE_API_URL of http://localhost:8000 gets blocked and the page loads
+#    with no data. That is correct behaviour — use `npm run dev` (Vite, no
+#    _headers) for local work against the local backend.
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-jHEAM3JmPQpU2ceeQsqbo7cQqLnVKSg3+E+RR6vzcGk=' https://apis.google.com https://*.firebaseapp.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://storage.googleapis.com https://placehold.co; connect-src 'self' https://*.run.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com; frame-src https://*.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'; upgrade-insecure-requests
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  X-DNS-Prefetch-Control: off
+
+# Fingerprinted build assets are immutable — safe to cache forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

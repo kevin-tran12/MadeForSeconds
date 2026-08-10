@@ -12,6 +12,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gitleaks needs the full history to scan every commit, not just the tip.
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+
+      - name: gitleaks — secret scan across full git history
+        # Live Stripe, Instagram, and Redis credentials live in gitignored files
+        # (.env.local, terraform/terraform.tfvars) right beside tracked ones.
+        # This is the backstop for the day someone runs `git add -f`.
+        run: gitleaks detect --source . --redact --verbose --exit-code 1
 
       - name: Set up Python
         uses: actions/setup-python@v5

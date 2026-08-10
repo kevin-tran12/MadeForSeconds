@@ -43,8 +43,9 @@ def _verify_oidc_caller(request: Request) -> None:
 
     try:
         claims = id_token.verify_oauth2_token(token, _google_request, audience=audience)
-    except Exception as exc:
-        raise HTTPException(status_code=403, detail=f"Invalid OIDC token: {exc}")
+    except Exception:
+        logger.warning("Internal OIDC token verification failed", exc_info=True)
+        raise HTTPException(status_code=403, detail="Invalid OIDC token")
 
     if not claims.get("email_verified") or claims.get("email") != invoker:
         raise HTTPException(status_code=403, detail="Caller not authorized")

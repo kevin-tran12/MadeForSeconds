@@ -178,3 +178,18 @@ def sample_expense_doc():
         doc.to_dict.return_value = payload
         return doc
     return _create
+
+
+# ── Upload fixtures ───────────────────────────────────────────────────────────
+# Uploads are validated by magic bytes (services/uploads.sniff_content_type),
+# not by the declared Content-Type, so test payloads need real file signatures.
+# sniff_content_type requires at least 12 bytes, hence the padding.
+
+JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+WEBP_BYTES = b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 12
+HEIC_BYTES = b"\x00\x00\x00\x18" + b"ftyp" + b"heic" + b"\x00" * 12
+PDF_BYTES = b"%PDF-1.4\n" + b"\x00" * 16
+
+# Content that no sniffer should accept — the "renamed .html to .jpg" case.
+NOT_A_MEDIA_FILE = b"<html><body>hello</body></html>"

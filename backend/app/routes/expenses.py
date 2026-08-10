@@ -1,5 +1,6 @@
 """Admin-only expense ledger routes for tax tracking."""
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -19,6 +20,8 @@ from ..models_expense import (
 )
 from ..services import uploads
 from ..totp import require_totp_session
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/admin/expenses",
@@ -231,41 +234,43 @@ async def void_expense(expense_id: str, request: Request, reason: str = ""):
 @router.post("/upload-receipt")
 async def upload_receipt(file: Annotated[UploadFile, File()]):
     """Upload a receipt image or PDF to private GCS bucket (or mock in dev)."""
-    if not file.content_type or file.content_type not in ALLOWED_RECEIPT_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File must be an image or PDF. Got: {file.content_type}",
-        )
-
-    # Read and check size
-    contents = await file.read()
+    # Bounded read: cap memory at the limit instead of buffering the whole upload
+    contents = await file.read(MAX_RECEIPT_SIZE + 1)
     if len(contents) > MAX_RECEIPT_SIZE:
-        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
 
-    filename = f"receipts/{uuid.uuid4()}-{file.filename}"
+    # Sniff the real type rather than trusting the client's declared one.
+    try:
+        content_type = uploads.verify_upload_type(contents, ALLOWED_RECEIPT_TYPES)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    safe_name = uploads.sanitize_filename(file.filename or "")
+    filename = f"receipts/{uuid.uuid4()}-{safe_name}"
 
     if settings.is_dev or not settings.gcs_receipts_bucket_name:
         # Dev mode: return mock path
         return {
             "receipt_url": f"dev://{filename}",
-            "receipt_filename": file.filename,
-            "receipt_content_type": file.content_type,
+            "receipt_filename": safe_name,
+            "receipt_content_type": content_type,
         }
 
     try:
         client = storage.Client()
         bucket = client.bucket(settings.gcs_receipts_bucket_name)
         blob = bucket.blob(filename)
-        blob.upload_from_string(contents, content_type=file.content_type)
+        blob.upload_from_string(contents, content_type=content_type)
 
         # Store the GCS path — NOT a public URL (bucket is private)
         return {
             "receipt_url": f"gs://{settings.gcs_receipts_bucket_name}/{filename}",
-            "receipt_filename": file.filename,
-            "receipt_content_type": file.content_type,
+            "receipt_filename": safe_name,
+            "receipt_content_type": content_type,
         }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}")
+    except Exception:
+        logger.exception("Expense receipt upload to GCS failed")
+        raise HTTPException(status_code=500, detail="Upload failed")
 
 
 @router.get("/{expense_id}/receipt")
@@ -304,5 +309,6 @@ async def get_receipt(expense_id: str):
             "filename": data.get("receipt_filename"),
             "content_type": data.get("receipt_content_type"),
         }
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to generate signed URL: {exc}")
+    except Exception:
+        logger.exception("Signed receipt URL generation failed for expense %s", expense_id)
+        raise HTTPException(status_code=500, detail="Failed to generate signed URL")

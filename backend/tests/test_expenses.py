@@ -2,6 +2,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
+from conftest import JPEG_BYTES, NOT_A_MEDIA_FILE, PDF_BYTES
+
 def test_create_expense(totp_authenticated_client, mock_db):
     """Creates doc with calculated project amounts."""
     mock_db.collection.return_value.document.return_value.id = "exp_123"
@@ -107,7 +109,7 @@ def test_upload_receipt_dev_mode(totp_authenticated_client):
     """Returns mock path."""
     with patch("app.routes.expenses.settings") as mock_settings:
         mock_settings.is_dev = True
-        file_data = {"file": ("receipt.pdf", b"pdf-content", "application/pdf")}
+        file_data = {"file": ("receipt.pdf", PDF_BYTES, "application/pdf")}
         response = totp_authenticated_client.post("/api/admin/expenses/upload-receipt", files=file_data)
         assert response.status_code == 200
         assert "dev://" in response.json()["receipt_url"]
