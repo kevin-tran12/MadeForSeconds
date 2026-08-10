@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     instagram_token_secret_id: str = "instagram-access-token"  # Secret Manager secret id
     instagram_refresh_invoker_email: str = ""  # SA allowed to call the refresh endpoint (OIDC)
     instagram_refresh_audience: str = ""  # Expected OIDC audience for the refresh endpoint
+    usage_report_audience: str = ""  # Expected OIDC audience for the weekly usage report endpoint
+    alert_email: str = ""  # Destination for the weekly usage report (same address as budget/uptime alerts)
 
     @property
     def admin_email_set(self) -> set[str]:
@@ -97,6 +99,13 @@ def validate_production_settings(s: "Settings") -> None:
             "INSTAGRAM_REFRESH_AUDIENCE must be set in production when Instagram is configured "
             "— without it the refresh endpoint skips OIDC audience validation"
         )
+    if not s.usage_report_audience:
+        raise RuntimeError(
+            "USAGE_REPORT_AUDIENCE must be set in production — without it the weekly usage "
+            "report endpoint always rejects Cloud Scheduler's calls"
+        )
+    if not s.alert_email:
+        raise RuntimeError("ALERT_EMAIL must be set in production — the weekly usage report needs a destination")
 
 
 settings = Settings()

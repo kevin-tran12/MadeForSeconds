@@ -13,7 +13,8 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
 from ..config import settings
-from ..services import instagram
+from ..services import instagram, usage_stats
+from ..services.email import send_email
 
 logger = logging.getLogger(__name__)
 
@@ -22,24 +23,29 @@ router = APIRouter(prefix="/api/internal")
 _google_request = google_requests.Request()
 
 
-def _verify_oidc_caller(request: Request) -> None:
-    """Authorize the caller via its Google OIDC token (no-op in dev)."""
+def _verify_oidc_caller(request: Request, audience: str) -> None:
+    """Authorize the caller via its Google OIDC token (no-op in dev).
+
+    All internal endpoints are invoked by the same backend service account
+    (Cloud Scheduler mints an OIDC token as this SA — see terraform/scheduler.tf),
+    so the invoker-email check is shared; only the expected audience differs
+    per endpoint (it's the endpoint's own URL, per OIDC best practice).
+    """
     if settings.is_dev:
         return
 
     invoker = settings.instagram_refresh_invoker_email
     if not invoker:
         # Fail closed: with no authorized invoker configured, nobody may call this.
-        raise HTTPException(status_code=403, detail="Refresh endpoint is not configured")
+        raise HTTPException(status_code=403, detail="Internal endpoint is not configured")
 
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token")
     token = auth[7:]
 
-    audience = settings.instagram_refresh_audience
     if not audience:
-        raise HTTPException(status_code=503, detail="Refresh endpoint audience not configured")
+        raise HTTPException(status_code=503, detail="Endpoint audience not configured")
 
     try:
         claims = id_token.verify_oauth2_token(token, _google_request, audience=audience)
@@ -54,7 +60,34 @@ def _verify_oidc_caller(request: Request) -> None:
 @router.post("/instagram/refresh-token")
 def refresh_instagram_token(request: Request) -> dict:
     """Rotate the Instagram long-lived token. Invoked on a schedule by Cloud Scheduler."""
-    _verify_oidc_caller(request)
+    _verify_oidc_caller(request, settings.instagram_refresh_audience)
     result = instagram.refresh_token()
     logger.info("Instagram token refresh invoked: refreshed=%s", result.get("refreshed"))
     return result
+
+
+@router.post("/usage/weekly-report")
+async def weekly_usage_report(request: Request) -> dict:
+    """Email a weekly aggregate usage summary. Invoked on a schedule by Cloud Scheduler."""
+    _verify_oidc_caller(request, settings.usage_report_audience)
+    summary = usage_stats.get_weekly_summary()
+
+    paths_html = "".join(f"<li>{p['path']} — {p['count']}</li>" for p in summary["top_paths"]) or "<li>(no requests)</li>"
+    html = f"""
+        <p>Backend traffic for the past {summary["window_days"]} days:</p>
+        <ul>
+            <li>Total requests: {summary["total_requests"]}</li>
+            <li>Distinct visitors: {summary["distinct_visitors"]}</li>
+            <li>Errors: {summary["error_count"]}</li>
+        </ul>
+        <p>Top paths:</p>
+        <ul>{paths_html}</ul>
+    """
+    await send_email(settings.alert_email, "Weekly site usage — MadeForSeconds", html)
+    logger.info(
+        "Weekly usage report sent: requests=%s visitors=%s errors=%s",
+        summary["total_requests"],
+        summary["distinct_visitors"],
+        summary["error_count"],
+    )
+    return summary

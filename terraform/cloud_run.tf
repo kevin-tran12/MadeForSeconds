@@ -151,6 +151,21 @@ resource "google_cloud_run_v2_service" "backend" {
         value = var.frontend_url
       }
 
+      # ALERT_EMAIL — destination for the weekly usage report (same address as
+      # the budget/uptime/error alerts configured in terraform/billing.tf and
+      # terraform/logging_alerts.tf)
+      env {
+        name  = "ALERT_EMAIL"
+        value = var.alert_email
+      }
+
+      # USAGE_REPORT_AUDIENCE — expected OIDC audience for the weekly usage
+      # report endpoint, checked in backend/app/routes/internal.py
+      env {
+        name  = "USAGE_REPORT_AUDIENCE"
+        value = local.usage_report_url
+      }
+
       # Instagram (MCP publishing). The access token is NOT injected here — it is
       # read from Secret Manager at runtime so auto-rotated versions are picked up
       # without redeploying. These are non-secret config values.

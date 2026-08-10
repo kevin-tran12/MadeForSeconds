@@ -264,6 +264,14 @@ rm terraform.tfstate terraform.tfstate.backup
   (`google_logging_metric.backend_5xx`) emails the alert address after more
   than 5 HTTP 5xx responses in a 15-minute window, using Cloud Run's
   automatic per-request logs.
+- **Weekly usage report**: `google_cloud_scheduler_job.weekly_usage_report`
+  hits `/api/internal/usage/weekly-report` every Monday at 13:00 UTC. The
+  endpoint aggregates the trailing 7 days of Cloud Run request logs (total
+  requests, distinct visitor count, top request paths, error count) and
+  emails the summary to `alert_email` — the same address used for the
+  budget/uptime/error alerts above. The report is aggregate-only: no IP
+  addresses or per-request rows ever appear in the email or get stored
+  anywhere new — they're only counted in memory while the report is built.
 
 ### Viewing backend logs
 
