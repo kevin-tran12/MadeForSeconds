@@ -9,8 +9,11 @@ No REDIS_URL: falls back silently to in-memory cache (no external dependency nee
 """
 
 import json
+import logging
 import time
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # ── Serialisation helpers ──────────────────────────────────────────────────────
@@ -124,17 +127,29 @@ _TTL = 86_400
 
 def _build() -> RedisCache | MemoryCache:
     from .config import settings
-    if settings.redis_url:
-        try:
-            c = RedisCache(settings.redis_url, _TTL)
-            c._r.ping()
-            print("[cache] Redis connected")
-            return c
-        except Exception as exc:
-            print(f"[cache] Redis unavailable ({exc}), falling back to memory cache")
-    else:
-        print("[cache] No REDIS_URL set, using in-memory cache")
-    return MemoryCache(_TTL)
+
+    if not settings.redis_url:
+        # Expected locally and in CI; only noteworthy in production.
+        logger.info("Cache: no REDIS_URL set, using in-memory cache")
+        return MemoryCache(_TTL)
+
+    try:
+        c = RedisCache(settings.redis_url, _TTL)
+        c._r.ping()
+        logger.info("Cache: Redis connected")
+        return c
+    except Exception as exc:
+        # WARNING, not info: REDIS_URL was configured, so someone intended a
+        # shared cache and is not getting one. On Cloud Run this matters more
+        # than it looks — the service scales to zero, so every cold start gets
+        # an empty MemoryCache and the cache effectively never survives.
+        # This previously logged via print() and went unnoticed for weeks.
+        logger.warning(
+            "Cache: REDIS_URL is set but Redis is unreachable (%s). "
+            "Falling back to a per-instance in-memory cache.",
+            exc,
+        )
+        return MemoryCache(_TTL)
 
 
 cache = _build()
