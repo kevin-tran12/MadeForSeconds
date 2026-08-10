@@ -23,6 +23,7 @@ A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger
 | DNS / CDN | Cloudflare |
 | CI/CD | GitHub Actions + Cloud Build (backend) / Cloudflare Pages (frontend) |
 | Infrastructure | Terraform |
+| Observability | Cloud Monitoring alert policies (uptime, error rate, 5xx) + weekly usage email, budget-capped infra |
 
 All GCP services stay within the always-free tier for personal/low-traffic use.
 
