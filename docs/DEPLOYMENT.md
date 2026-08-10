@@ -122,12 +122,21 @@ gcloud run services update mfs-backend \
   --project YOUR_PROJECT_ID
 ```
 
-### Step 6 — Create an admin user
+### Step 6 — Enable Google sign-in and authorize the admin
 
-1. Go to [GCP console → Identity Platform → Users](https://console.cloud.google.com/customer-identity/users)
-2. Click **Add user**
-3. Enter the email address you put in `admin_emails` and set a password
-4. This is the account you'll use to log in to the admin panel
+The admin panel authenticates only with Google (`GoogleAuthProvider` in
+`src/lib/auth.ts`). Email/password sign-in is deliberately disabled in
+`terraform/identity_platform.tf` — it was an unused code path that kept a live
+password-hashing signer key in the project config.
+
+1. Go to [GCP console → Identity Platform → Providers](https://console.cloud.google.com/customer-identity/providers)
+2. Add the **Google** provider if it is not already present. It is configured
+   here rather than in Terraform because it needs an OAuth client ID/secret.
+3. Make sure the email address you want to use is listed in `admin_emails` in
+   `terraform.tfvars`. Authorization is by email claim — `require_admin` in
+   `backend/app/auth.py` checks the verified token's email against that list, so
+   no user record needs to be pre-created.
+4. Sign in at `/admin` with that Google account.
 
 ### Step 7 — Connect frontend to Cloudflare Pages
 
