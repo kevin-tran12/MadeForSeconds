@@ -4,13 +4,13 @@ import time
 from collections import defaultdict
 from datetime import datetime, timezone
 
-import httpx
 import stripe
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..firestore import get_db
+from ..services.email import send_email
 from ..subscriber_auth import create_cancel_token, verify_cancel_token
 
 logger = logging.getLogger(__name__)
@@ -381,33 +381,22 @@ async def cancel_request(body: CancelRequest, request: Request):
     token = create_cancel_token(email)
     cancel_url = f"{settings.frontend_url}/support/cancel?token={token}"
 
-    if settings.resend_api_key:
-        try:
-            async with httpx.AsyncClient() as client:
-                await client.post(
-                    "https://api.resend.com/emails",
-                    headers={"Authorization": f"Bearer {settings.resend_api_key}"},
-                    json={
-                        "from": "MadeForSeconds <noreply@madeforseconds.com>",
-                        "to": [email],
-                        "subject": "Confirm your subscription cancellation",
-                        "html": f"""
-                            <p>Hi,</p>
-                            <p>We received a request to cancel your MadeForSeconds subscription.</p>
-                            <p>Click the link below to confirm (expires in 1 hour):</p>
-                            <p><a href="{cancel_url}">Cancel my subscription</a></p>
-                            <p>If you didn't request this, you can safely ignore this email.</p>
-                            <p>— MadeForSeconds</p>
-                        """,
-                    },
-                    timeout=10.0,
-                )
-        except Exception:
-            logger.exception("Failed to send cancellation email")
-            raise HTTPException(status_code=500, detail="Failed to send confirmation email. Please try again.")
-    else:
-        # Dev mode: log the cancel link
-        logger.info(f"[DEV] Cancel link for {email}: {cancel_url}")
+    try:
+        await send_email(
+            email,
+            "Confirm your subscription cancellation",
+            f"""
+                <p>Hi,</p>
+                <p>We received a request to cancel your MadeForSeconds subscription.</p>
+                <p>Click the link below to confirm (expires in 1 hour):</p>
+                <p><a href="{cancel_url}">Cancel my subscription</a></p>
+                <p>If you didn't request this, you can safely ignore this email.</p>
+                <p>— MadeForSeconds</p>
+            """,
+        )
+    except Exception:
+        logger.exception("Failed to send cancellation email")
+        raise HTTPException(status_code=500, detail="Failed to send confirmation email. Please try again.")
 
     return generic_msg
 

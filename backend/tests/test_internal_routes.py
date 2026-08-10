@@ -124,3 +124,62 @@ def test_prod_valid_oidc_returns_200(client):
     body = response.json()
     assert body["refreshed"] is True
     assert body["expires_in_days"] == 60
+
+
+# ── weekly usage report ────────────────────────────────────────────────────
+
+USAGE_REPORT_URL = "/api/internal/usage/weekly-report"
+_USAGE_AUDIENCE = "https://backend.example.run.app/api/internal/usage/weekly-report"
+_SUMMARY = {
+    "window_days": 7,
+    "total_requests": 42,
+    "distinct_visitors": 5,
+    "error_count": 1,
+    "top_paths": [{"path": "/api/recipes", "count": 20}],
+}
+
+
+def test_usage_report_dev_mode_no_auth_required(client):
+    with (
+        patch("app.routes.internal.usage_stats.get_weekly_summary", return_value=_SUMMARY),
+        patch("app.routes.internal.send_email") as mock_send,
+    ):
+        response = client.post(USAGE_REPORT_URL)
+    assert response.status_code == 200
+    assert response.json()["total_requests"] == 42
+    mock_send.assert_called_once()
+
+
+def test_usage_report_prod_no_invoker_configured_returns_403(client):
+    with patch("app.routes.internal.settings") as mock_settings:
+        mock_settings.is_dev = False
+        mock_settings.instagram_refresh_invoker_email = ""
+        response = client.post(USAGE_REPORT_URL)
+    assert response.status_code == 403
+
+
+def test_usage_report_prod_valid_oidc_sends_email(client):
+    claims = {"email": _INVOKER, "email_verified": True}
+    with (
+        patch("app.routes.internal.settings") as mock_settings,
+        patch(
+            "app.routes.internal.id_token.verify_oauth2_token", return_value=claims
+        ),
+        patch("app.routes.internal.usage_stats.get_weekly_summary", return_value=_SUMMARY),
+        patch("app.routes.internal.send_email") as mock_send,
+    ):
+        mock_settings.is_dev = False
+        mock_settings.instagram_refresh_invoker_email = _INVOKER
+        mock_settings.usage_report_audience = _USAGE_AUDIENCE
+        mock_settings.alert_email = "owner@example.com"
+        response = client.post(
+            USAGE_REPORT_URL, headers={"Authorization": "Bearer valid-oidc-token"}
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_requests"] == 42
+    assert body["distinct_visitors"] == 5
+    mock_send.assert_called_once()
+    args, _ = mock_send.call_args
+    assert args[0] == "owner@example.com"
+    assert "/api/recipes" in args[2]
