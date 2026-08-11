@@ -12,3 +12,9 @@ github_owner         = "your-github-username"
 github_repo          = "MadeForSeconds"
 # Redis URL for shared caching — create a free database at https://upstash.com
 # redis_url            = "rediss://default:TOKEN@your-host.upstash.io:6379"
+
+# Cost protection. Crossing monthly_budget_amount scales the backend to 0
+# instances; a Cloud Scheduler job restores it on the 1st of each month.
+billing_account       = "XXXXXX-XXXXXX-XXXXXX"
+alert_email           = "you@yourdomain.com"
+monthly_budget_amount = 15

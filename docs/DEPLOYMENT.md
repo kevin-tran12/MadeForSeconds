@@ -50,7 +50,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `frontend_url` | Your production frontend URL (used in email links) |
 | `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
 | `billing_account` | GCP billing account ID, for the budget alert |
-| `monthly_budget_amount` | Budget threshold in USD that triggers the alert |
+| `monthly_budget_amount` | Budget cap in USD (default `15`) — see [Cost circuit breaker](#cost-circuit-breaker) |
 | `alert_email` | Address that receives budget and uptime alerts |
 | `instagram_user_id` | Instagram Creator account numeric ID (optional — leave blank to skip) |
 | `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy) |
@@ -210,6 +210,14 @@ gcloud run services update mfs-backend \
 
 Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild.yaml`.
 
+> **The deploy pipeline owns the running image, not Terraform.** `cloud_run.tf`
+> sets `ignore_changes` on the container image, so `terraform apply` never
+> re-pins the service to `var.backend_image`. That variable only seeds the
+> service on first create. Without this guard an infrastructure-only apply would
+> roll the backend onto whatever `:latest` happened to point at — which is
+> exactly how a budget-config apply once tried to deploy an unrelated image that
+> could not boot. Roll back or forward with `gcloud run services update`.
+
 ### What requires what kind of deploy?
 
 | Change | Action |
@@ -257,6 +265,31 @@ rm terraform.tfstate terraform.tfstate.backup
   `gcloud firestore databases restore`.
 - **Uptime**: a Cloud Monitoring check hits `/api/health` every 15 minutes
   and emails the alert address after ~20 minutes of failures.
+
+### Cost circuit breaker
+
+The project cannot quietly bill past `monthly_budget_amount` (default **$15**).
+
+| Spend | What happens |
+|---|---|
+| Forecast to exceed 100% | Early-warning email — GCP projects month-end spend from run-rate, so this lands days before you actually cross. No shutdown. |
+| 50% / 80% actual | Warning emails. |
+| 100% actual | The `budget-killer` function scales `mfs-backend` to **0 instances**. The site goes down. A dedicated *"budget breaker TRIPPED"* alert fires — distinct from the generic uptime alert, so you know it was the breaker and not an outage. |
+| 1st of month, 08:00 UTC | The `budget-breaker-reset` scheduler job restores the service to 1 instance. Idempotent — a no-op in normal months. |
+
+Only Cloud Run is scaled down. Firestore, GCS, and egress keep billing, but at
+this scale they are cents. The breaker deliberately does **not** detach the
+billing account.
+
+Recover early, without waiting for the 1st:
+
+```bash
+gcloud scheduler jobs run budget-breaker-reset --location us-central1 --project made-for-seconds
+```
+
+> Note: `cloud_run.tf` declares `max_instance_count = 1`, so a `terraform apply`
+> while the breaker is tripped will also restore service — silently. If you get
+> the breaker alert, find out why before applying.
 
 ### Viewing backend logs
 
