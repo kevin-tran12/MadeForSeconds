@@ -23,6 +23,7 @@ A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger
 | DNS / CDN | Cloudflare |
 | CI/CD | GitHub Actions + Cloud Build (backend) / Cloudflare Pages (frontend) |
 | Infrastructure | Terraform |
+| Observability | Cloud Monitoring alert policies (uptime, error rate, 5xx) + weekly usage email, budget-capped infra |
 
 All GCP services stay within the always-free tier for personal/low-traffic use.
 
@@ -307,7 +308,11 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 | POST | `/api/admin/recipes` | Create recipe (slug auto-generated) |
 | PUT | `/api/admin/recipes/{id}` | Update recipe |
 | DELETE | `/api/admin/recipes/{id}` | Delete recipe |
-| POST | `/api/admin/upload-image` | Upload image to GCS (magic-byte validated) |
+| POST | `/api/admin/upload-image` | Upload recipe image to GCS (magic-byte validated) |
+| POST | `/api/admin/upload-receipt` | Upload a recipe purchase receipt (image or PDF) |
+| DELETE | `/api/admin/recipes/{id}/receipts` | Detach a receipt from a recipe |
+| GET | `/api/admin/categories` | Allowed category list |
+| PUT | `/api/admin/categories` | Replace the allowed category list |
 | GET | `/api/admin/pages/{page_id}` | Read editable page copy |
 | PUT | `/api/admin/pages/{page_id}` | Update editable page copy |
 
@@ -330,17 +335,17 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 | GET | `/api/admin/expenses` | List expenses (`?year=`, `?month=`, `?category=`) |
 | GET | `/api/admin/expenses/{id}` | Get expense |
 | PUT | `/api/admin/expenses/{id}` | Update expense |
-| DELETE | `/api/admin/expenses/{id}` | Void expense |
-| POST | `/api/admin/expenses/{id}/upload-receipt` | Upload receipt to GCS |
-| GET | `/api/admin/expenses/{id}/receipt-url` | Get signed receipt URL |
+| POST | `/api/admin/expenses/{id}/void` | Void expense (`?reason=`) — ledger entries are never deleted |
+| POST | `/api/admin/expenses/upload-receipt` | Upload a receipt to the private GCS bucket |
+| GET | `/api/admin/expenses/{id}/receipt` | Time-limited signed URL for a stored receipt |
 
 ### Admin — reports (requires auth + TOTP session)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/admin/reports/summary` | Expense totals by category (`?year=`, `?month=`) |
-| GET | `/api/admin/reports/csv` | CSV export |
-| GET | `/api/admin/reports/pdf` | PDF export |
+| GET | `/api/admin/reports/export/csv` | CSV export |
+| GET | `/api/admin/reports/export/pdf` | PDF export |
 
 ### Admin — TOTP (requires auth)
 
@@ -367,8 +372,8 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/mcp` | MCP endpoint (Streamable HTTP) |
-| GET | `/.well-known/oauth-protected-resource` | Resource metadata served by the MCP SDK |
+| POST | `/mcp` | MCP endpoint (Streamable HTTP). Unauthenticated calls get a 401 plus a `WWW-Authenticate` challenge pointing at the metadata URL below |
+| GET | `/.well-known/oauth-protected-resource/mcp` | RFC 9728 resource metadata, served by the MCP SDK. The `/mcp` suffix is part of the path — the bare `/.well-known/oauth-protected-resource` is a 404. Only served in production, since dev runs the MCP server unauthenticated |
 
 ---
 
@@ -413,6 +418,42 @@ Covers: home page, public recipe browsing, recipe detail, admin recipe CRUD, nav
 `main` is protected: a PR cannot merge until every one of these passes and the branch is up to date with `main`. Force pushes and branch deletion are blocked.
 
 Python dependencies carry upper version bounds on purpose. Because CI gates merges, an upstream major release must never be able to turn the build red on its own.
+
+---
+
+## Caching
+
+Read-heavy public endpoints (`/api/recipes`, `/api/recipes/grouped`, `/api/categories`) are cached in [`backend/app/cache.py`](backend/app/cache.py). Two backends, chosen at startup:
+
+| `REDIS_URL` | Backend | Behaviour |
+|---|---|---|
+| set and reachable | `RedisCache` | Shared across instances, survives cold starts |
+| set but unreachable | `MemoryCache` | Logs a **warning**, degrades rather than failing requests |
+| unset | `MemoryCache` | Per-instance, expected locally and in CI |
+
+Invalidation is explicit: admin mutations call `cache.clear()`, which bumps a version counter in Redis so all previous keys become unreachable in O(1) — no `KEYS`/`SCAN` on every write. The 24-hour TTL is only a safety net for a day of total inactivity.
+
+`_warm_cache()` in [`main.py`](backend/app/main.py) pre-populates the homepage and recipe-list responses at startup so the first request after a Cloud Run cold start is fast.
+
+### Why Redis matters here specifically
+
+Cloud Run **scales to zero**. With `MemoryCache`, every cold start begins with an empty cache and nothing is shared between concurrent instances, so the cache stops doing most of its job. Redis is what makes it survive.
+
+### Setting it up
+
+Use [Upstash](https://upstash.com) (free tier, no VPC needed) and put the URL in `terraform.tfvars` as `redis_url`. Terraform stores it in Secret Manager and injects it into Cloud Run only when non-empty.
+
+> **Use the `rediss://` endpoint, not `redis://`.** Upstash is reached over the public internet; the `redis://` scheme sends the auth token and every cached value in cleartext.
+
+### Verifying it actually works
+
+The failure mode is silent by design — the site keeps serving. Check the log line rather than assuming:
+
+```bash
+gcloud logging read 'resource.labels.service_name="mfs-backend" AND textPayload:"Cache:"' --limit 5 --freshness=7d
+```
+
+`Cache: Redis connected` means it's live. `Cache: REDIS_URL is set but Redis is unreachable` means it has fallen back — most often because a free-tier Upstash database was reclaimed for inactivity and its hostname no longer resolves.
 
 ---
 

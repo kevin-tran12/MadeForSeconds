@@ -159,9 +159,10 @@ def test_cancel_request_sends_email(client, mock_db):
     mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream.return_value = iter([mock_doc])
     
     with patch("app.routes.subscriptions.settings") as mock_settings, \
-         patch("app.routes.subscriptions.httpx.AsyncClient.post") as mock_post:
-        mock_settings.resend_api_key = "fake_key"
+         patch("app.services.email.settings") as mock_email_settings, \
+         patch("app.services.email.httpx.AsyncClient.post") as mock_post:
         mock_settings.frontend_url = "https://madeforseconds.com"
+        mock_email_settings.resend_api_key = "fake_key"
         mock_post.return_value = MagicMock(status_code=200)
         
         response = client.post("/api/subscribe/cancel-request", json={"email": "test@example.com"})

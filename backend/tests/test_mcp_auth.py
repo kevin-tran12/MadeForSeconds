@@ -14,6 +14,8 @@ def _settings(**over):
         subscriber_jwt_secret="s" * 40,
         workos_authkit_domain="https://example.authkit.app",
         mcp_resource_url="https://mfs-backend.example.com/mcp",
+        usage_report_audience="https://mfs-backend.example.com/api/internal/usage/weekly-report",
+        alert_email="owner@example.com",
     )
     base.update(over)
     return Settings(**base)

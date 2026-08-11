@@ -17,10 +17,10 @@ resource "google_cloud_run_v2_service" "backend" {
     # by Terraform. var.backend_image only seeds the service on first create.
     #
     # Without this, every terraform apply re-pins the service to whatever
-    # var.backend_image resolves to right now. That is how a purely
-    # infrastructural apply came to roll the backend onto an unrelated newer
-    # image that the current config cannot boot (it required an env var that
-    # does not exist in this branch or in cloud_run.tf), failing the apply.
+    # var.backend_image (:latest) resolves to right now. A budget-only apply
+    # once rolled the backend onto a newer image whose required env vars had
+    # not been applied yet, and the apply failed on the crash-looping revision.
+    # Image rollout and infra rollout must be able to happen independently.
     #
     # client/client_version are metadata gcloud stamps on deploys it performs.
     ignore_changes = [
@@ -168,6 +168,21 @@ resource "google_cloud_run_v2_service" "backend" {
       env {
         name  = "FRONTEND_URL"
         value = var.frontend_url
+      }
+
+      # ALERT_EMAIL — destination for the weekly usage report (same address as
+      # the budget/uptime/error alerts configured in terraform/billing.tf and
+      # terraform/logging_alerts.tf)
+      env {
+        name  = "ALERT_EMAIL"
+        value = var.alert_email
+      }
+
+      # USAGE_REPORT_AUDIENCE — expected OIDC audience for the weekly usage
+      # report endpoint, checked in backend/app/routes/internal.py
+      env {
+        name  = "USAGE_REPORT_AUDIENCE"
+        value = local.usage_report_url
       }
 
       # Instagram (MCP publishing). The access token is NOT injected here — it is
