@@ -31,10 +31,32 @@ resource "google_logging_metric" "backend_errors" {
   depends_on = [google_project_service.required_apis]
 }
 
+# Creating a log-based metric registers it with Logging immediately, but the
+# Monitoring API only sees the descriptor a few minutes later. Referencing the
+# metric from an alert policy in the same apply therefore fails with
+# "Cannot find metric(s) that match type = logging.googleapis.com/user/...".
+# Terraform's dependency graph is already correct — this is pure GCP eventual
+# consistency, so the only fix is to wait.
+#
+# time_sleep delays on create only, so this costs nothing on subsequent applies
+# and nothing at all once the policies exist. If a from-scratch apply still
+# races (GCP documents up to 10 minutes), re-running apply is safe and picks up
+# exactly where it left off.
+resource "time_sleep" "wait_for_log_metrics" {
+  depends_on = [
+    google_logging_metric.backend_errors,
+    google_logging_metric.backend_5xx,
+  ]
+
+  create_duration = "180s"
+}
+
 resource "google_monitoring_alert_policy" "backend_errors" {
   project      = var.gcp_project_id
   display_name = "MFS backend errors"
   combiner     = "OR"
+
+  depends_on = [time_sleep.wait_for_log_metrics]
 
   conditions {
     display_name = "Error log entries"
@@ -89,6 +111,8 @@ resource "google_monitoring_alert_policy" "backend_5xx" {
   project      = var.gcp_project_id
   display_name = "MFS backend 5xx responses"
   combiner     = "OR"
+
+  depends_on = [time_sleep.wait_for_log_metrics]
 
   conditions {
     display_name = "5xx request log entries"
