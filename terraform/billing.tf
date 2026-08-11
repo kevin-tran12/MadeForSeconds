@@ -112,6 +112,28 @@ resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
   member   = "serviceAccount:${google_service_account.budget_killer.email}"
 }
 
+# Updating a Cloud Run service makes the API re-resolve the container image, and
+# it checks that against the *caller's* identity — not the service's runtime SA.
+# So roles/run.developer alone is not enough: without read access to the repo,
+# update_service fails with
+#
+#   PERMISSION_DENIED: Permission 'artifactregistry.repositories.downloadArtifacts'
+#   denied on resource '.../repositories/mfs'
+#
+# and the breaker logs BUDGET_BREAKER_TRIPPED while silently failing to scale
+# down — the exact failure the breaker exists to prevent. Found by an end-to-end
+# trip test; unit tests cannot catch it because they mock the Run client.
+#
+# Scoped to the one repository rather than granted project-wide (the pattern used
+# for Cloud Build in cloudbuild.tf), since read on mfs is all this needs.
+resource "google_artifact_registry_repository_iam_member" "budget_killer_reader" {
+  project    = var.gcp_project_id
+  location   = google_artifact_registry_repository.backend.location
+  repository = google_artifact_registry_repository.backend.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.budget_killer.email}"
+}
+
 # ─── Cloud Function (Gen 2) ─────────────────────────────────────────────────
 
 # Zip the function source for upload
@@ -289,12 +311,19 @@ resource "google_service_account_iam_member" "scheduler_mints_budget_killer_oidc
 # without knowing why it tripped.
 
 resource "google_monitoring_alert_policy" "budget_breaker_tripped" {
-  project      = var.gcp_project_id
-  display_name = "MFS budget breaker TRIPPED — backend scaled to 0"
+  project = var.gcp_project_id
+
+  # GCP composes the notification subject as
+  #   [ALERT - <severity>] <display_name> for <resource> with {<labels>}
+  # The resource/label suffix is not suppressible, so keep display_name short —
+  # a long one pushes the meaning off the end of a phone notification. Setting
+  # severity replaces the default "[ALERT - No severity]" prefix.
+  display_name = "MFS site DOWN — budget cap hit"
+  severity     = "CRITICAL"
   combiner     = "OR"
 
   conditions {
-    display_name = "budget-killer scaled Cloud Run to zero"
+    display_name = "Budget breaker scaled the backend to zero"
 
     # Gen2 functions log under cloud_run_revision, not cloud_function.
     # Marker string is defined as TRIPPED_MARKER in billing_function/main.py.
