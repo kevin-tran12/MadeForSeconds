@@ -103,51 +103,25 @@ resource "google_service_account" "budget_killer" {
   display_name = "Budget Killer Cloud Function"
 }
 
-# Grant permission to update the Cloud Run service (scale to 0)
+# The breaker trips by revoking the service's public invoker binding, which needs
+# getIamPolicy/setIamPolicy on the service — run.developer does not include
+# setIamPolicy, so this is run.admin, scoped to the one service.
+#
+# This replaces an earlier design that called update_service to set
+# max_instance_count = 0. That required run.developer on the service *plus*
+# artifactregistry.reader on the image repo (the API re-resolves the image
+# against the caller) *plus* iam.serviceAccountUser on the runtime SA (the
+# service runs as it) *plus* run.operations.get to poll the result. Every one of
+# those was missing, surfaced one at a time, and each produced the same silent
+# failure: the breaker logged success, emailed, and changed nothing. Worse, the
+# mechanism itself did not work — see the module docstring in
+# billing_function/main.py. Revoking invoker needs exactly this one grant.
 resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
   project  = var.gcp_project_id
   location = var.gcp_region
   name     = google_cloud_run_v2_service.backend.name
-  role     = "roles/run.developer"
+  role     = "roles/run.admin"
   member   = "serviceAccount:${google_service_account.budget_killer.email}"
-}
-
-# Updating a Cloud Run service makes the API re-resolve the container image, and
-# it checks that against the *caller's* identity — not the service's runtime SA.
-# So roles/run.developer alone is not enough: without read access to the repo,
-# update_service fails with
-#
-#   PERMISSION_DENIED: Permission 'artifactregistry.repositories.downloadArtifacts'
-#   denied on resource '.../repositories/mfs'
-#
-# and the breaker logs BUDGET_BREAKER_TRIPPED while silently failing to scale
-# down — the exact failure the breaker exists to prevent. Found by an end-to-end
-# trip test; unit tests cannot catch it because they mock the Run client.
-#
-# Scoped to the one repository rather than granted project-wide (the pattern used
-# for Cloud Build in cloudbuild.tf), since read on mfs is all this needs.
-resource "google_artifact_registry_repository_iam_member" "budget_killer_reader" {
-  project    = var.gcp_project_id
-  location   = google_artifact_registry_repository.backend.location
-  repository = google_artifact_registry_repository.backend.name
-  role       = "roles/artifactregistry.reader"
-  member     = "serviceAccount:${google_service_account.budget_killer.email}"
-}
-
-# ...and because the service runs *as* the backend SA, updating it also requires
-# actAs on that SA:
-#
-#   PERMISSION_DENIED: Permission 'iam.serviceaccounts.actAs' denied on service
-#   account mfs-backend@made-for-seconds.iam.gserviceaccount.com
-#
-# Rewriting a Cloud Run service therefore needs all three of: run.developer on
-# the service, read on the image repo, and actAs on its runtime SA. Missing any
-# one produces the same silent-failure shape — the kill logs success and does
-# nothing. GCP surfaces them one at a time, so they were found one at a time.
-resource "google_service_account_iam_member" "budget_killer_acts_as_backend" {
-  service_account_id = google_service_account.backend.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.budget_killer.email}"
 }
 
 # ─── Cloud Function (Gen 2) ─────────────────────────────────────────────────

@@ -237,7 +237,14 @@ resource "google_cloud_run_v2_service" "backend" {
   }
 }
 
-# Allow unauthenticated access (public API)
+# Allow unauthenticated access (public API).
+#
+# This binding is also the budget breaker's kill switch: tripping removes
+# allUsers here, which is what stops requests (and therefore spend). Terraform
+# still declares it, so a `terraform apply` while the breaker is tripped will
+# re-add it and put the site back online. That is the same drift caveat that
+# applies to the scaling config, and the breaker-tripped alert is the mitigation
+# — if you get that alert, find out why before applying.
 resource "google_cloud_run_v2_service_iam_member" "public" {
   project  = var.gcp_project_id
   location = var.gcp_region
