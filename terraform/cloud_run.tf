@@ -11,6 +11,25 @@ resource "google_cloud_run_v2_service" "backend" {
 
   depends_on = [google_project_service.required_apis]
 
+  lifecycle {
+    # The running image is owned by the deploy pipeline — `gcloud run services
+    # update` or Cloud Build (docs/DEPLOYMENT.md § Updating the backend) — not
+    # by Terraform. var.backend_image only seeds the service on first create.
+    #
+    # Without this, every terraform apply re-pins the service to whatever
+    # var.backend_image (:latest) resolves to right now. A budget-only apply
+    # once rolled the backend onto a newer image whose required env vars had
+    # not been applied yet, and the apply failed on the crash-looping revision.
+    # Image rollout and infra rollout must be able to happen independently.
+    #
+    # client/client_version are metadata gcloud stamps on deploys it performs.
+    ignore_changes = [
+      template[0].containers[0].image,
+      client,
+      client_version,
+    ]
+  }
+
   template {
     service_account = google_service_account.backend.email
     timeout         = "120s"

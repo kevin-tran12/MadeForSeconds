@@ -10,6 +10,11 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 6.0"
     }
+    # Used to wait out log-based metric propagation — see logging_alerts.tf.
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.12"
+    }
   }
 }
 

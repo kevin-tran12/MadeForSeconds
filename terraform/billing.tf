@@ -76,6 +76,15 @@ resource "google_billing_budget" "monthly_cap" {
     spend_basis       = "CURRENT_SPEND"
   }
 
+  # Forecasted 100% — early warning only. GCP projects month-end spend from the
+  # current run rate, so this lands days before actual spend confirms, which
+  # matters because billing data itself lags by hours. This does NOT kill:
+  # kill_cloud_run compares *actual* costAmount, still under budget here.
+  threshold_rules {
+    threshold_percent = 1.0
+    spend_basis       = "FORECASTED_SPEND"
+  }
+
   all_updates_rule {
     monitoring_notification_channels = [
       google_monitoring_notification_channel.budget_email.name,
@@ -154,8 +163,9 @@ resource "google_cloudfunctions2_function" "budget_killer" {
     service_account_email = google_service_account.budget_killer.email
 
     environment_variables = {
-      GCP_PROJECT_ID = var.gcp_project_id
-      GCP_REGION     = var.gcp_region
+      GCP_PROJECT_ID    = var.gcp_project_id
+      GCP_REGION        = var.gcp_region
+      CLOUD_RUN_SERVICE = google_cloud_run_v2_service.backend.name
     }
   }
 
@@ -201,4 +211,121 @@ resource "google_service_account_iam_member" "pubsub_token_creator" {
   service_account_id = google_service_account.budget_killer.name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+}
+
+# ─── Breaker reset function ──────────────────────────────────────────────────
+# The budget resets on the 1st of the month, but max_instance_count = 0 does not.
+# Without this the site stays down until someone notices and runs terraform.
+#
+# Deployed from the SAME source zip as budget-killer — one archive, two entry
+# points. Runs as the budget_killer SA, which already holds exactly the
+# roles/run.developer grant this needs (see budget_killer_admin above); a
+# separate SA would need an identical grant for no isolation benefit.
+
+resource "google_cloudfunctions2_function" "budget_resetter" {
+  project  = var.gcp_project_id
+  name     = "budget-resetter"
+  location = var.gcp_region
+
+  build_config {
+    runtime     = "python312"
+    entry_point = "reset_cloud_run"
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_source.name
+        object = google_storage_bucket_object.budget_killer_source.name
+      }
+    }
+  }
+
+  service_config {
+    max_instance_count = 1
+    available_memory   = "256Mi"
+    timeout_seconds    = 60
+
+    service_account_email = google_service_account.budget_killer.email
+
+    # Scheduler authenticates with an OIDC token; no unauthenticated access.
+    ingress_settings = "ALLOW_ALL"
+
+    environment_variables = {
+      GCP_PROJECT_ID    = var.gcp_project_id
+      GCP_REGION        = var.gcp_region
+      CLOUD_RUN_SERVICE = google_cloud_run_v2_service.backend.name
+    }
+  }
+
+  depends_on = [google_project_service.required_apis]
+}
+
+# The scheduler job presents an OIDC token as the budget_killer SA, so that SA
+# must be able to invoke the resetter's own backing Cloud Run service.
+resource "google_cloud_run_v2_service_iam_member" "budget_resetter_invoker" {
+  project  = var.gcp_project_id
+  location = var.gcp_region
+  name     = "budget-resetter"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.budget_killer.email}"
+
+  depends_on = [google_cloudfunctions2_function.budget_resetter]
+}
+
+# Cloud Scheduler's service agent must be able to mint OIDC tokens as the
+# budget_killer SA. The equivalent grant in scheduler.tf covers the backend SA
+# only, so this is a separate binding.
+resource "google_service_account_iam_member" "scheduler_mints_budget_killer_oidc" {
+  service_account_id = google_service_account.budget_killer.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${google_project_service_identity.cloudscheduler.email}"
+
+  depends_on = [google_project_service_identity.cloudscheduler]
+}
+
+# ─── Breaker-tripped alert ───────────────────────────────────────────────────
+# Scaling to 0 also trips the generic "MFS backend down" uptime alert, which
+# looks identical to a real outage. This fires on the kill function's log marker
+# so the cause is unambiguous — and so you don't terraform apply the breaker off
+# without knowing why it tripped.
+
+resource "google_monitoring_alert_policy" "budget_breaker_tripped" {
+  project      = var.gcp_project_id
+  display_name = "MFS budget breaker TRIPPED — backend scaled to 0"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "budget-killer scaled Cloud Run to zero"
+
+    # Gen2 functions log under cloud_run_revision, not cloud_function.
+    # Marker string is defined as TRIPPED_MARKER in billing_function/main.py.
+    condition_matched_log {
+      filter = <<-EOT
+        resource.type="cloud_run_revision"
+        resource.labels.service_name="${google_cloudfunctions2_function.budget_killer.name}"
+        textPayload:"BUDGET_BREAKER_TRIPPED"
+      EOT
+    }
+  }
+
+  # Required by the API for log-match conditions.
+  alert_strategy {
+    notification_rate_limit {
+      period = "300s"
+    }
+  }
+
+  notification_channels = [google_monitoring_notification_channel.budget_email.name]
+
+  documentation {
+    content   = <<-EOT
+      The monthly budget cap was exceeded and ${google_cloud_run_v2_service.backend.name}
+      has been scaled to 0 instances. The site is DOWN.
+
+      Investigate the spend before restoring. To restore early:
+        gcloud scheduler jobs run budget-breaker-reset --location ${var.gcp_region} --project ${var.gcp_project_id}
+
+      Otherwise it restores automatically on the 1st at 08:00 UTC.
+    EOT
+    mime_type = "text/markdown"
+  }
 }

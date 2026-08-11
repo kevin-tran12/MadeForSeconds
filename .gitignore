@@ -28,6 +28,9 @@ terraform/*.tfstate.backup
 terraform/.terraform.lock.hcl
 terraform/terraform.tfvars
 terraform/.tmp/
+# Plan files embed the fully resolved config, secrets included. Never commit one.
+terraform/tfplan
+terraform/*.tfplan
 # The gcloud SDK was once unpacked here and committed; never again.
 terraform/ls/
 

@@ -118,7 +118,7 @@ variable "billing_account" {
 variable "monthly_budget_amount" {
   description = "Monthly budget cap in USD — alerts and auto-kill trigger at this amount"
   type        = number
-  default     = 1
+  default     = 15
 }
 
 variable "alert_email" {
