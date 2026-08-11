@@ -134,6 +134,22 @@ resource "google_artifact_registry_repository_iam_member" "budget_killer_reader"
   member     = "serviceAccount:${google_service_account.budget_killer.email}"
 }
 
+# ...and because the service runs *as* the backend SA, updating it also requires
+# actAs on that SA:
+#
+#   PERMISSION_DENIED: Permission 'iam.serviceaccounts.actAs' denied on service
+#   account mfs-backend@made-for-seconds.iam.gserviceaccount.com
+#
+# Rewriting a Cloud Run service therefore needs all three of: run.developer on
+# the service, read on the image repo, and actAs on its runtime SA. Missing any
+# one produces the same silent-failure shape — the kill logs success and does
+# nothing. GCP surfaces them one at a time, so they were found one at a time.
+resource "google_service_account_iam_member" "budget_killer_acts_as_backend" {
+  service_account_id = google_service_account.backend.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.budget_killer.email}"
+}
+
 # ─── Cloud Function (Gen 2) ─────────────────────────────────────────────────
 
 # Zip the function source for upload
