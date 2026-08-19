@@ -33,7 +33,7 @@ export function SupportPage() {
   // renders. This is the React-docs pattern for "reset a value when a
   // dependency changes" without an effect.
   const idempotencyKeyRef = useRef<string>('')
-  const prevDepsRef = useRef<{ amount: number; oneTime: boolean }>()
+  const prevDepsRef = useRef<{ amount: number; oneTime: boolean } | undefined>(undefined)
   if (
     !idempotencyKeyRef.current ||
     prevDepsRef.current?.amount !== amount ||
