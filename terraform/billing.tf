@@ -130,11 +130,22 @@ resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
 
 # ─── Cloud Function (Gen 2) ─────────────────────────────────────────────────
 
-# Zip the function source for upload
+# Zip the function source for upload.
+#
+# output_file_mode is what makes the archive reproducible across machines.
+# Without it the provider records each file's real mode, and Windows has no Unix
+# permissions — Go reports 0666 there against 0644 on macOS and Linux. Different
+# mode bits produce different zip bytes, so output_md5 differs, which renames the
+# source object and forces BOTH Cloud Functions to redeploy. That happened on
+# every switch between machines, for no functional change to the code.
+#
+# Timestamps are already normalised by the provider (it stamps 2049-01-01), so
+# mode was the only remaining source of drift.
 data "archive_file" "budget_killer_source" {
-  type        = "zip"
-  source_dir  = "${path.module}/billing_function"
-  output_path = "${path.module}/.tmp/billing_function.zip"
+  type             = "zip"
+  source_dir       = "${path.module}/billing_function"
+  output_path      = "${path.module}/.tmp/billing_function.zip"
+  output_file_mode = "0644"
 }
 
 # GCS bucket for function source code
