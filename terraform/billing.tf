@@ -48,7 +48,11 @@ resource "google_billing_budget" "monthly_cap" {
   display_name    = "MFS Monthly Budget"
 
   budget_filter {
-    projects = ["projects/${var.gcp_project_id}"]
+    # Project NUMBER, not ID. The Budget API always returns the number, so
+    # "projects/${var.gcp_project_id}" never matches what comes back and every
+    # plan shows the same diff — applying it does not converge, it just re-queues
+    # itself. data.google_project.project is already declared in cloudbuild.tf.
+    projects = ["projects/${data.google_project.project.number}"]
   }
 
   amount {
