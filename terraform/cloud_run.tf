@@ -55,11 +55,11 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "GCS_BUCKET_NAME"
-        value = google_storage_bucket.images.name
+        value = module.storage.images_bucket_name
       }
       env {
         name  = "GCS_RECEIPTS_BUCKET_NAME"
-        value = google_storage_bucket.receipts.name
+        value = module.storage.receipts_bucket_name
       }
 
       # ADMIN_EMAILS read from Secret Manager — not passed as plaintext

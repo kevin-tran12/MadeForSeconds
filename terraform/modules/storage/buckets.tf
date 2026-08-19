@@ -46,7 +46,7 @@ resource "google_storage_bucket_iam_member" "public_read" {
 resource "google_storage_bucket_iam_member" "backend_upload" {
   bucket = google_storage_bucket.images.name
   role   = "roles/storage.objectCreator"
-  member = "serviceAccount:${google_service_account.backend.email}"
+  member = "serviceAccount:${var.backend_sa_email}"
 }
 
 # ─── GCS Bucket for Receipts (Private — tax audit data) ─────────────────────
@@ -91,5 +91,5 @@ resource "google_storage_bucket" "receipts" {
 resource "google_storage_bucket_iam_member" "backend_receipts" {
   bucket = google_storage_bucket.receipts.name
   role   = "roles/storage.objectAdmin"
-  member = "serviceAccount:${google_service_account.backend.email}"
+  member = "serviceAccount:${var.backend_sa_email}"
 }
