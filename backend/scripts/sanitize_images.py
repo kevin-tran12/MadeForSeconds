@@ -90,18 +90,31 @@ def main() -> int:
     if args.apply:
         backup_dir.mkdir(parents=True, exist_ok=True)
 
-    changed = skipped = failed = 0
+    changed = skipped = failed = unstrippable = 0
 
     for blob in client.list_blobs(args.bucket):
+        # Read stored metadata BEFORE downloading. An authenticated media
+        # download responds with "Cache-Control: no-cache, no-store, ..." and the
+        # client library writes those response headers back onto the blob object,
+        # so reading it afterwards reports the download's headers rather than what
+        # is stored — which makes every object look like it needs updating.
+        cache_control = blob.cache_control
         data = blob.download_as_bytes()
         content_type = sniff_content_type(data)
 
         if content_type not in STRIPPABLE:
-            # Not a format this can rewrite. HEIC lands here; it is not even an
-            # allowed recipe-image type, so its presence is worth reporting
-            # rather than silently passing over.
-            print(f"  SKIP  {blob.name}  (unsupported type: {content_type})")
-            skipped += 1
+            # A public object whose metadata cannot be removed is the exact thing
+            # this script exists to prevent, so it is a finding, not a skip. HEIC
+            # lands here, and phone HEICs carry the same GPS IFD as phone JPEGs —
+            # it is also not an allowed recipe-image type, so it should not be in
+            # this bucket at all.
+            print(f"  UNSAFE {blob.name}  ({content_type}: cannot strip, still public)")
+            unstrippable += 1
+            # Caching is orthogonal to stripping — a public object should still
+            # be cacheable even when its metadata cannot be verified.
+            if cache_control != PUBLIC_IMAGE_CACHE_CONTROL and args.apply:
+                blob.cache_control = PUBLIC_IMAGE_CACHE_CONTROL
+                blob.patch()
             continue
 
         try:
@@ -112,7 +125,7 @@ def main() -> int:
             continue
 
         needs_strip = cleaned != data
-        needs_cache = blob.cache_control != PUBLIC_IMAGE_CACHE_CONTROL
+        needs_cache = cache_control != PUBLIC_IMAGE_CACHE_CONTROL
         if not needs_strip and not needs_cache:
             skipped += 1
             continue
@@ -137,10 +150,18 @@ def main() -> int:
 
     print()
     verb = "rewritten" if args.apply else "would be rewritten"
-    print(f"{changed} {verb} · {skipped} already clean or unsupported · {failed} failed")
+    print(f"{changed} {verb} · {skipped} already clean · {failed} failed · {unstrippable} unstrippable")
     if not args.apply and changed:
         print("Dry run — re-run with --apply to make these changes.")
-    return 1 if failed else 0
+    if unstrippable:
+        print()
+        print(
+            f"{unstrippable} public object(s) could not be stripped and may still "
+            "carry location data. They need removing or converting — this script "
+            "cannot make them safe."
+        )
+    # Non-zero if anything is still exposed, so a CI or cron caller notices.
+    return 1 if (failed or unstrippable) else 0
 
 
 if __name__ == "__main__":
