@@ -1,20 +1,71 @@
-# Copy to terraform.tfvars and fill in values
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored — this
+# repo is public, and a plan file embeds every value it resolves.
+#
+# Terraform is NOT the source of truth for secret values. It seeds each secret's
+# first version, then lifecycle { ignore_changes = [secret_data] } means later
+# applies never touch it. Rotate out of band:
+#   echo -n "new-value" | gcloud secrets versions add <secret-id> --data-file=-
+#
+# But the values below still matter after the first apply: every optional secret
+# is gated on `count = var.X != "" ? 1 : 0`. Running a plan with one of them
+# blank does not error — it plans to DESTROY that secret and its versions. Keep
+# this file complete, and read any plan that proposes deleting a secret.
 
-gcp_project_id       = "your-gcp-project-id"
-gcp_region           = "us-central1"  # Keep NA region for Cloud Run free egress
-cloudflare_api_token = "your-cloudflare-api-token"
-cloudflare_zone_id   = "your-cloudflare-zone-id"
-domain               = "madefor.seconds"
-admin_emails         = "admin@yourdomain.com"
-allowed_origins      = "https://yourdomain.com"
-backend_image        = "us-central1-docker.pkg.dev/your-gcp-project-id/mfs/backend:latest"
-github_owner         = "your-github-username"
-github_repo          = "MadeForSeconds"
-# Redis URL for shared caching — create a free database at https://upstash.com
-# redis_url            = "rediss://default:TOKEN@your-host.upstash.io:6379"
+# ─── Required ────────────────────────────────────────────────────────────────
 
-# Cost protection. Crossing monthly_budget_amount scales the backend to 0
-# instances; a Cloud Scheduler job restores it on the 1st of each month.
-billing_account       = "XXXXXX-XXXXXX-XXXXXX"
-alert_email           = "you@yourdomain.com"
+gcp_project_id  = "your-gcp-project-id"
+admin_emails    = "admin@yourdomain.com"        # comma-separated
+allowed_origins = "https://yourdomain.com"      # comma-separated CORS origins
+backend_image   = "us-central1-docker.pkg.dev/your-gcp-project-id/mfs/backend:latest"
+github_owner    = "your-github-username"
+github_repo     = "MadeForSeconds"
+
+# Google account granted objectAdmin on the state bucket — whoever runs apply.
+# Must match the casing already recorded in state: IAM preserves the case it was
+# given, so a difference forces the binding to be replaced.
+state_admin_email = "you@yourdomain.com"
+
+# Crossing monthly_budget_amount drops allUsers from the Cloud Run invoker role,
+# which stops requests and therefore spend. A scheduler job restores it monthly.
+billing_account = "XXXXXX-XXXXXX-XXXXXX"
+alert_email     = "you@yourdomain.com"
+
+# ─── Optional — defaults shown ───────────────────────────────────────────────
+
+# Keep a North American region: Cloud Run egress is only free from us-central1,
+# us-east1, and us-west1.
+gcp_region = "us-central1"
+
+# Only "production" or "development" are meaningful. app/config.py treats
+# is_dev as environment == "development" and everything else as production.
+environment = "production"
+
 monthly_budget_amount = 15
+frontend_url          = "https://madeforseconds.pages.dev"
+
+# ─── Optional — features stay off when left blank ────────────────────────────
+
+# MCP OAuth. WorkOS AuthKit is the authorization server; the MCP server only
+# validates tokens against its public JWKS, so no secret is needed here.
+workos_authkit_domain = ""   # https://<slug>.authkit.app
+mcp_resource_url      = ""   # https://<cloud-run-url>/mcp
+
+# Shared cache. Without it the app falls back to in-memory, which resets on every
+# cold start — and this service scales to zero. Free tier at https://upstash.com
+redis_url = ""               # rediss://default:TOKEN@host.upstash.io:6379
+
+# Payments. Blank disables the subscription flow.
+stripe_secret_key     = ""   # sk_live_...
+stripe_webhook_secret = ""   # whsec_...
+stripe_product_id     = ""   # prod_... (legacy donations, optional)
+subscriber_jwt_secret = ""   # min 32 chars; production startup aborts if short
+
+# Cancellation confirmation emails.
+resend_api_key = ""
+
+# Instagram publishing via MCP. The token seeds the secret and is then rotated
+# automatically by a weekly scheduler job. Setting a token creates that job —
+# note Cloud Scheduler's free tier is 3 jobs per billing account, and two are
+# already used by the usage report and the budget-breaker reset.
+instagram_user_id      = ""
+instagram_access_token = ""

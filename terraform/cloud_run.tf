@@ -47,7 +47,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "ENVIRONMENT"
-        value = "production"
+        value = var.environment
       }
       env {
         name  = "ALLOWED_ORIGINS"

@@ -108,6 +108,35 @@ variable "instagram_access_token" {
   default     = ""
 }
 
+# ─── Environment ─────────────────────────────────────────────────────────────
+#
+# There is deliberately no staging environment, and no Terraform workspaces.
+#
+# Cloudflare Pages already previews every branch at <branch>.madeforseconds.pages.dev,
+# which covers the frontend — and those previews point at the production backend,
+# so the integration they exercise is the real one.
+#
+# A genuine second environment could not live in this project anyway: Firestore's
+# "(default)" database and google_identity_platform_config are both per-project
+# singletons, so staging would need a second GCP project. That is buildable, but
+# the free tier would not stretch to cover it — Cloud Scheduler's 3-job limit is
+# per *billing account*, not per project, so a second environment does not come
+# with a second allowance.
+#
+# This variable exists so ENVIRONMENT is not hardcoded in cloud_run.tf, not
+# because a second environment is expected.
+
+variable "environment" {
+  description = "Value of the backend's ENVIRONMENT env var. Only \"production\" and \"development\" are meaningful — app/config.py treats is_dev as environment == \"development\" and everything else as production, so a typo would silently ship production behaviour."
+  type        = string
+  default     = "production"
+
+  validation {
+    condition     = contains(["production", "development"], var.environment)
+    error_message = "environment must be \"production\" or \"development\"."
+  }
+}
+
 # ─── Terraform state ────────────────────────────────────────────────────────
 
 variable "state_admin_email" {
