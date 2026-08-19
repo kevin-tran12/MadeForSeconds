@@ -1,15 +1,16 @@
 import logging
 import re
-import time
-from collections import defaultdict
 from datetime import datetime, timezone
 
 import stripe
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from google.api_core.exceptions import AlreadyExists
+from google.cloud.firestore import Increment
 from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..firestore import get_db
+from ..rate_limit import rate_limit
 from ..services.email import send_email
 from ..subscriber_auth import create_cancel_token, verify_cancel_token
 
@@ -19,11 +20,27 @@ router = APIRouter(prefix="/api/subscribe")
 # Configure Stripe once at import time (thread-safe, no per-request mutation)
 stripe.api_key = settings.stripe_secret_key
 
-# Simple in-memory rate limiter (best-effort; use Redis for multi-instance enforcement)
-_rate_attempts: dict[str, list[float]] = defaultdict(list)
-_RATE_MAX_KEYS = 10_000  # evict all keys when exceeded to prevent memory leak
-CANCEL_RATE_LIMIT = 3  # max attempts
-CANCEL_RATE_WINDOW = 600  # 10 minutes
+# How stale a "processing" webhook-event reservation must be before we assume
+# the worker that created it crashed and it's safe to reclaim and reprocess.
+_STALE_RESERVATION_SECONDS = 120
+
+
+class WebhookProcessingError(Exception):
+    """Raised by _handle_* functions when a webhook can't be processed yet
+    (e.g. a referenced subscriber doc doesn't exist), so the caller re-raises
+    and Stripe retries with backoff."""
+
+
+async def _alert(subject: str, detail: str) -> None:
+    """Best-effort ops alert to settings.alert_email. Never raises — a failed
+    alert send must not mask or replace the original webhook error."""
+    if not settings.alert_email:
+        logger.warning("alert_email not configured, dropping alert: %s — %s", subject, detail)
+        return
+    try:
+        await send_email(settings.alert_email, f"[MadeForSeconds] {subject}", f"<p>{detail}</p>")
+    except Exception:
+        logger.exception("Failed to send alert email: %s", subject)
 
 
 def _sanitize(text: str, max_len: int) -> str:
@@ -35,17 +52,6 @@ def _sanitize(text: str, max_len: int) -> str:
     # Collapse multiple whitespace into single space
     text = re.sub(r"\s+", " ", text).strip()
     return text[:max_len]
-
-
-def _check_rate_limit(ip: str, limit: int = CANCEL_RATE_LIMIT, window: int = CANCEL_RATE_WINDOW) -> None:
-    now = time.time()
-    # Evict all keys if the dict grows too large (prevents memory leak from unique IPs)
-    if len(_rate_attempts) > _RATE_MAX_KEYS:
-        _rate_attempts.clear()
-    _rate_attempts[ip] = [t for t in _rate_attempts[ip] if now - t < window]
-    if len(_rate_attempts[ip]) >= limit:
-        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
-    _rate_attempts[ip].append(now)
 
 
 # ── Request/Response models ──────────────────────────────────────────────────
@@ -108,7 +114,11 @@ def _validate_redirect_url(url: str) -> None:
     raise HTTPException(status_code=400, detail="Invalid redirect URL")
 
 
-@router.post("/checkout", response_model=CheckoutResponse)
+@router.post(
+    "/checkout",
+    response_model=CheckoutResponse,
+    dependencies=[Depends(rate_limit("checkout", 20, 3600))],
+)
 async def create_checkout(body: CheckoutRequest):
     """Create a Stripe Checkout session for a subscription or one-time donation."""
 
@@ -191,47 +201,85 @@ async def stripe_webhook(request: Request):
     except stripe.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # Idempotency: skip events we've already processed
     event_id = event.get("id", "")
-    db = get_db()
-    if event_id:
-        existing = db.collection("processed_events").document(event_id).get()
-        if existing.exists:
-            logger.info(f"Skipping already-processed event: {event_id}")
-            return {"status": "ok"}
-
     event_type = event["type"]
     data = event["data"]["object"]
 
-    if event_type == "checkout.session.completed":
-        if data.get("mode") == "subscription":
-            await _handle_subscription_checkout(data)
-        elif data.get("mode") == "payment":
-            await _handle_donation_checkout(data)
+    db = get_db()
+    ref = db.collection("processed_events").document(event_id) if event_id else None
 
-    elif event_type == "customer.subscription.updated":
-        await _handle_subscription_updated(data)
+    # Idempotency: atomically reserve this event id before processing. create()
+    # raises AlreadyExists if another delivery (concurrent or a prior attempt)
+    # already holds the reservation — closes the check-then-act race that a
+    # separate read-then-write would have.
+    if ref is not None:
+        try:
+            ref.create({
+                "type": event_type,
+                "status": "processing",
+                "created_at": datetime.now(timezone.utc),
+            })
+        except AlreadyExists:
+            existing = ref.get().to_dict() or {}
+            status = existing.get("status")
+            created_at = existing.get("created_at")
+            age = (datetime.now(timezone.utc) - created_at).total_seconds() if created_at else None
 
-    elif event_type == "customer.subscription.deleted":
-        await _handle_subscription_deleted(data)
+            if status == "completed":
+                logger.info(f"Skipping already-processed event: {event_id}")
+                return {"status": "ok"}
+            if status == "processing" and age is not None and age < _STALE_RESERVATION_SECONDS:
+                logger.info(f"Event {event_id} already being processed (age={age:.0f}s), skipping duplicate delivery")
+                return {"status": "ok"}
+            # Stuck reservation (worker crashed before cleanup) — reclaim it.
+            logger.warning(f"Reclaiming stale reservation for event {event_id} (status={status}, age={age})")
+            ref.set({
+                "type": event_type,
+                "status": "processing",
+                "created_at": datetime.now(timezone.utc),
+            })
 
-    elif event_type == "invoice.payment_failed":
-        await _handle_payment_failed(data)
+    try:
+        if event_type == "checkout.session.completed":
+            if data.get("mode") == "subscription":
+                await _handle_subscription_checkout(data)
+            elif data.get("mode") == "payment":
+                await _handle_donation_checkout(data)
 
-    elif event_type == "invoice.payment_succeeded":
-        await _handle_payment_succeeded(data)
+        elif event_type == "customer.subscription.updated":
+            await _handle_subscription_updated(data)
 
-    # Mark event as processed for idempotency
-    if event_id:
-        db.collection("processed_events").document(event_id).set({
-            "type": event_type,
-            "processed_at": datetime.now(timezone.utc),
-        })
+        elif event_type == "customer.subscription.deleted":
+            await _handle_subscription_deleted(data)
+
+        elif event_type == "invoice.payment_failed":
+            await _handle_payment_failed(data)
+
+        elif event_type == "invoice.payment_succeeded":
+            await _handle_payment_succeeded(data)
+    except Exception as exc:
+        if ref is not None:
+            # Release the reservation so a legitimate Stripe retry can
+            # re-reserve and fully reprocess this event.
+            ref.delete()
+        logger.exception(f"Webhook handler failed for event {event_id} ({event_type})")
+        await _alert(
+            f"Webhook processing failed: {event_type}",
+            f"event_id={event_id}<br>error={exc}",
+        )
+        raise  # -> FastAPI 500 -> Stripe retries with backoff
+
+    if ref is not None:
+        ref.update({"status": "completed", "processed_at": datetime.now(timezone.utc)})
 
     return {"status": "ok"}
 
 
-@router.get("/session-info", response_model=SessionInfoResponse)
+@router.get(
+    "/session-info",
+    response_model=SessionInfoResponse,
+    dependencies=[Depends(rate_limit("session_info", 30, 600))],
+)
 async def get_session_info(session_id: str):
     """Get info about a completed Stripe checkout session (no auth required — session_id is the proof)."""
     try:
@@ -275,7 +323,11 @@ async def get_session_info(session_id: str):
     )
 
 
-@router.post("/setup-profile", response_model=SetupProfileResponse)
+@router.post(
+    "/setup-profile",
+    response_model=SetupProfileResponse,
+    dependencies=[Depends(rate_limit("setup_profile", 5, 600))],
+)
 async def setup_profile(body: SetupProfileRequest):
     """Set display name and note after payment. Uses Stripe session_id as proof — no login needed."""
     # Verify the session with Stripe
@@ -352,12 +404,9 @@ async def setup_profile(body: SetupProfileRequest):
     )
 
 
-@router.post("/cancel-request")
-async def cancel_request(body: CancelRequest, request: Request):
+@router.post("/cancel-request", dependencies=[Depends(rate_limit("cancel_request", 3, 600))])
+async def cancel_request(body: CancelRequest):
     """Request subscription cancellation. Sends a confirmation email."""
-    ip = request.client.host if request.client else "unknown"
-    _check_rate_limit(ip)
-
     email = body.email.strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
@@ -401,7 +450,7 @@ async def cancel_request(body: CancelRequest, request: Request):
     return generic_msg
 
 
-@router.post("/cancel-confirm")
+@router.post("/cancel-confirm", dependencies=[Depends(rate_limit("cancel_confirm", 5, 600))])
 async def cancel_confirm(body: CancelConfirmRequest):
     """Confirm subscription cancellation using a signed token from email."""
     email = verify_cancel_token(body.token)
@@ -483,6 +532,12 @@ async def _handle_subscription_checkout(data: dict) -> None:
 
     if not email:
         logger.warning("Subscription checkout missing email")
+        await _alert(
+            "Subscription checkout missing email",
+            f"customer={customer_id}<br>subscription={subscription_id}<br>"
+            "Stripe never captured an email for this checkout — retrying won't add one; "
+            "needs manual reconciliation in the Stripe dashboard.",
+        )
         return
 
     db = get_db()
@@ -505,10 +560,7 @@ async def _handle_subscription_checkout(data: dict) -> None:
     }
 
     if existing_doc:
-        # Keep existing total and add to it
-        existing_data = existing_doc.to_dict()
-        existing_total = existing_data.get("total_donated_cents", 0)
-        subscriber_data["total_donated_cents"] = existing_total + amount_total
+        subscriber_data["total_donated_cents"] = Increment(amount_total)
         db.collection("subscribers").document(existing_doc.id).update(subscriber_data)
         logger.info(f"Updated subscriber: {email}")
     else:
@@ -532,8 +584,7 @@ async def _handle_subscription_updated(data: dict) -> None:
     )
     doc = next(docs, None)
     if doc is None:
-        logger.warning(f"Subscription updated but no subscriber found: {subscription_id}")
-        return
+        raise WebhookProcessingError(f"Subscription updated but no subscriber found: {subscription_id}")
 
     update_data: dict = {
         "status": status,
@@ -561,7 +612,7 @@ async def _handle_subscription_deleted(data: dict) -> None:
     )
     doc = next(docs, None)
     if doc is None:
-        return
+        raise WebhookProcessingError(f"Subscription deleted but no subscriber found: {subscription_id}")
 
     db.collection("subscribers").document(doc.id).update({
         "status": "canceled",
@@ -585,7 +636,7 @@ async def _handle_payment_failed(data: dict) -> None:
     )
     doc = next(docs, None)
     if doc is None:
-        return
+        raise WebhookProcessingError(f"Payment failed but no subscriber found: {subscription_id}")
 
     db.collection("subscribers").document(doc.id).update({
         "status": "past_due",
@@ -621,13 +672,10 @@ async def _handle_payment_succeeded(data: dict) -> None:
     )
     doc = next(docs, None)
     if doc is None:
-        return
-
-    existing_data = doc.to_dict()
-    existing_total = existing_data.get("total_donated_cents", 0)
+        raise WebhookProcessingError(f"Payment succeeded but no subscriber found: {subscription_id}")
 
     db.collection("subscribers").document(doc.id).update({
-        "total_donated_cents": existing_total + amount_paid,
+        "total_donated_cents": Increment(amount_paid),
         "updated_at": datetime.now(timezone.utc),
     })
     logger.info(f"Payment succeeded for subscription {subscription_id}: +{amount_paid} cents")
@@ -655,15 +703,13 @@ async def _handle_donation_checkout(data: dict) -> None:
         )
         existing_doc = next(existing, None)
         if existing_doc:
-            existing_data = existing_doc.to_dict()
-            prev_total = existing_data.get("total_donated_cents", existing_data.get("amount_cents", 0))
             db.collection("donations").document(existing_doc.id).update({
-                "total_donated_cents": prev_total + amount_total,
+                "total_donated_cents": Increment(amount_total),
                 "last_donation_cents": amount_total,
                 "last_donated_at": now,
                 "updated_at": now,
             })
-            logger.info(f"Repeat donation: +{amount_total} cents from {email} (new total: {prev_total + amount_total})")
+            logger.info(f"Repeat donation: +{amount_total} cents from {email}")
             return
 
     db.collection("donations").add({

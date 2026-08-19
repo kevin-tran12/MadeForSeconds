@@ -88,6 +88,25 @@ class RedisCache:
         except Exception:
             pass
 
+    def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:
+        """Atomically increment a rate-limit counter and set its expiry once.
+
+        Bypasses _key()/_version() on purpose — rate-limit counters live outside
+        the content-cache versioning scheme, so cache.clear() (an admin content
+        mutation) must not reset them. Returns -1 on any backend error (sentinel
+        for "treat as unavailable"), never raises.
+        """
+        try:
+            raw_key = f"{self._NS}:rl:{key}"
+            count = self._r.incr(raw_key)
+            if count == 1:
+                # Only the request that created the key (guaranteed unique via
+                # INCR's atomicity) sets the TTL — no race, no NX flag needed.
+                self._r.expire(raw_key, ttl_seconds)
+            return count
+        except Exception:
+            return -1
+
 
 # ── In-memory fallback ─────────────────────────────────────────────────────────
 
@@ -97,6 +116,9 @@ class MemoryCache:
     def __init__(self, ttl: int) -> None:
         self._store: dict[str, tuple[Any, float]] = {}
         self._ttl = ttl
+        # Separate from _store on purpose — rate-limit counters must not be
+        # wiped by clear() (the content-cache invalidation hook).
+        self._counters: dict[str, tuple[int, float]] = {}
 
     def get(self, key: str) -> Optional[Any]:
         entry = self._store.get(key)
@@ -116,6 +138,16 @@ class MemoryCache:
 
     def clear(self) -> None:
         self._store.clear()
+
+    def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:
+        now = time.time()
+        entry = self._counters.get(key)
+        if entry is None or now >= entry[1]:
+            self._counters[key] = (1, now + ttl_seconds)
+            return 1
+        count = entry[0] + 1
+        self._counters[key] = (count, entry[1])
+        return count
 
 
 # ── Singleton ──────────────────────────────────────────────────────────────────

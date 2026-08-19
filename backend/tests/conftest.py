@@ -65,6 +65,18 @@ def cleanup_overrides():
     app.dependency_overrides.pop(require_totp_session, None)
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Rate-limit counters live in the same module-level cache singleton for
+    the whole test session, and TestClient requests all share one IP by
+    default — reset counters before each test so rate-limited routes don't
+    flake based on execution order/count across the suite."""
+    from app.cache import cache
+    if hasattr(cache, "_counters"):
+        cache._counters.clear()
+    yield
+
+
 @pytest.fixture
 def authenticated_client(client, mock_admin):
     """Provides a client that bypasses admin authentication and sets request.state.admin_email."""

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { subscriberApi } from '../lib/api'
 
@@ -13,11 +13,22 @@ export function SupportPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // One key per logical checkout attempt, regenerated only once the attempt
+  // settles (see finally below) — a double-click within one attempt reuses
+  // it, a later attempt with different params always gets a fresh one.
+  const idempotencyKeyRef = useRef(crypto.randomUUID())
+  // Checked/set synchronously so two rapid clicks can't both start a
+  // checkout before React re-renders with loading=true and disables the
+  // button — setLoading alone can't close that race.
+  const submittingRef = useRef(false)
+
   const amount = isCustom ? parseInt(custom) || 0 : selected
   const valid = amount >= 1 && amount <= 500
 
   async function doCheckout() {
     if (!valid) return
+    if (submittingRef.current) return
+    submittingRef.current = true
     setLoading(true)
     setError(null)
     try {
@@ -25,12 +36,15 @@ export function SupportPage() {
         amount * 100,
         `${window.location.origin}/support/success?session_id={CHECKOUT_SESSION_ID}`,
         window.location.href,
-        oneTime
+        oneTime,
+        idempotencyKeyRef.current
       )
       window.location.href = checkout_url
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
+      idempotencyKeyRef.current = crypto.randomUUID()
+      submittingRef.current = false
       setLoading(false)
       setShowConfirm(false)
     }

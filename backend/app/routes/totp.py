@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..auth import require_admin
+from ..rate_limit import rate_limit
 from ..totp import (
     clear_totp_config,
     create_session_token,
@@ -63,7 +64,7 @@ async def totp_confirm_setup(body: ConfirmSetupRequest, request: Request):
     return {"enabled": True, "token": token}
 
 
-@router.post("/verify")
+@router.post("/verify", dependencies=[Depends(rate_limit("totp_verify", 5, 900))])
 async def totp_verify(body: VerifyRequest, request: Request):
     """Verify a TOTP code and return a session token."""
     config = get_totp_config()
@@ -79,7 +80,7 @@ async def totp_verify(body: VerifyRequest, request: Request):
     return {"token": token}
 
 
-@router.post("/reset")
+@router.post("/reset", dependencies=[Depends(rate_limit("totp_reset", 5, 900))])
 async def totp_reset(body: VerifyRequest):
     """Clear TOTP configuration. Requires a valid code as confirmation."""
     config = get_totp_config()
