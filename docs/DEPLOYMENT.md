@@ -289,12 +289,21 @@ The project cannot quietly bill past `monthly_budget_amount` (default **$15**).
 |---|---|
 | Forecast to exceed 100% | Early-warning email — GCP projects month-end spend from run-rate, so this lands days before you actually cross. No shutdown. |
 | 50% / 80% actual | Warning emails. |
-| 100% actual | The `budget-killer` function scales `mfs-backend` to **0 instances**. The site goes down. A dedicated *"budget breaker TRIPPED"* alert fires — distinct from the generic uptime alert, so you know it was the breaker and not an outage. |
-| 1st of month, 08:00 UTC | The `budget-breaker-reset` scheduler job restores the service to 1 instance. Idempotent — a no-op in normal months. |
+| 100% actual | The `budget-killer` function **revokes public access** — it removes `allUsers` from the backend's `roles/run.invoker` binding. Visitors get 403, no instances start, request billing stops. A dedicated *"MFS site DOWN — budget cap hit"* CRITICAL alert fires, distinct from the generic uptime alert, so you know it was the breaker and not an outage. |
+| 1st of month, 08:00 UTC | The `budget-breaker-reset` scheduler job re-adds `allUsers`. Idempotent — a no-op in normal months. |
 
-Only Cloud Run is scaled down. Firestore, GCS, and egress keep billing, but at
-this scale they are cents. The breaker deliberately does **not** detach the
-billing account.
+Only public request traffic is stopped. Firestore, GCS, and egress keep billing,
+but at this scale they are cents. The breaker deliberately does **not** detach
+the billing account.
+
+> **Why not scale to zero?** In Cloud Run v2, `max_instance_count = 0` is
+> proto3's default, so it serializes as *unset* and the API applies its default
+> cap instead. It does not stop the service — in this project it silently raised
+> the cap from 1 to 20, so a "kill" would have increased spend exposure 20×.
+> There is no value of `max_instance_count` meaning "serve nothing". Revoking the
+> invoker binding is also a single `setIamPolicy` call, so it creates no revision
+> and avoids the image-resolution and `actAs` permission chain that a service
+> update requires.
 
 Recover early, without waiting for the 1st:
 

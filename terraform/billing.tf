@@ -103,12 +103,24 @@ resource "google_service_account" "budget_killer" {
   display_name = "Budget Killer Cloud Function"
 }
 
-# Grant permission to update the Cloud Run service (scale to 0)
+# The breaker trips by revoking the service's public invoker binding, which needs
+# getIamPolicy/setIamPolicy on the service — run.developer does not include
+# setIamPolicy, so this is run.admin, scoped to the one service.
+#
+# This replaces an earlier design that called update_service to set
+# max_instance_count = 0. That required run.developer on the service *plus*
+# artifactregistry.reader on the image repo (the API re-resolves the image
+# against the caller) *plus* iam.serviceAccountUser on the runtime SA (the
+# service runs as it) *plus* run.operations.get to poll the result. Every one of
+# those was missing, surfaced one at a time, and each produced the same silent
+# failure: the breaker logged success, emailed, and changed nothing. Worse, the
+# mechanism itself did not work — see the module docstring in
+# billing_function/main.py. Revoking invoker needs exactly this one grant.
 resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
   project  = var.gcp_project_id
   location = var.gcp_region
   name     = google_cloud_run_v2_service.backend.name
-  role     = "roles/run.developer"
+  role     = "roles/run.admin"
   member   = "serviceAccount:${google_service_account.budget_killer.email}"
 }
 
@@ -289,12 +301,19 @@ resource "google_service_account_iam_member" "scheduler_mints_budget_killer_oidc
 # without knowing why it tripped.
 
 resource "google_monitoring_alert_policy" "budget_breaker_tripped" {
-  project      = var.gcp_project_id
-  display_name = "MFS budget breaker TRIPPED — backend scaled to 0"
+  project = var.gcp_project_id
+
+  # GCP composes the notification subject as
+  #   [ALERT - <severity>] <display_name> for <resource> with {<labels>}
+  # The resource/label suffix is not suppressible, so keep display_name short —
+  # a long one pushes the meaning off the end of a phone notification. Setting
+  # severity replaces the default "[ALERT - No severity]" prefix.
+  display_name = "MFS site DOWN — budget cap hit"
+  severity     = "CRITICAL"
   combiner     = "OR"
 
   conditions {
-    display_name = "budget-killer scaled Cloud Run to zero"
+    display_name = "Budget breaker scaled the backend to zero"
 
     # Gen2 functions log under cloud_run_revision, not cloud_function.
     # Marker string is defined as TRIPPED_MARKER in billing_function/main.py.
