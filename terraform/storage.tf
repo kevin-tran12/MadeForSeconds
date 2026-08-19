@@ -24,10 +24,21 @@ resource "google_storage_bucket" "images" {
   }
 }
 
-# Grant public read access to all objects in the bucket
+# Grant anonymous READ of individual objects — but not the ability to list them.
+#
+# This was roles/storage.objectViewer, which also carries storage.objects.list.
+# Anyone could walk the whole bucket: `GET /storage/v1/b/<bucket>/o` returned 200
+# and enumerated every object, including images belonging to unpublished draft
+# recipes that are not linked from anywhere public.
+#
+# legacyObjectReader is the narrower grant: storage.objects.get without .list.
+# The bucket stays genuinely public, which is deliberate — signed URLs would
+# expire, so they could not be edge-cached or shared, every page load would need
+# the backend to mint one, and crawlers could not fetch them at all, which breaks
+# OG previews and the RecipeSchema JSON-LD.
 resource "google_storage_bucket_iam_member" "public_read" {
   bucket = google_storage_bucket.images.name
-  role   = "roles/storage.objectViewer"
+  role   = "roles/storage.legacyObjectReader"
   member = "allUsers"
 }
 
