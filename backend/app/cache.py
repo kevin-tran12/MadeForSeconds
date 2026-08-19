@@ -32,6 +32,18 @@ def _loads(raw: str) -> Any:
     return json.loads(raw)
 
 
+# INCR then EXPIRE as two round-trips would leave a key with no TTL forever
+# if the connection drops between them — evaluated as one Lua script instead,
+# so it either fully applies or fully doesn't.
+_INCR_WITH_TTL_LUA = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
+
+
 # ── Redis backend ──────────────────────────────────────────────────────────────
 
 class RedisCache:
@@ -55,6 +67,7 @@ class RedisCache:
             socket_timeout=2,
         )
         self._ttl = ttl
+        self._incr_with_ttl_script = self._r.register_script(_INCR_WITH_TTL_LUA)
 
     def _version(self) -> str:
         return self._r.get(f"{self._NS}:version") or "1"
@@ -98,17 +111,15 @@ class RedisCache:
         """
         try:
             raw_key = f"{self._NS}:rl:{key}"
-            count = self._r.incr(raw_key)
-            if count == 1:
-                # Only the request that created the key (guaranteed unique via
-                # INCR's atomicity) sets the TTL — no race, no NX flag needed.
-                self._r.expire(raw_key, ttl_seconds)
-            return count
+            return self._incr_with_ttl_script(keys=[raw_key], args=[ttl_seconds])
         except Exception:
             return -1
 
 
 # ── In-memory fallback ─────────────────────────────────────────────────────────
+
+_MAX_COUNTERS = 10_000  # evict expired (or, failing that, all) entries above this
+
 
 class MemoryCache:
     """Single-instance in-memory cache used when Redis is unavailable."""
@@ -143,6 +154,14 @@ class MemoryCache:
         now = time.time()
         entry = self._counters.get(key)
         if entry is None or now >= entry[1]:
+            if len(self._counters) > _MAX_COUNTERS:
+                # Traffic from many distinct IPs would otherwise leak memory
+                # forever, since an expired entry is only cleaned up when its
+                # exact key recurs. Prune expired entries first; if that's
+                # not enough, evict everything rather than grow unbounded.
+                self._counters = {k: v for k, v in self._counters.items() if now < v[1]}
+                if len(self._counters) > _MAX_COUNTERS:
+                    self._counters.clear()
             self._counters[key] = (1, now + ttl_seconds)
             return 1
         count = entry[0] + 1

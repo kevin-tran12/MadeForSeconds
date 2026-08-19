@@ -14,6 +14,23 @@ from .cache import cache
 logger = logging.getLogger(__name__)
 
 
+def _client_ip(request: Request) -> str:
+    """Best-effort real client IP.
+
+    On Cloud Run, request.client.host is the ASGI-level socket peer — the
+    Google Front End hop, not the visitor — so keying on it alone would
+    collapse every user into one shared rate-limit bucket. Cloud Run's
+    ingress can't be bypassed (there is no path to the container that skips
+    the GFE hop that sets this header), so the leftmost X-Forwarded-For
+    entry is trustworthy here. Falls back to the socket peer for local dev
+    and tests, where no such header is present.
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()[:100]
+    return request.client.host if request.client else "unknown"
+
+
 def rate_limit(name: str, limit: int, window_seconds: int):
     """FastAPI dependency factory: `limit` requests per `window_seconds` per client IP.
 
@@ -21,7 +38,7 @@ def rate_limit(name: str, limit: int, window_seconds: int):
     """
 
     async def _dependency(request: Request) -> None:
-        ip = request.client.host if request.client else "unknown"
+        ip = _client_ip(request)
         count = cache.incr_with_ttl(f"{name}:{ip}", window_seconds)
         if count <= 0:
             # incr_with_ttl returns -1 when the backend errored — fail open.

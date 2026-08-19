@@ -2,11 +2,11 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
-from app.cache import MemoryCache, RedisCache
-from app.rate_limit import rate_limit
+from app.cache import MemoryCache, RedisCache, _MAX_COUNTERS
+from app.rate_limit import _client_ip, rate_limit
 
 
 # ── cache.incr_with_ttl ──────────────────────────────────────────────────────
@@ -37,27 +37,64 @@ def test_incr_with_ttl_memory_does_not_clear_on_cache_clear():
     assert cache.incr_with_ttl("k", 60) == 3
 
 
-def test_incr_with_ttl_redis_increments_and_sets_expire_once():
+def test_incr_with_ttl_redis_calls_registered_script_atomically():
+    """INCR+EXPIRE run as one Lua script (single round-trip), not two separate
+    calls — a dropped connection between two separate calls could otherwise
+    leave a key with no TTL, stuck over its limit forever."""
     cache = RedisCache.__new__(RedisCache)
     cache._NS = "mfs"
-    cache._r = MagicMock()
-    cache._r.incr.return_value = 1
+    cache._incr_with_ttl_script = MagicMock(return_value=1)
     assert cache.incr_with_ttl("checkout:1.2.3.4", 60) == 1
-    cache._r.incr.assert_called_once_with("mfs:rl:checkout:1.2.3.4")
-    cache._r.expire.assert_called_once_with("mfs:rl:checkout:1.2.3.4", 60)
-
-    cache._r.incr.return_value = 2
-    assert cache.incr_with_ttl("checkout:1.2.3.4", 60) == 2
-    # expire is only set on the first increment, not subsequent ones
-    cache._r.expire.assert_called_once()
+    cache._incr_with_ttl_script.assert_called_once_with(keys=["mfs:rl:checkout:1.2.3.4"], args=[60])
 
 
 def test_incr_with_ttl_redis_returns_negative_one_on_error():
     cache = RedisCache.__new__(RedisCache)
     cache._NS = "mfs"
-    cache._r = MagicMock()
-    cache._r.incr.side_effect = Exception("connection refused")
+    cache._incr_with_ttl_script = MagicMock(side_effect=Exception("connection refused"))
     assert cache.incr_with_ttl("k", 60) == -1
+
+
+def test_redis_cache_init_registers_incr_with_ttl_script():
+    with patch("redis.from_url") as mock_from_url:
+        mock_client = MagicMock()
+        mock_from_url.return_value = mock_client
+        RedisCache("redis://localhost:6379", ttl=100)
+        mock_client.register_script.assert_called_once()
+        script_text = mock_client.register_script.call_args[0][0]
+        assert "INCR" in script_text and "EXPIRE" in script_text
+
+
+# ── MemoryCache counter bound (mirrors the old limiter's key cap) ───────────
+
+def test_memory_cache_evicts_when_over_max_counters():
+    cache = MemoryCache(ttl=86_400)
+    for i in range(_MAX_COUNTERS + 1):
+        cache.incr_with_ttl(f"k{i}", 86_400)
+    assert len(cache._counters) == _MAX_COUNTERS + 1
+
+    # Next insert is over the cap; nothing has expired, so it clears entirely
+    # rather than growing further, instead of leaking memory forever.
+    cache.incr_with_ttl("trigger", 86_400)
+    assert len(cache._counters) == 1
+
+
+# ── _client_ip (Cloud Run: request.client.host is the GFE hop, not the visitor) ──
+
+def _make_request(headers=None, client_host="10.0.0.1"):
+    raw_headers = [(k.lower().encode(), v.encode()) for k, v in (headers or [])]
+    scope = {"type": "http", "headers": raw_headers, "client": (client_host, 1234)}
+    return Request(scope)
+
+
+def test_client_ip_prefers_leftmost_x_forwarded_for():
+    request = _make_request(headers=[("X-Forwarded-For", "5.6.7.8, 9.9.9.9")], client_host="10.0.0.1")
+    assert _client_ip(request) == "5.6.7.8"
+
+
+def test_client_ip_falls_back_to_socket_peer_without_header():
+    request = _make_request(headers=[], client_host="10.0.0.1")
+    assert _client_ip(request) == "10.0.0.1"
 
 
 # ── rate_limit dependency ────────────────────────────────────────────────────
@@ -94,3 +131,17 @@ def test_rate_limit_dependency_fails_open_on_backend_error(rl_app):
         with TestClient(rl_app) as client:
             for _ in range(5):
                 assert client.get("/limited").status_code == 200
+
+
+def test_rate_limit_dependency_buckets_by_x_forwarded_for(rl_app):
+    """Regression test: on Cloud Run, request.client.host is the GFE hop, not
+    the visitor — two different visitors must not share one bucket, and one
+    visitor's traffic must not block everyone else's."""
+    with TestClient(rl_app) as client:
+        for _ in range(2):
+            assert client.get("/limited", headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 200
+        assert client.get("/limited", headers={"X-Forwarded-For": "1.1.1.1"}).status_code == 429
+
+        # A different forwarded client is an independent bucket, not blocked
+        # by the first client's traffic.
+        assert client.get("/limited", headers={"X-Forwarded-For": "2.2.2.2"}).status_code == 200

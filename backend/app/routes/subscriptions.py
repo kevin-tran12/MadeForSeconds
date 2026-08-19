@@ -4,8 +4,7 @@ from datetime import datetime, timezone
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
-from google.api_core.exceptions import AlreadyExists
-from google.cloud.firestore import Increment
+from google.cloud.firestore import Increment, transactional
 from pydantic import BaseModel, Field
 
 from ..config import settings
@@ -29,6 +28,39 @@ class WebhookProcessingError(Exception):
     """Raised by _handle_* functions when a webhook can't be processed yet
     (e.g. a referenced subscriber doc doesn't exist), so the caller re-raises
     and Stripe retries with backoff."""
+
+
+def _reserve_event_logic(transaction, ref, event_type: str) -> str:
+    """Decide whether this webhook event should be processed, and if so,
+    write the reservation. Split out from _reserve_event (below) as a plain
+    function so the decision logic is directly unit-testable without going
+    through Firestore's transaction-retry machinery.
+
+    Returns "reserved" (caller should process the event) or "skip".
+    """
+    snapshot = ref.get(transaction=transaction)
+    now = datetime.now(timezone.utc)
+    if snapshot.exists:
+        data = snapshot.to_dict() or {}
+        status = data.get("status")
+        created_at = data.get("created_at")
+        age = (now - created_at).total_seconds() if created_at else None
+        if status == "completed":
+            return "skip"
+        if status == "processing" and age is not None and age < _STALE_RESERVATION_SECONDS:
+            return "skip"
+        # Stuck reservation (worker crashed before cleanup) — reclaim it.
+    transaction.set(ref, {"type": event_type, "status": "processing", "created_at": now})
+    return "reserved"
+
+
+# The read-and-conditionally-write above runs inside one Firestore
+# transaction, so two concurrent deliveries of the same (possibly stale)
+# event can't both win the reservation — Firestore's optimistic concurrency
+# lets only one transaction touching this doc commit; the other is retried
+# automatically by the client library and will see the winner's fresh
+# reservation on its retry.
+_reserve_event = transactional(_reserve_event_logic)
 
 
 async def _alert(subject: str, detail: str) -> None:
@@ -208,36 +240,15 @@ async def stripe_webhook(request: Request):
     db = get_db()
     ref = db.collection("processed_events").document(event_id) if event_id else None
 
-    # Idempotency: atomically reserve this event id before processing. create()
-    # raises AlreadyExists if another delivery (concurrent or a prior attempt)
-    # already holds the reservation — closes the check-then-act race that a
-    # separate read-then-write would have.
+    # Idempotency: atomically reserve this event id before processing. The
+    # read-and-conditionally-write happens inside one Firestore transaction,
+    # so two concurrent deliveries (or a concurrent delivery plus a stale
+    # crashed reservation) can't both win — see _reserve_event's docstring.
     if ref is not None:
-        try:
-            ref.create({
-                "type": event_type,
-                "status": "processing",
-                "created_at": datetime.now(timezone.utc),
-            })
-        except AlreadyExists:
-            existing = ref.get().to_dict() or {}
-            status = existing.get("status")
-            created_at = existing.get("created_at")
-            age = (datetime.now(timezone.utc) - created_at).total_seconds() if created_at else None
-
-            if status == "completed":
-                logger.info(f"Skipping already-processed event: {event_id}")
-                return {"status": "ok"}
-            if status == "processing" and age is not None and age < _STALE_RESERVATION_SECONDS:
-                logger.info(f"Event {event_id} already being processed (age={age:.0f}s), skipping duplicate delivery")
-                return {"status": "ok"}
-            # Stuck reservation (worker crashed before cleanup) — reclaim it.
-            logger.warning(f"Reclaiming stale reservation for event {event_id} (status={status}, age={age})")
-            ref.set({
-                "type": event_type,
-                "status": "processing",
-                "created_at": datetime.now(timezone.utc),
-            })
+        outcome = _reserve_event(db.transaction(), ref, event_type)
+        if outcome == "skip":
+            logger.info(f"Skipping event {event_id} (already processed or in flight)")
+            return {"status": "ok"}
 
     try:
         if event_type == "checkout.session.completed":

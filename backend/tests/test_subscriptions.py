@@ -2,7 +2,6 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timedelta, timezone
 import stripe
-from google.api_core.exceptions import AlreadyExists
 from google.cloud.firestore import Increment
 from app.routes.subscriptions import WebhookProcessingError
 
@@ -15,6 +14,16 @@ def mock_stripe_settings():
         mock_settings.stripe_webhook_secret = "whsec_123"
         mock_settings.frontend_url = "https://madeforseconds.com"
         yield mock_settings
+
+@pytest.fixture
+def mock_reserve_event():
+    """Patches the webhook idempotency reservation to skip the real Firestore
+    transactional machinery entirely — that machinery is covered by direct
+    unit tests of _reserve_event_logic instead (see below). Defaults to
+    "reserved" (dispatch proceeds); tests exercising the dedup path override
+    .return_value to "skip"."""
+    with patch("app.routes.subscriptions._reserve_event", return_value="reserved") as mock:
+        yield mock
 
 def test_create_checkout_subscription(client, mock_stripe):
     """Verifies Stripe session creation for recurring mode."""
@@ -63,7 +72,7 @@ def test_create_checkout_invalid_amount(client):
     response = client.post("/api/subscribe/checkout", json=payload)
     assert response.status_code == 400
 
-def test_webhook_checkout_completed_subscription(client, mock_db, mock_stripe):
+def test_webhook_checkout_completed_subscription(client, mock_db, mock_stripe, mock_reserve_event):
     """Verifies that a completed subscription checkout creates/updates a subscriber."""
     # Mock stripe.Webhook.construct_event
     with patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct:
@@ -80,13 +89,10 @@ def test_webhook_checkout_completed_subscription(client, mock_db, mock_stripe):
                 }
             }
         }
-        
-        # Idempotency check: event does not exist
-        mock_db.collection.return_value.document.return_value.get.return_value.exists = False
-        
+
         # Subscriber lookup: does not exist
         mock_db.collection.return_value.where.return_value.limit.return_value.stream.return_value = iter([])
-        
+
         response = client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
         assert response.status_code == 200
         
@@ -231,52 +237,86 @@ def _subscription_checkout_event(event_id="evt_1", email="test@example.com", amo
     }
 
 
-def test_webhook_duplicate_completed_event_skipped(client, mock_db, mock_stripe):
-    """A redelivered event whose reservation is already 'completed' is skipped entirely."""
+class FakeSnapshot:
+    def __init__(self, exists, data=None):
+        self.exists = exists
+        self._data = data or {}
+
+    def to_dict(self):
+        return self._data
+
+
+class FakeTransaction:
+    """Minimal stand-in for a Firestore Transaction — just records .set() calls."""
+    def __init__(self):
+        self.set_calls = []
+
+    def set(self, ref, data):
+        self.set_calls.append((ref, data))
+
+
+class FakeRef:
+    def __init__(self, snapshot):
+        self._snapshot = snapshot
+
+    def get(self, transaction=None):
+        return self._snapshot
+
+
+# ── _reserve_event_logic (direct unit tests — no Firestore SDK involved) ────
+
+def test_reserve_event_logic_absent_doc_reserves():
+    from app.routes.subscriptions import _reserve_event_logic
+    txn = FakeTransaction()
+    ref = FakeRef(FakeSnapshot(exists=False))
+    assert _reserve_event_logic(txn, ref, "checkout.session.completed") == "reserved"
+    assert txn.set_calls[0][1]["status"] == "processing"
+
+
+def test_reserve_event_logic_completed_skips():
+    from app.routes.subscriptions import _reserve_event_logic
+    txn = FakeTransaction()
+    ref = FakeRef(FakeSnapshot(exists=True, data={"status": "completed"}))
+    assert _reserve_event_logic(txn, ref, "checkout.session.completed") == "skip"
+    assert txn.set_calls == []
+
+
+def test_reserve_event_logic_fresh_processing_skips():
+    from app.routes.subscriptions import _reserve_event_logic
+    txn = FakeTransaction()
+    ref = FakeRef(FakeSnapshot(exists=True, data={
+        "status": "processing",
+        "created_at": datetime.now(timezone.utc),
+    }))
+    assert _reserve_event_logic(txn, ref, "checkout.session.completed") == "skip"
+    assert txn.set_calls == []
+
+
+def test_reserve_event_logic_stale_processing_reclaims():
+    from app.routes.subscriptions import _reserve_event_logic
+    txn = FakeTransaction()
+    ref = FakeRef(FakeSnapshot(exists=True, data={
+        "status": "processing",
+        "created_at": datetime.now(timezone.utc) - timedelta(seconds=200),
+    }))
+    assert _reserve_event_logic(txn, ref, "checkout.session.completed") == "reserved"
+    assert txn.set_calls[0][1]["status"] == "processing"
+
+
+# ── Webhook route wiring (idempotency machinery patched via mock_reserve_event) ──
+
+def test_webhook_skipped_event_does_not_dispatch(client, mock_db, mock_stripe, mock_reserve_event):
+    """When the reservation says 'skip', the route returns 200 without touching handlers."""
+    mock_reserve_event.return_value = "skip"
     with patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct:
         mock_construct.return_value = _subscription_checkout_event()
-        mock_db.collection.return_value.document.return_value.create.side_effect = AlreadyExists("dup")
-        mock_db.collection.return_value.document.return_value.get.return_value.to_dict.return_value = {
-            "status": "completed"
-        }
 
         response = client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
         assert response.status_code == 200
         mock_db.collection.return_value.add.assert_not_called()
 
 
-def test_webhook_fresh_processing_reservation_skipped(client, mock_db, mock_stripe):
-    """A concurrent delivery of the same event, still within the reservation, is skipped."""
-    with patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct:
-        mock_construct.return_value = _subscription_checkout_event()
-        mock_db.collection.return_value.document.return_value.create.side_effect = AlreadyExists("dup")
-        mock_db.collection.return_value.document.return_value.get.return_value.to_dict.return_value = {
-            "status": "processing",
-            "created_at": datetime.now(timezone.utc),
-        }
-
-        response = client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
-        assert response.status_code == 200
-        mock_db.collection.return_value.add.assert_not_called()
-
-
-def test_webhook_stale_processing_reservation_reclaimed_and_reprocessed(client, mock_db, mock_stripe):
-    """A reservation stuck in 'processing' past the staleness window is reclaimed and reprocessed."""
-    with patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct:
-        mock_construct.return_value = _subscription_checkout_event()
-        mock_db.collection.return_value.document.return_value.create.side_effect = AlreadyExists("dup")
-        mock_db.collection.return_value.document.return_value.get.return_value.to_dict.return_value = {
-            "status": "processing",
-            "created_at": datetime.now(timezone.utc) - timedelta(seconds=200),
-        }
-        mock_db.collection.return_value.where.return_value.limit.return_value.stream.return_value = iter([])
-
-        response = client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
-        assert response.status_code == 200
-        mock_db.collection.return_value.add.assert_called_once()
-
-
-def test_webhook_handler_exception_deletes_reservation_and_alerts(client, mock_db, mock_stripe):
+def test_webhook_handler_exception_deletes_reservation_and_alerts(client, mock_db, mock_stripe, mock_reserve_event):
     """A failing handler releases the reservation (so Stripe's retry can reprocess),
     alerts, and re-raises (-> FastAPI 500 -> Stripe retries with backoff).
 
@@ -301,7 +341,7 @@ def test_webhook_handler_exception_deletes_reservation_and_alerts(client, mock_d
 
 # ── Silent-loss paths ─────────────────────────────────────────────────────────
 
-def test_subscription_checkout_missing_email_alerts_and_returns_200(client, mock_db, mock_stripe):
+def test_subscription_checkout_missing_email_alerts_and_returns_200(client, mock_db, mock_stripe, mock_reserve_event):
     with (
         patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct,
         patch("app.routes.subscriptions._alert") as mock_alert,
@@ -330,7 +370,7 @@ def test_subscription_checkout_missing_email_alerts_and_returns_200(client, mock
         ),
     ],
 )
-def test_webhook_event_with_no_matching_subscriber_raises(client, mock_db, mock_stripe, event_type, data):
+def test_webhook_event_with_no_matching_subscriber_raises(client, mock_db, mock_stripe, mock_reserve_event, event_type, data):
     """Event-ordering races (e.g. .updated arriving before checkout.session.completed
     finishes) must force a Stripe retry rather than silently drop the event."""
     with (
@@ -353,7 +393,7 @@ def test_webhook_event_with_no_matching_subscriber_raises(client, mock_db, mock_
 
 # ── Safe amount accumulation (Increment, not read-then-write) ────────────────
 
-def test_subscription_checkout_existing_subscriber_uses_increment(client, mock_db, mock_stripe):
+def test_subscription_checkout_existing_subscriber_uses_increment(client, mock_db, mock_stripe, mock_reserve_event):
     with patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct:
         mock_construct.return_value = _subscription_checkout_event(amount_total=500)
         existing_doc = MagicMock()
@@ -373,7 +413,7 @@ def test_subscription_checkout_existing_subscriber_uses_increment(client, mock_d
         assert isinstance(amount_updates[0], Increment)
 
 
-def test_payment_succeeded_uses_increment(client, mock_db, mock_stripe):
+def test_payment_succeeded_uses_increment(client, mock_db, mock_stripe, mock_reserve_event):
     with patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct:
         mock_construct.return_value = {
             "id": "evt_pay",
@@ -397,7 +437,7 @@ def test_payment_succeeded_uses_increment(client, mock_db, mock_stripe):
         assert isinstance(amount_updates[0], Increment)
 
 
-def test_donation_checkout_repeat_donor_uses_increment(client, mock_db, mock_stripe):
+def test_donation_checkout_repeat_donor_uses_increment(client, mock_db, mock_stripe, mock_reserve_event):
     with patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct:
         mock_construct.return_value = {
             "id": "evt_don",
@@ -428,7 +468,7 @@ def test_donation_checkout_repeat_donor_uses_increment(client, mock_db, mock_str
         assert isinstance(amount_updates[0], Increment)
 
 
-def test_donation_checkout_new_anonymous_donor_creates_doc(client, mock_db, mock_stripe):
+def test_donation_checkout_new_anonymous_donor_creates_doc(client, mock_db, mock_stripe, mock_reserve_event):
     """One-time donation with no email — previously-untested event shape."""
     with patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct:
         mock_construct.return_value = {
