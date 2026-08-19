@@ -1,15 +1,15 @@
 import logging
 import re
-import time
-from collections import defaultdict
 from datetime import datetime, timezone
 
 import stripe
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from google.cloud.firestore import Increment, transactional
 from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..firestore import get_db
+from ..rate_limit import rate_limit
 from ..services.email import send_email
 from ..subscriber_auth import create_cancel_token, verify_cancel_token
 
@@ -19,11 +19,259 @@ router = APIRouter(prefix="/api/subscribe")
 # Configure Stripe once at import time (thread-safe, no per-request mutation)
 stripe.api_key = settings.stripe_secret_key
 
-# Simple in-memory rate limiter (best-effort; use Redis for multi-instance enforcement)
-_rate_attempts: dict[str, list[float]] = defaultdict(list)
-_RATE_MAX_KEYS = 10_000  # evict all keys when exceeded to prevent memory leak
-CANCEL_RATE_LIMIT = 3  # max attempts
-CANCEL_RATE_WINDOW = 600  # 10 minutes
+# How stale a "processing" webhook-event reservation must be before we assume
+# the worker that created it crashed and it's safe to reclaim and reprocess.
+_STALE_RESERVATION_SECONDS = 120
+
+
+class WebhookProcessingError(Exception):
+    """Raised by _apply_* functions when a webhook can't be processed yet
+    (e.g. a referenced subscriber doc doesn't exist), aborting the
+    transaction so the caller re-raises and Stripe retries with backoff."""
+
+
+def _read_existing_doc(transaction, db, event_type: str, data: dict):
+    """Read phase: the one query a given event type needs, if any (pure
+    read — part of the transaction's read set, must happen before any
+    writes). Returns a DocumentSnapshot or None."""
+    if event_type == "checkout.session.completed":
+        email = (data.get("customer_details") or {}).get("email", "").lower()
+        if not email:
+            return None
+        collection = "subscribers" if data.get("mode") == "subscription" else "donations"
+        docs = list(
+            db.collection(collection).where("email", "==", email).limit(1).stream(transaction=transaction)
+        )
+        return docs[0] if docs else None
+
+    if event_type in (
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+        "invoice.payment_failed",
+        "invoice.payment_succeeded",
+    ):
+        subscription_id = (
+            data.get("id") if event_type.startswith("customer.subscription") else data.get("subscription")
+        )
+        if not subscription_id:
+            return None
+        docs = list(
+            db.collection("subscribers")
+            .where("stripe_subscription_id", "==", subscription_id)
+            .limit(1)
+            .stream(transaction=transaction)
+        )
+        return docs[0] if docs else None
+
+    return None
+
+
+def _apply_subscription_checkout(transaction, db, data: dict, existing_doc, now) -> str:
+    customer_id = data.get("customer")
+    subscription_id = data.get("subscription")
+    email = (data.get("customer_details") or {}).get("email", "").lower()
+    amount_total = data.get("amount_total", 0)
+
+    if not email:
+        return "missing_email"
+
+    subscriber_data = {
+        "email": email,
+        "stripe_customer_id": customer_id,
+        "stripe_subscription_id": subscription_id,
+        "status": "active",
+        "total_donated_cents": amount_total,
+        "updated_at": now,
+    }
+
+    if existing_doc:
+        subscriber_data["total_donated_cents"] = Increment(amount_total)
+        transaction.update(existing_doc.reference, subscriber_data)
+        logger.info(f"Updated subscriber: {email}")
+    else:
+        subscriber_data["created_at"] = now
+        new_ref = db.collection("subscribers").document()
+        transaction.set(new_ref, subscriber_data)
+        logger.info(f"Created subscriber: {email}")
+    return "processed"
+
+
+def _apply_subscription_updated(transaction, data: dict, existing_doc, now) -> str:
+    subscription_id = data.get("id")
+    status = data.get("status")
+    current_period_end = data.get("current_period_end")
+
+    if existing_doc is None:
+        raise WebhookProcessingError(f"Subscription updated but no subscriber found: {subscription_id}")
+
+    update_data: dict = {"status": status, "updated_at": now}
+    if current_period_end:
+        update_data["current_period_end"] = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
+
+    transaction.update(existing_doc.reference, update_data)
+    logger.info(f"Subscription {subscription_id} updated to status: {status}")
+    return "processed"
+
+
+def _apply_subscription_deleted(transaction, data: dict, existing_doc, now) -> str:
+    subscription_id = data.get("id")
+    if existing_doc is None:
+        raise WebhookProcessingError(f"Subscription deleted but no subscriber found: {subscription_id}")
+
+    transaction.update(existing_doc.reference, {"status": "canceled", "updated_at": now})
+    logger.info(f"Subscription canceled: {subscription_id}")
+    return "processed"
+
+
+def _apply_payment_failed(transaction, data: dict, existing_doc, now) -> str:
+    subscription_id = data.get("subscription")
+    if not subscription_id:
+        return "ignored"
+    if existing_doc is None:
+        raise WebhookProcessingError(f"Payment failed but no subscriber found: {subscription_id}")
+
+    transaction.update(existing_doc.reference, {"status": "past_due", "updated_at": now})
+    logger.info(f"Payment failed for subscription: {subscription_id}")
+    return "processed"
+
+
+def _apply_payment_succeeded(transaction, data: dict, existing_doc, now) -> str:
+    """Handle invoice.payment_succeeded — increment total_donated_cents for recurring payments.
+
+    Skips the initial subscription invoice (billing_reason=subscription_create) because
+    that amount is already recorded by _apply_subscription_checkout.
+    """
+    subscription_id = data.get("subscription")
+    amount_paid = data.get("amount_paid", 0)  # in cents
+    billing_reason = data.get("billing_reason", "")
+
+    if not subscription_id or not amount_paid:
+        return "ignored"
+    if billing_reason == "subscription_create":
+        logger.info(f"Skipping initial invoice for subscription {subscription_id} (already counted at checkout)")
+        return "ignored"
+    if existing_doc is None:
+        raise WebhookProcessingError(f"Payment succeeded but no subscriber found: {subscription_id}")
+
+    transaction.update(existing_doc.reference, {
+        "total_donated_cents": Increment(amount_paid),
+        "updated_at": now,
+    })
+    logger.info(f"Payment succeeded for subscription {subscription_id}: +{amount_paid} cents")
+    return "processed"
+
+
+def _apply_donation_checkout(transaction, db, data: dict, existing_doc, now) -> str:
+    """Handle checkout.session.completed for one-time donation payments.
+
+    Consolidates by email — repeat donors get their total accumulated on one doc.
+    """
+    email = (data.get("customer_details") or {}).get("email", "").lower()
+    amount_total = data.get("amount_total", 0)
+    session_id = data.get("id")
+
+    if email and existing_doc:
+        transaction.update(existing_doc.reference, {
+            "total_donated_cents": Increment(amount_total),
+            "last_donation_cents": amount_total,
+            "last_donated_at": now,
+            "updated_at": now,
+        })
+        logger.info(f"Repeat donation: +{amount_total} cents from {email}")
+        return "processed"
+
+    new_ref = db.collection("donations").document()
+    transaction.set(new_ref, {
+        "email": email or "anonymous",
+        "amount_cents": amount_total,
+        "total_donated_cents": amount_total,
+        "stripe_session_id": session_id,
+        "created_at": now,
+    })
+    logger.info(f"New donation recorded: {amount_total} cents from {email or 'anonymous'}")
+    return "processed"
+
+
+def _apply_mutation(transaction, db, event_type: str, data: dict, existing_doc, now) -> str:
+    """Write phase: the actual business mutation for a given event type,
+    dispatched the same way the old per-event _handle_* functions were,
+    but writing through the shared transaction instead of directly."""
+    if event_type == "checkout.session.completed":
+        mode = data.get("mode")
+        if mode == "subscription":
+            return _apply_subscription_checkout(transaction, db, data, existing_doc, now)
+        if mode == "payment":
+            return _apply_donation_checkout(transaction, db, data, existing_doc, now)
+        return "ignored"
+
+    if event_type == "customer.subscription.updated":
+        return _apply_subscription_updated(transaction, data, existing_doc, now)
+
+    if event_type == "customer.subscription.deleted":
+        return _apply_subscription_deleted(transaction, data, existing_doc, now)
+
+    if event_type == "invoice.payment_failed":
+        return _apply_payment_failed(transaction, data, existing_doc, now)
+
+    if event_type == "invoice.payment_succeeded":
+        return _apply_payment_succeeded(transaction, data, existing_doc, now)
+
+    return "ignored"
+
+
+def _process_event_logic(transaction, ref, db, event_type: str, data: dict, now) -> str:
+    """One transaction covers both the event reservation AND the business
+    mutation, so a crash between "apply the change" and "mark the event
+    completed" can no longer let a reclaim double-apply it — either both
+    happen or neither does.
+
+    Raising (e.g. WebhookProcessingError) aborts the WHOLE transaction:
+    nothing is committed, not even the reservation, so a Stripe retry starts
+    completely fresh with no cleanup needed.
+
+    Returns an outcome string ("skip", "missing_email", "processed",
+    "ignored") the caller uses to decide whether to alert.
+    """
+    # ---- READ PHASE — nothing written yet. Firestore's Python client
+    # forbids reads after the first write within one transaction, so every
+    # read this event might need happens here, before any write below. ----
+    snapshot = ref.get(transaction=transaction)
+    if snapshot.exists:
+        d = snapshot.to_dict() or {}
+        status, created_at = d.get("status"), d.get("created_at")
+        age = (now - created_at).total_seconds() if created_at else None
+        if status == "completed":
+            return "skip"
+        if status == "processing" and age is not None and age < _STALE_RESERVATION_SECONDS:
+            return "skip"
+        # else: absent, or a stale "processing" reservation — reclaim below.
+
+    existing_doc = _read_existing_doc(transaction, db, event_type, data)
+
+    # ---- WRITE PHASE ----
+    transaction.set(ref, {"type": event_type, "status": "processing", "created_at": now})
+    outcome = _apply_mutation(transaction, db, event_type, data, existing_doc, now)
+    transaction.update(ref, {"status": "completed", "processed_at": now, "outcome": outcome})
+    return outcome
+
+
+# Firestore's optimistic concurrency lets only one transaction touching this
+# reservation doc commit at a time — a concurrent or racing retry is
+# automatically retried by the client library and will see the winner's
+# fresh state (completed, or a fresh "processing" reservation) on its retry.
+_process_event = transactional(_process_event_logic)
+
+
+async def _alert(subject: str, detail: str) -> None:
+    """Best-effort ops alert to settings.alert_email. Never raises — a failed
+    alert send must not mask or replace the original webhook error."""
+    if not settings.alert_email:
+        logger.warning("alert_email not configured, dropping alert: %s — %s", subject, detail)
+        return
+    try:
+        await send_email(settings.alert_email, f"[MadeForSeconds] {subject}", f"<p>{detail}</p>")
+    except Exception:
+        logger.exception("Failed to send alert email: %s", subject)
 
 
 def _sanitize(text: str, max_len: int) -> str:
@@ -35,17 +283,6 @@ def _sanitize(text: str, max_len: int) -> str:
     # Collapse multiple whitespace into single space
     text = re.sub(r"\s+", " ", text).strip()
     return text[:max_len]
-
-
-def _check_rate_limit(ip: str, limit: int = CANCEL_RATE_LIMIT, window: int = CANCEL_RATE_WINDOW) -> None:
-    now = time.time()
-    # Evict all keys if the dict grows too large (prevents memory leak from unique IPs)
-    if len(_rate_attempts) > _RATE_MAX_KEYS:
-        _rate_attempts.clear()
-    _rate_attempts[ip] = [t for t in _rate_attempts[ip] if now - t < window]
-    if len(_rate_attempts[ip]) >= limit:
-        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
-    _rate_attempts[ip].append(now)
 
 
 # ── Request/Response models ──────────────────────────────────────────────────
@@ -108,7 +345,11 @@ def _validate_redirect_url(url: str) -> None:
     raise HTTPException(status_code=400, detail="Invalid redirect URL")
 
 
-@router.post("/checkout", response_model=CheckoutResponse)
+@router.post(
+    "/checkout",
+    response_model=CheckoutResponse,
+    dependencies=[Depends(rate_limit("checkout", 20, 3600))],
+)
 async def create_checkout(body: CheckoutRequest):
     """Create a Stripe Checkout session for a subscription or one-time donation."""
 
@@ -191,47 +432,54 @@ async def stripe_webhook(request: Request):
     except stripe.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # Idempotency: skip events we've already processed
     event_id = event.get("id", "")
-    db = get_db()
-    if event_id:
-        existing = db.collection("processed_events").document(event_id).get()
-        if existing.exists:
-            logger.info(f"Skipping already-processed event: {event_id}")
-            return {"status": "ok"}
-
     event_type = event["type"]
     data = event["data"]["object"]
 
-    if event_type == "checkout.session.completed":
-        if data.get("mode") == "subscription":
-            await _handle_subscription_checkout(data)
-        elif data.get("mode") == "payment":
-            await _handle_donation_checkout(data)
+    if not event_id:
+        # Stripe always includes an id on genuine webhook events; this would
+        # mean a malformed payload that nonetheless passed signature
+        # verification. Can't be safely deduplicated or retried into success.
+        logger.error(f"Stripe event missing id, cannot process safely: {event_type}")
+        await _alert("Webhook event missing id", f"type={event_type} — cannot be safely deduplicated or processed")
+        raise HTTPException(status_code=400, detail="Event missing id")
 
-    elif event_type == "customer.subscription.updated":
-        await _handle_subscription_updated(data)
+    db = get_db()
+    ref = db.collection("processed_events").document(event_id)
+    now = datetime.now(timezone.utc)
 
-    elif event_type == "customer.subscription.deleted":
-        await _handle_subscription_deleted(data)
+    # The reservation and the business mutation both happen inside one
+    # Firestore transaction (_process_event) — see its docstring for why
+    # that's needed for exactly-once processing, not just a race-free
+    # reservation. Raising aborts the whole transaction; nothing commits,
+    # so a Stripe retry starts completely fresh with no cleanup needed here.
+    try:
+        outcome = _process_event(db.transaction(), ref, db, event_type, data, now)
+    except Exception as exc:
+        logger.exception(f"Webhook processing failed for event {event_id} ({event_type})")
+        await _alert(
+            f"Webhook processing failed: {event_type}",
+            f"event_id={event_id}<br>error={exc}",
+        )
+        raise  # -> FastAPI 500 -> Stripe retries with backoff
 
-    elif event_type == "invoice.payment_failed":
-        await _handle_payment_failed(data)
-
-    elif event_type == "invoice.payment_succeeded":
-        await _handle_payment_succeeded(data)
-
-    # Mark event as processed for idempotency
-    if event_id:
-        db.collection("processed_events").document(event_id).set({
-            "type": event_type,
-            "processed_at": datetime.now(timezone.utc),
-        })
+    if outcome == "skip":
+        logger.info(f"Skipping event {event_id} (already processed or in flight)")
+    elif outcome == "missing_email":
+        await _alert(
+            "Subscription checkout missing email",
+            f"event_id={event_id}<br>Stripe never captured an email for this checkout — "
+            "retrying won't add one; needs manual reconciliation in the Stripe dashboard.",
+        )
 
     return {"status": "ok"}
 
 
-@router.get("/session-info", response_model=SessionInfoResponse)
+@router.get(
+    "/session-info",
+    response_model=SessionInfoResponse,
+    dependencies=[Depends(rate_limit("session_info", 30, 600))],
+)
 async def get_session_info(session_id: str):
     """Get info about a completed Stripe checkout session (no auth required — session_id is the proof)."""
     try:
@@ -275,7 +523,11 @@ async def get_session_info(session_id: str):
     )
 
 
-@router.post("/setup-profile", response_model=SetupProfileResponse)
+@router.post(
+    "/setup-profile",
+    response_model=SetupProfileResponse,
+    dependencies=[Depends(rate_limit("setup_profile", 5, 600))],
+)
 async def setup_profile(body: SetupProfileRequest):
     """Set display name and note after payment. Uses Stripe session_id as proof — no login needed."""
     # Verify the session with Stripe
@@ -352,12 +604,9 @@ async def setup_profile(body: SetupProfileRequest):
     )
 
 
-@router.post("/cancel-request")
-async def cancel_request(body: CancelRequest, request: Request):
+@router.post("/cancel-request", dependencies=[Depends(rate_limit("cancel_request", 3, 600))])
+async def cancel_request(body: CancelRequest):
     """Request subscription cancellation. Sends a confirmation email."""
-    ip = request.client.host if request.client else "unknown"
-    _check_rate_limit(ip)
-
     email = body.email.strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
@@ -401,7 +650,7 @@ async def cancel_request(body: CancelRequest, request: Request):
     return generic_msg
 
 
-@router.post("/cancel-confirm")
+@router.post("/cancel-confirm", dependencies=[Depends(rate_limit("cancel_confirm", 5, 600))])
 async def cancel_confirm(body: CancelConfirmRequest):
     """Confirm subscription cancellation using a signed token from email."""
     email = verify_cancel_token(body.token)
@@ -471,206 +720,3 @@ async def list_supporters(limit: int | None = None):
 
     return [Supporter(display_name=s["display_name"], note=s.get("note")) for s in supporters]
 
-
-# ── Webhook handlers ─────────────────────────────────────────────────────────
-
-async def _handle_subscription_checkout(data: dict) -> None:
-    """Handle checkout.session.completed for subscription mode."""
-    customer_id = data.get("customer")
-    subscription_id = data.get("subscription")
-    email = data.get("customer_details", {}).get("email", "").lower()
-    amount_total = data.get("amount_total", 0)
-
-    if not email:
-        logger.warning("Subscription checkout missing email")
-        return
-
-    db = get_db()
-    existing = (
-        db.collection("subscribers")
-        .where("email", "==", email)
-        .limit(1)
-        .stream()
-    )
-    existing_doc = next(existing, None)
-
-    now = datetime.now(timezone.utc)
-    subscriber_data = {
-        "email": email,
-        "stripe_customer_id": customer_id,
-        "stripe_subscription_id": subscription_id,
-        "status": "active",
-        "total_donated_cents": amount_total,
-        "updated_at": now,
-    }
-
-    if existing_doc:
-        # Keep existing total and add to it
-        existing_data = existing_doc.to_dict()
-        existing_total = existing_data.get("total_donated_cents", 0)
-        subscriber_data["total_donated_cents"] = existing_total + amount_total
-        db.collection("subscribers").document(existing_doc.id).update(subscriber_data)
-        logger.info(f"Updated subscriber: {email}")
-    else:
-        subscriber_data["created_at"] = now
-        db.collection("subscribers").add(subscriber_data)
-        logger.info(f"Created subscriber: {email}")
-
-
-async def _handle_subscription_updated(data: dict) -> None:
-    """Handle customer.subscription.updated."""
-    subscription_id = data.get("id")
-    status = data.get("status")
-    current_period_end = data.get("current_period_end")
-
-    db = get_db()
-    docs = (
-        db.collection("subscribers")
-        .where("stripe_subscription_id", "==", subscription_id)
-        .limit(1)
-        .stream()
-    )
-    doc = next(docs, None)
-    if doc is None:
-        logger.warning(f"Subscription updated but no subscriber found: {subscription_id}")
-        return
-
-    update_data: dict = {
-        "status": status,
-        "updated_at": datetime.now(timezone.utc),
-    }
-    if current_period_end:
-        update_data["current_period_end"] = datetime.fromtimestamp(
-            current_period_end, tz=timezone.utc
-        )
-
-    db.collection("subscribers").document(doc.id).update(update_data)
-    logger.info(f"Subscription {subscription_id} updated to status: {status}")
-
-
-async def _handle_subscription_deleted(data: dict) -> None:
-    """Handle customer.subscription.deleted."""
-    subscription_id = data.get("id")
-
-    db = get_db()
-    docs = (
-        db.collection("subscribers")
-        .where("stripe_subscription_id", "==", subscription_id)
-        .limit(1)
-        .stream()
-    )
-    doc = next(docs, None)
-    if doc is None:
-        return
-
-    db.collection("subscribers").document(doc.id).update({
-        "status": "canceled",
-        "updated_at": datetime.now(timezone.utc),
-    })
-    logger.info(f"Subscription canceled: {subscription_id}")
-
-
-async def _handle_payment_failed(data: dict) -> None:
-    """Handle invoice.payment_failed."""
-    subscription_id = data.get("subscription")
-    if not subscription_id:
-        return
-
-    db = get_db()
-    docs = (
-        db.collection("subscribers")
-        .where("stripe_subscription_id", "==", subscription_id)
-        .limit(1)
-        .stream()
-    )
-    doc = next(docs, None)
-    if doc is None:
-        return
-
-    db.collection("subscribers").document(doc.id).update({
-        "status": "past_due",
-        "updated_at": datetime.now(timezone.utc),
-    })
-    logger.info(f"Payment failed for subscription: {subscription_id}")
-
-
-async def _handle_payment_succeeded(data: dict) -> None:
-    """Handle invoice.payment_succeeded — increment total_donated_cents for recurring payments.
-
-    Skips the initial subscription invoice (billing_reason=subscription_create) because
-    that amount is already recorded by _handle_subscription_checkout.
-    """
-    subscription_id = data.get("subscription")
-    amount_paid = data.get("amount_paid", 0)  # in cents
-    billing_reason = data.get("billing_reason", "")
-
-    if not subscription_id or not amount_paid:
-        return
-
-    # The first invoice is already counted in _handle_subscription_checkout
-    if billing_reason == "subscription_create":
-        logger.info(f"Skipping initial invoice for subscription {subscription_id} (already counted at checkout)")
-        return
-
-    db = get_db()
-    docs = (
-        db.collection("subscribers")
-        .where("stripe_subscription_id", "==", subscription_id)
-        .limit(1)
-        .stream()
-    )
-    doc = next(docs, None)
-    if doc is None:
-        return
-
-    existing_data = doc.to_dict()
-    existing_total = existing_data.get("total_donated_cents", 0)
-
-    db.collection("subscribers").document(doc.id).update({
-        "total_donated_cents": existing_total + amount_paid,
-        "updated_at": datetime.now(timezone.utc),
-    })
-    logger.info(f"Payment succeeded for subscription {subscription_id}: +{amount_paid} cents")
-
-
-async def _handle_donation_checkout(data: dict) -> None:
-    """Handle checkout.session.completed for one-time donation payments.
-
-    Consolidates by email — repeat donors get their total accumulated on one doc.
-    """
-    email = data.get("customer_details", {}).get("email", "").lower()
-    amount_total = data.get("amount_total", 0)
-    session_id = data.get("id")
-    now = datetime.now(timezone.utc)
-
-    db = get_db()
-
-    if email:
-        # Check if this donor already has a doc — consolidate by email
-        existing = (
-            db.collection("donations")
-            .where("email", "==", email)
-            .limit(1)
-            .stream()
-        )
-        existing_doc = next(existing, None)
-        if existing_doc:
-            existing_data = existing_doc.to_dict()
-            prev_total = existing_data.get("total_donated_cents", existing_data.get("amount_cents", 0))
-            db.collection("donations").document(existing_doc.id).update({
-                "total_donated_cents": prev_total + amount_total,
-                "last_donation_cents": amount_total,
-                "last_donated_at": now,
-                "updated_at": now,
-            })
-            logger.info(f"Repeat donation: +{amount_total} cents from {email} (new total: {prev_total + amount_total})")
-            return
-
-    db.collection("donations").add({
-        "email": email or "anonymous",
-        "amount_cents": amount_total,
-        "total_donated_cents": amount_total,
-        "stripe_session_id": session_id,
-        "created_at": now,
-    })
-    logger.info(f"New donation recorded: {amount_total} cents from {email or 'anonymous'}")

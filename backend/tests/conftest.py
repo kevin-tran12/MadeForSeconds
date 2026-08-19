@@ -65,6 +65,33 @@ def cleanup_overrides():
     app.dependency_overrides.pop(require_totp_session, None)
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """Rate-limit counters live in module-level singletons for the whole
+    test session, and TestClient requests all share one IP by default —
+    reset counters before each test so rate-limited routes don't flake
+    based on execution order/count across the suite.
+
+    Covers both cache backends: MemoryCache keeps counters in a plain dict
+    (`_counters`), but RedisCache keeps them in real Redis under the
+    `{_NS}:rl:*` prefix (see cache.py's `incr_with_ttl`) — when REDIS_URL is
+    set (e.g. under `docker compose exec backend pytest`, which points at a
+    real Redis container), only clearing `_counters` leaves every prior
+    test's counts sitting in Redis, so rate-limit-boundary tests fail
+    depending on how much other traffic already ran in the same session.
+    """
+    from app.cache import cache
+    from app.rate_limit import _fallback
+    if hasattr(cache, "_counters"):
+        cache._counters.clear()
+    elif hasattr(cache, "_r"):
+        keys = cache._r.keys(f"{cache._NS}:rl:*")
+        if keys:
+            cache._r.delete(*keys)
+    _fallback._counters.clear()
+    yield
+
+
 @pytest.fixture
 def authenticated_client(client, mock_admin):
     """Provides a client that bypasses admin authentication and sets request.state.admin_email."""

@@ -106,6 +106,13 @@ def validate_production_settings(s: "Settings") -> None:
         )
     if not s.alert_email:
         raise RuntimeError("ALERT_EMAIL must be set in production — the weekly usage report needs a destination")
+    if not s.stripe_secret_key:
+        raise RuntimeError("STRIPE_SECRET_KEY must be set in production — payments cannot work without it")
+    if not s.stripe_webhook_secret:
+        raise RuntimeError(
+            "STRIPE_WEBHOOK_SECRET must be set in production — without it /api/subscribe/webhook "
+            "rejects every event with an invalid-signature error, and payments silently stop recording"
+        )
 
 
 settings = Settings()

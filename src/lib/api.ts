@@ -217,7 +217,13 @@ export const adminReportsApi = {
 // ─── Supporter endpoints ────────────────────────────────────────────────────
 
 export const subscriberApi = {
-  createCheckout: (amountCents: number, successUrl: string, cancelUrl: string, oneTime = false) =>
+  createCheckout: (
+    amountCents: number,
+    successUrl: string,
+    cancelUrl: string,
+    oneTime: boolean,
+    idempotencyKey: string
+  ) =>
     apiFetch<{ checkout_url: string }>('/api/subscribe/checkout', {
       method: 'POST',
       body: JSON.stringify({
@@ -225,8 +231,10 @@ export const subscriberApi = {
         success_url: successUrl,
         cancel_url: cancelUrl,
         one_time: oneTime,
-        // Lets Stripe dedupe a retried/double-submitted request
-        idempotency_key: crypto.randomUUID(),
+        // Caller owns the key's lifecycle so it stays stable across a single
+        // logical submit attempt (see SupportPage.tsx) — lets Stripe dedupe a
+        // retried/double-submitted request instead of creating two sessions.
+        idempotency_key: idempotencyKey,
       }),
     }),
 

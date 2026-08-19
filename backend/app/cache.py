@@ -32,6 +32,18 @@ def _loads(raw: str) -> Any:
     return json.loads(raw)
 
 
+# INCR then EXPIRE as two round-trips would leave a key with no TTL forever
+# if the connection drops between them — evaluated as one Lua script instead,
+# so it either fully applies or fully doesn't.
+_INCR_WITH_TTL_LUA = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
+
+
 # ── Redis backend ──────────────────────────────────────────────────────────────
 
 class RedisCache:
@@ -55,6 +67,7 @@ class RedisCache:
             socket_timeout=2,
         )
         self._ttl = ttl
+        self._incr_with_ttl_script = self._r.register_script(_INCR_WITH_TTL_LUA)
 
     def _version(self) -> str:
         return self._r.get(f"{self._NS}:version") or "1"
@@ -88,8 +101,25 @@ class RedisCache:
         except Exception:
             pass
 
+    def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:
+        """Atomically increment a rate-limit counter and set its expiry once.
+
+        Bypasses _key()/_version() on purpose — rate-limit counters live outside
+        the content-cache versioning scheme, so cache.clear() (an admin content
+        mutation) must not reset them. Returns -1 on any backend error (sentinel
+        for "treat as unavailable"), never raises.
+        """
+        try:
+            raw_key = f"{self._NS}:rl:{key}"
+            return self._incr_with_ttl_script(keys=[raw_key], args=[ttl_seconds])
+        except Exception:
+            return -1
+
 
 # ── In-memory fallback ─────────────────────────────────────────────────────────
+
+_MAX_COUNTERS = 10_000  # evict expired (or, failing that, all) entries above this
+
 
 class MemoryCache:
     """Single-instance in-memory cache used when Redis is unavailable."""
@@ -97,6 +127,9 @@ class MemoryCache:
     def __init__(self, ttl: int) -> None:
         self._store: dict[str, tuple[Any, float]] = {}
         self._ttl = ttl
+        # Separate from _store on purpose — rate-limit counters must not be
+        # wiped by clear() (the content-cache invalidation hook).
+        self._counters: dict[str, tuple[int, float]] = {}
 
     def get(self, key: str) -> Optional[Any]:
         entry = self._store.get(key)
@@ -116,6 +149,24 @@ class MemoryCache:
 
     def clear(self) -> None:
         self._store.clear()
+
+    def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:
+        now = time.time()
+        entry = self._counters.get(key)
+        if entry is None or now >= entry[1]:
+            if len(self._counters) > _MAX_COUNTERS:
+                # Traffic from many distinct IPs would otherwise leak memory
+                # forever, since an expired entry is only cleaned up when its
+                # exact key recurs. Prune expired entries first; if that's
+                # not enough, evict everything rather than grow unbounded.
+                self._counters = {k: v for k, v in self._counters.items() if now < v[1]}
+                if len(self._counters) > _MAX_COUNTERS:
+                    self._counters.clear()
+            self._counters[key] = (1, now + ttl_seconds)
+            return 1
+        count = entry[0] + 1
+        self._counters[key] = (count, entry[1])
+        return count
 
 
 # ── Singleton ──────────────────────────────────────────────────────────────────
