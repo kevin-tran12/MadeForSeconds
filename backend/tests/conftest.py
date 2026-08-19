@@ -67,13 +67,15 @@ def cleanup_overrides():
 
 @pytest.fixture(autouse=True)
 def reset_rate_limits():
-    """Rate-limit counters live in the same module-level cache singleton for
-    the whole test session, and TestClient requests all share one IP by
-    default — reset counters before each test so rate-limited routes don't
-    flake based on execution order/count across the suite."""
+    """Rate-limit counters live in module-level singletons for the whole
+    test session, and TestClient requests all share one IP by default —
+    reset counters before each test so rate-limited routes don't flake
+    based on execution order/count across the suite."""
     from app.cache import cache
+    from app.rate_limit import _fallback
     if hasattr(cache, "_counters"):
         cache._counters.clear()
+    _fallback._counters.clear()
     yield
 
 

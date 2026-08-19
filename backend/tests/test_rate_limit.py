@@ -87,9 +87,24 @@ def _make_request(headers=None, client_host="10.0.0.1"):
     return Request(scope)
 
 
-def test_client_ip_prefers_leftmost_x_forwarded_for():
-    request = _make_request(headers=[("X-Forwarded-For", "5.6.7.8, 9.9.9.9")], client_host="10.0.0.1")
-    assert _client_ip(request) == "5.6.7.8"
+def test_client_ip_prefers_rightmost_entry_ignoring_spoofed_prefix():
+    """Google's documented format is <client-supplied, unverified>, ...,
+    <value GFE appended> — the real client IP is whatever the trusted hop
+    appended (rightmost), not whatever the client claimed (leftmost, fully
+    spoofable). An attacker sending a fresh fake leftmost value on every
+    request must not be able to dodge the limit."""
+    request = _make_request(headers=[("X-Forwarded-For", "9.9.9.9, 1.1.1.1")], client_host="10.0.0.1")
+    assert _client_ip(request) == "1.1.1.1"
+
+
+def test_client_ip_single_entry_no_spoofing_attempted():
+    request = _make_request(headers=[("X-Forwarded-For", "1.1.1.1")], client_host="10.0.0.1")
+    assert _client_ip(request) == "1.1.1.1"
+
+
+def test_client_ip_malformed_rightmost_entry_falls_back_to_socket_peer():
+    request = _make_request(headers=[("X-Forwarded-For", "not-an-ip")], client_host="10.0.0.1")
+    assert _client_ip(request) == "10.0.0.1"
 
 
 def test_client_ip_falls_back_to_socket_peer_without_header():
@@ -125,12 +140,20 @@ def test_rate_limit_dependency_blocks_over_limit_with_retry_after(rl_app):
         assert response.headers["retry-after"] == "60"
 
 
-def test_rate_limit_dependency_fails_open_on_backend_error(rl_app):
+def test_rate_limit_dependency_falls_back_to_local_counter_on_backend_error(rl_app):
+    """A Redis error must not disable rate limiting entirely — that would
+    also strip brute-force protection from TOTP verify/reset during an
+    outage. It degrades to a local counter instead, which still enforces
+    the limit (this deployment runs a single Cloud Run instance, so a local
+    counter is just as authoritative as Redis would have been here)."""
+    from app.rate_limit import _fallback
+    _fallback._counters.clear()
     with patch("app.rate_limit.cache") as mock_cache:
         mock_cache.incr_with_ttl.return_value = -1
         with TestClient(rl_app) as client:
-            for _ in range(5):
-                assert client.get("/limited").status_code == 200
+            assert client.get("/limited").status_code == 200
+            assert client.get("/limited").status_code == 200
+            assert client.get("/limited").status_code == 429
 
 
 def test_rate_limit_dependency_buckets_by_x_forwarded_for(rl_app):

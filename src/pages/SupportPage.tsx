@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { subscriberApi } from '../lib/api'
 
@@ -26,7 +26,22 @@ export function SupportPage() {
   // know if Stripe already created the session) must reuse the same key so
   // Stripe dedupes it, not mint a new one. It only changes when the user
   // changes what they're buying.
-  const idempotencyKey = useMemo(() => crypto.randomUUID(), [amount, oneTime])
+  //
+  // Computed during render into a ref rather than useMemo: React documents
+  // useMemo as a performance optimization it may discard the cache for, not
+  // a durability guarantee — this value needs to actually persist across
+  // renders. This is the React-docs pattern for "reset a value when a
+  // dependency changes" without an effect.
+  const idempotencyKeyRef = useRef<string>('')
+  const prevDepsRef = useRef<{ amount: number; oneTime: boolean }>()
+  if (
+    !idempotencyKeyRef.current ||
+    prevDepsRef.current?.amount !== amount ||
+    prevDepsRef.current?.oneTime !== oneTime
+  ) {
+    idempotencyKeyRef.current = crypto.randomUUID()
+    prevDepsRef.current = { amount, oneTime }
+  }
 
   async function doCheckout() {
     if (!valid) return
@@ -40,7 +55,7 @@ export function SupportPage() {
         `${window.location.origin}/support/success?session_id={CHECKOUT_SESSION_ID}`,
         window.location.href,
         oneTime,
-        idempotencyKey
+        idempotencyKeyRef.current
       )
       window.location.href = checkout_url
     } catch (err) {
