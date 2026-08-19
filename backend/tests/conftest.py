@@ -1,3 +1,5 @@
+import base64
+
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi import Request
@@ -193,3 +195,17 @@ PDF_BYTES = b"%PDF-1.4\n" + b"\x00" * 16
 
 # Content that no sniffer should accept — the "renamed .html to .jpg" case.
 NOT_A_MEDIA_FILE = b"<html><body>hello</body></html>"
+
+# The signatures above are enough to exercise sniffing, but they are not decodable
+# images — they have no IEND chunk, no scan segment. Anything that goes through the
+# upload *route* now also passes through metadata stripping, which fails closed on
+# input it cannot parse, so route tests need genuinely valid files. These are 2x2
+# solid-colour images carrying no metadata of their own.
+REAL_PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM8YaPBwMDAxAAGAA7a"
+    "ATDQ5FyAAAAAAElFTkSuQmCC"
+)
+REAL_WEBP_BYTES = base64.b64decode(
+    "UklGRjwAAABXRUJQVlA4IDAAAADwAQCdASoCAAIAAUAmJaACdLoB+AAEgwAA/u4KZ/5BcsLrka/9"
+    "pZ+pZ+pZ/ioAAAA="
+)

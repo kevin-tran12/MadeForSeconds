@@ -6,6 +6,7 @@ passing service_account_email + access_token to generate_signed_url.
 """
 
 import ipaddress
+import logging
 import re
 import socket
 import urllib.parse
@@ -19,6 +20,8 @@ from google.auth.transport import requests as google_auth_requests
 from google.cloud import storage
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 ALLOWED_RECEIPT_TYPES = ALLOWED_IMAGE_TYPES | {"image/heic", "application/pdf"}
@@ -122,6 +125,219 @@ def verify_upload_type(data: bytes, allowed: set[str]) -> str:
             "Allowed: " + ", ".join(sorted(allowed))
         )
     return actual
+
+
+# ── Metadata stripping ────────────────────────────────────────────────────────
+#
+# Phone cameras embed a GPS IFD in EXIF. The images bucket is world-readable, so
+# an unstripped kitchen photo publishes the coordinates it was taken at.
+#
+# These strip containers rather than re-encoding through an imaging library. A
+# Pillow round-trip would be five lines, but re-encoding a JPEG is lossy — every
+# pass degrades the photo, and the photos are the product. Dropping the metadata
+# segments leaves the compressed image data byte-for-byte identical.
+
+
+class MetadataStripError(ValueError):
+    """Raised when an image cannot be parsed well enough to strip metadata.
+
+    Deliberately fails closed. Returning the original bytes on a parse failure
+    would silently publish the GPS this function exists to remove.
+    """
+
+
+# APP1 carries EXIF (and the GPS IFD within it) plus XMP; APP13 carries
+# Photoshop/IPTC records. APP0 (JFIF) and APP14 (Adobe colour transform) are
+# kept — they describe how to decode the image, and dropping APP14 shifts
+# colours on YCCK/CMYK files.
+_JPEG_STRIP_MARKERS = frozenset({0xE1, 0xED})
+_JPEG_COMMENT_MARKER = 0xFE
+
+# PNG: the four critical chunks plus the ancillary ones that affect rendering.
+# Everything else — eXIf, tEXt, iTXt, zTXt, tIME — carries no pixel information.
+_PNG_KEEP_CHUNKS = frozenset({
+    b"IHDR", b"PLTE", b"IDAT", b"IEND",
+    b"tRNS", b"gAMA", b"cHRM", b"sRGB", b"iCCP", b"sBIT", b"bKGD", b"pHYs",
+})
+
+# WebP RIFF chunks holding metadata rather than pixels.
+_WEBP_STRIP_CHUNKS = frozenset({b"EXIF", b"XMP "})
+
+
+def _strip_jpeg(data: bytes) -> bytes:
+    """Drop EXIF/XMP/IPTC/comment segments, preserving the entropy-coded scan."""
+    if data[:2] != b"\xff\xd8":
+        raise MetadataStripError("not a JPEG")
+
+    out = bytearray(b"\xff\xd8")
+    i, n = 2, len(data)
+    while i < n - 1:
+        if data[i] != 0xFF:
+            raise MetadataStripError(f"desynchronised at byte {i}")
+        marker = data[i + 1]
+
+        # Fill bytes: any number of 0xFF may precede a marker.
+        if marker == 0xFF:
+            i += 1
+            continue
+        # Standalone markers carry no length field.
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            out += data[i:i + 2]
+            i += 2
+            continue
+        # Start of scan: entropy-coded data runs to the end. Nothing after this
+        # point is a metadata segment, so copy it through untouched.
+        if marker == 0xDA:
+            out += data[i:]
+            return bytes(out)
+        if marker == 0xD9:  # end of image
+            out += data[i:i + 2]
+            i += 2
+            continue
+
+        if i + 4 > n:
+            raise MetadataStripError("truncated segment header")
+        seglen = int.from_bytes(data[i + 2:i + 4], "big")
+        end = i + 2 + seglen
+        if seglen < 2 or end > n:
+            raise MetadataStripError("segment length out of bounds")
+
+        if marker not in _JPEG_STRIP_MARKERS and marker != _JPEG_COMMENT_MARKER:
+            out += data[i:end]
+        i = end
+
+    return bytes(out)
+
+
+def _strip_png(data: bytes) -> bytes:
+    """Keep only chunks that affect decoding; drop textual and EXIF chunks."""
+    signature = b"\x89PNG\r\n\x1a\n"
+    if data[:8] != signature:
+        raise MetadataStripError("not a PNG")
+
+    out = bytearray(signature)
+    i, n = 8, len(data)
+    saw_end = False
+    while i + 12 <= n:
+        length = int.from_bytes(data[i:i + 4], "big")
+        chunk_type = data[i + 4:i + 8]
+        end = i + 12 + length  # length + type + payload + CRC
+        if end > n:
+            raise MetadataStripError("chunk length out of bounds")
+        if chunk_type in _PNG_KEEP_CHUNKS:
+            out += data[i:end]
+        i = end
+        if chunk_type == b"IEND":
+            saw_end = True
+            break
+
+    if not saw_end:
+        raise MetadataStripError("no IEND chunk")
+    return bytes(out)
+
+
+def _strip_webp(data: bytes) -> bytes:
+    """Drop EXIF/XMP RIFF chunks and clear their flags in the VP8X header."""
+    if data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise MetadataStripError("not a WebP")
+
+    body = bytearray()
+    i, n = 12, len(data)
+    while i + 8 <= n:
+        chunk_type = data[i:i + 4]
+        size = int.from_bytes(data[i + 4:i + 8], "little")
+        end = i + 8 + size + (size & 1)  # chunks pad to an even length
+        if end > n:
+            raise MetadataStripError("chunk size out of bounds")
+
+        if chunk_type not in _WEBP_STRIP_CHUNKS:
+            chunk = bytearray(data[i:end])
+            # VP8X advertises which optional chunks follow. Leaving the EXIF and
+            # XMP bits set after removing those chunks makes the file malformed.
+            if chunk_type == b"VP8X" and len(chunk) >= 9:
+                chunk[8] &= ~0b00001100
+            body += chunk
+        i = end
+
+    out = bytearray(b"RIFF")
+    out += (4 + len(body)).to_bytes(4, "little")
+    out += b"WEBP"
+    out += body
+    return bytes(out)
+
+
+_STRIPPERS = {
+    "image/jpeg": _strip_jpeg,
+    "image/png": _strip_png,
+    "image/webp": _strip_webp,
+}
+
+
+def strip_image_metadata(data: bytes, content_type: str) -> bytes:
+    """Return image bytes with location and identifying metadata removed.
+
+    Lossless: the compressed image data is untouched, only container-level
+    metadata is dropped. Raises MetadataStripError rather than returning the
+    original bytes when parsing fails — this is a privacy control, so failing
+    closed is the point.
+
+    Content types with no stripper (HEIC, PDF) are returned unchanged. Neither
+    is an allowed recipe-image type; receipts are private and stay as uploaded.
+    """
+    stripper = _STRIPPERS.get(content_type)
+    if stripper is None:
+        return data
+    return stripper(data)
+
+
+# Blob names are UUID-prefixed, so the bytes behind a given name never change —
+# which is exactly the condition `immutable` requires.
+PUBLIC_IMAGE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+
+def sanitize_public_image_blob(blob_name: str) -> bool:
+    """Strip metadata and set caching on an image already sitting in the bucket.
+
+    The MCP flow hands out a signed PUT URL, so the client uploads directly to
+    GCS and the backend never sees those bytes — they cannot be cleaned on the
+    way in. The backend does learn the object's name when the URL is attached to
+    a recipe, which is the first and only chance to clean it.
+
+    Returns True if the object was rewritten. Never raises: a recipe save must
+    not fail because of a stray unparseable image. Callers that need to know
+    about failures should read the log.
+    """
+    bucket_name = settings.gcs_bucket_name
+    if settings.is_dev or not bucket_name or not blob_name:
+        return False
+
+    try:
+        blob = storage.Client().bucket(bucket_name).get_blob(blob_name)
+        if blob is None:
+            return False
+
+        data = blob.download_as_bytes()
+        content_type = sniff_content_type(data)
+        if content_type not in _STRIPPERS:
+            return False
+
+        cleaned = strip_image_metadata(data, content_type)
+        if cleaned == data and blob.cache_control == PUBLIC_IMAGE_CACHE_CONTROL:
+            return False
+
+        blob.cache_control = PUBLIC_IMAGE_CACHE_CONTROL
+        blob.upload_from_string(cleaned, content_type=content_type)
+        return True
+    except Exception:
+        logger.exception("Failed to sanitize image blob %s", blob_name)
+        return False
+
+
+def sanitize_recipe_image(url: str | None) -> bool:
+    """Sanitize a recipe image given its public URL (no-op for foreign URLs)."""
+    if blob := gcs_blob_name(url or "", settings.gcs_bucket_name or ""):
+        return sanitize_public_image_blob(blob)
+    return False
 
 
 # ── Signed URLs ───────────────────────────────────────────────────────────────

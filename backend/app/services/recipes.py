@@ -122,6 +122,7 @@ def create_recipe(db, body: RecipeCreate, *, source: str) -> Recipe:
     doc_ref = db.collection("recipes").document()
     doc_ref.set(data)
     data["id"] = doc_ref.id
+    uploads.sanitize_recipe_image(data.get("image_url"))
     cache.clear()
     return Recipe(**data)
 
@@ -143,6 +144,10 @@ def update_recipe(db, recipe_id: str, body: RecipeUpdate, *, source: str) -> Rec
         old_image = old_data.get("image_url") or ""
         if old_image != (updates["image_url"] or ""):
             uploads.delete_recipe_image_blob(old_image)
+        # Attaching is the backend's first sight of an object uploaded straight
+        # to GCS through a signed PUT URL (the MCP path) — the only point where
+        # its metadata can still be stripped before the image goes public.
+        uploads.sanitize_recipe_image(updates["image_url"])
 
     updated = doc_ref.get().to_dict()
     updated["id"] = recipe_id

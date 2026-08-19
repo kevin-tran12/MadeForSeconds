@@ -83,10 +83,21 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
     if settings.is_dev or not settings.gcs_bucket_name:
         return {"url": f"https://placehold.co/800x400?text={filename}"}
 
+    # Phone photos carry a GPS IFD. This bucket is world-readable, so uploading
+    # one unmodified publishes the coordinates it was taken at. Lossless — only
+    # the metadata segments go, the compressed image is untouched.
+    try:
+        contents = uploads.strip_image_metadata(contents, content_type)
+    except uploads.MetadataStripError as exc:
+        # Fail closed: better to reject an odd file than to publish its location.
+        logger.warning("Rejected image that could not be stripped: %s", exc)
+        raise HTTPException(status_code=400, detail="Image could not be processed")
+
     try:
         client = storage.Client()
         bucket = client.bucket(settings.gcs_bucket_name)
         blob = bucket.blob(filename)
+        blob.cache_control = uploads.PUBLIC_IMAGE_CACHE_CONTROL
         blob.upload_from_string(contents, content_type=content_type)
 
         # Construct a reliable public URL
