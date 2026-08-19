@@ -49,3 +49,19 @@ resource "google_storage_bucket" "tf_state" {
     prevent_destroy = true
   }
 }
+
+# Direct object access to the state bucket for the operator running Terraform.
+#
+# This existed in state but not in config — created by an apply from a machine
+# whose .tf edit was never committed — so Terraform proposed destroying it as an
+# orphan. Adopting it is the right direction: it is a legitimate grant, and the
+# project-level roles that would otherwise cover it are broader than intended.
+#
+# The address is unchanged from what is already in state, so this produces no
+# diff. The email must match the casing recorded there exactly — IAM preserves
+# the case it was given, and a difference forces replacement of the binding.
+resource "google_storage_bucket_iam_member" "tf_state_admin" {
+  bucket = google_storage_bucket.tf_state.name
+  role   = "roles/storage.objectAdmin"
+  member = "user:${var.state_admin_email}"
+}

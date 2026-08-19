@@ -108,6 +108,13 @@ variable "instagram_access_token" {
   default     = ""
 }
 
+# ─── Terraform state ────────────────────────────────────────────────────────
+
+variable "state_admin_email" {
+  description = "Google account granted objectAdmin on the Terraform state bucket — the human who runs apply. Kept in tfvars rather than inline: this repo is public."
+  type        = string
+}
+
 # ─── Cost Protection ────────────────────────────────────────────────────────
 
 variable "billing_account" {
