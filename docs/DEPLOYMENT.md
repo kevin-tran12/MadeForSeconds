@@ -13,7 +13,7 @@ Guide to deploying MadeForSeconds on GCP + Cloudflare.
   gcloud auth login
   gcloud auth application-default login
   ```
-- [Terraform 1.15.8](https://developer.hashicorp.com/terraform/install) —
+- [Terraform 1.15.9](https://developer.hashicorp.com/terraform/install) —
   pinned exactly, not a floor. See [State storage & locking](#state-storage--locking)
   for why the version matters more than usual here.
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
@@ -70,7 +70,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 
 ### Step 2 — Initialize and apply Terraform
 
-Install **Terraform 1.15.8** specifically — `terraform/.terraform-version`
+Install **Terraform 1.15.9** specifically — `terraform/.terraform-version`
 pins it, and `required_version` in `main.tf` enforces it. The CLI version is
 part of the state format: a newer Terraform writing state makes it unreadable
 to an older one on a machine you haven't upgraded yet.

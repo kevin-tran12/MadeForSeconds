@@ -111,7 +111,7 @@ jobs:
           # main.tf. Unpinned, this installs whatever is newest that day, and
           # fmt rules drift between releases — CI then fails on formatting a
           # developer's pinned CLI just produced.
-          terraform_version: 1.15.8
+          terraform_version: 1.15.9
 
       - name: terraform fmt
         working-directory: terraform

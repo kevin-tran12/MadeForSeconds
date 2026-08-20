@@ -6,7 +6,7 @@ terraform {
   # `fmt -check` starts failing on formatting another version considered clean.
   # State format upgrades are one-way: once a newer CLI writes this state, older
   # CLIs refuse to read it, so every machine has to be on the same version.
-  required_version = "1.15.8"
+  required_version = "1.15.9"
 
   required_providers {
     google = {
