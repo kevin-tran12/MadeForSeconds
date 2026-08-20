@@ -328,7 +328,15 @@ class TestDeleteRecipe:
 
         db.delete.assert_not_called()
 
-    def test_deletes_image_and_receipt_blobs(self, db, svc_cache):
+    def test_deletes_image_blob_but_keeps_receipt_objects(self, db, svc_cache):
+        """Receipts outlive the recipe they were attached to.
+
+        They are expense records under a seven-year retention policy, so the
+        only correct behaviour is to drop the Firestore document and leave the
+        objects alone. Asserted through delete_gcs_blob — the lowest point every
+        deletion path funnels through — so reintroducing a receipt delete by any
+        route fails here, not just the helper this used to patch.
+        """
         db.get.return_value = _doc(
             image_url="https://storage.googleapis.com/b/img.jpg",
             receipt_urls=["https://storage.googleapis.com/r/r1.jpg", "https://storage.googleapis.com/r/r2.jpg"],
@@ -336,11 +344,12 @@ class TestDeleteRecipe:
 
         with (
             patch("app.services.uploads.delete_recipe_image_blob") as img_deleter,
-            patch("app.services.uploads.delete_recipe_receipt_blob") as receipt_deleter,
+            patch("app.services.uploads.delete_gcs_blob") as raw_deleter,
         ):
             svc.delete_recipe(db, "doc-id")
 
         img_deleter.assert_called_once()
-        assert receipt_deleter.call_count == 2
+        raw_deleter.assert_not_called()
+        assert not hasattr(uploads, "delete_recipe_receipt_blob")
         db.delete.assert_called_once()
         svc_cache.clear.assert_called_once()

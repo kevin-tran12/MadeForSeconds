@@ -86,7 +86,8 @@ This provisions, across five modules (`modules/security`, `modules/storage`,
 - Firestore database + indexes
 - Artifact Registry repository (with cleanup policy — keeps ≤ 5 images)
 - Cloud Run service (scale-to-zero, 512 MB, startup CPU boost)
-- Cloud Storage buckets (images — public, receipts — private + versioned)
+- Cloud Storage buckets (images — public; receipts — private, versioned, and
+  held under a 7-year retention policy; staging — private and ephemeral)
 - Identity Platform (Firebase Auth) for admin login
 - Cloud Build CI/CD trigger
 - GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, Instagram token)
@@ -349,10 +350,14 @@ gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
 
 ### Backups & monitoring
 
-- **Firestore**: daily managed backup with 7-day retention
-  (`google_firestore_backup_schedule.daily`). List with
-  `gcloud firestore backups list`; restore with
-  `gcloud firestore databases restore`.
+- **Firestore**: two managed backup schedules — daily with 7-day retention
+  (`google_firestore_backup_schedule.daily`) for fast recovery of recent
+  mistakes, and weekly with 14-week retention
+  (`google_firestore_backup_schedule.weekly`) so a problem noticed late is
+  still recoverable. Firestore caps daily schedules at 7 days and any schedule
+  at 14 weeks, which is why depth needs the second schedule rather than a
+  longer retention on the first. List with `gcloud firestore backups list`;
+  restore with `gcloud firestore databases restore`.
 - **Uptime**: a Cloud Monitoring check hits `/api/health` every 15 minutes
   and emails the alert address after ~20 minutes of failures.
 - **App errors**: a log-based metric + alert policy
@@ -370,6 +375,74 @@ gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
   budget/uptime/error alerts above. The report is aggregate-only: no IP
   addresses or per-request rows ever appear in the email or get stored
   anywhere new — they're only counted in memory while the report is built.
+
+### Receipt & financial-record recovery
+
+Expense receipts are tax records. Two things protect them, and they cover
+different failures:
+
+| Protection | Covers | Where |
+|---|---|---|
+| Bucket retention policy, 7 years | Deletion or replacement of the object, by anyone — application bug, compromised runtime, or an admin with `objectAdmin` | `terraform/modules/storage/buckets.tf` |
+| Object versioning | Overwrites, by keeping the superseded generation | same file |
+| Firestore backups, daily 7d + weekly 14w | Loss of the *metadata* — which expense a receipt belongs to, for how much, on what date | `terraform/modules/storage/firestore.tf` |
+
+The retention policy is what makes the seven-year claim real. Versioning alone
+does not: a caller holding `objectAdmin` can delete every generation
+explicitly. GCS enforces retention itself, so no IAM grant defeats it.
+
+**The application never deletes a receipt.** `DELETE /api/admin/recipes/{id}/receipts`
+unlinks — it removes the URL from the recipe and leaves the object. Deleting a
+recipe likewise keeps its receipts. Both would fail against the retention
+policy anyway; unlinking makes that the intended behaviour rather than a
+swallowed error.
+
+**Restoring a receipt whose link was removed:**
+
+```bash
+# The object never went anywhere — list by prefix to find it
+gcloud storage ls gs://made-for-seconds-receipts/receipts/
+
+# If an overwrite is the problem, list generations and restore one
+gcloud storage ls -a gs://made-for-seconds-receipts/receipts/FILENAME
+gcloud storage cp gs://made-for-seconds-receipts/receipts/FILENAME#GENERATION \
+  gs://made-for-seconds-receipts/receipts/FILENAME
+```
+
+**Restoring the metadata** (which expense the receipt belonged to) restores
+into a *new* database — Firestore will not restore over a live one:
+
+```bash
+gcloud firestore backups list --location us-central1 --project made-for-seconds
+gcloud firestore databases restore \
+  --source-backup=projects/made-for-seconds/locations/us-central1/backups/BACKUP_ID \
+  --destination-database=restore-scratch \
+  --project made-for-seconds
+```
+
+Read the expense document out of `restore-scratch`, re-attach the receipt URL
+through the admin UI or MCP, then delete the scratch database. Restoring is
+therefore a manual, deliberate operation — which is the right shape for
+something that should happen approximately never.
+
+> **Locking the retention policy — irreversible, owner's call.**
+> The policy ships **unlocked**, so `terraform apply` can still shorten or
+> remove it. Locking it makes the seven years unconditional: it cannot be
+> shortened or removed by anyone, including you, including Google support, and
+> the bucket cannot be deleted until its last object ages out. Storage bills
+> grow monotonically for seven years as a direct consequence.
+>
+> That is a genuine trade of reliability and cost against tamper-evidence, and
+> it should be made deliberately rather than inherited from a default. When you
+> decide to make it:
+>
+> ```bash
+> gcloud storage buckets update gs://made-for-seconds-receipts \
+>   --lock-retention-period --project made-for-seconds
+> ```
+>
+> Then set `is_locked = true` in `buckets.tf` so Terraform's view matches
+> reality — the field is not reversible there either once the API call lands.
 
 ### Cost circuit breaker
 

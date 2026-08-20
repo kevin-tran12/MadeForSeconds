@@ -412,7 +412,10 @@ def unpublish_recipe(recipe_id: str) -> dict:
 @mcp.tool()
 @_tool_errors
 def delete_recipe(recipe_id: str, confirm_title: str) -> dict:
-    """Delete a DRAFT recipe and its stored image/receipts.
+    """Delete a DRAFT recipe and its stored image.
+
+    Any attached receipts are kept — they are expense records under seven-year
+    retention, so deleting the recipe unlinks them rather than destroying them.
 
     Published recipes must be unpublished first. confirm_title must exactly
     match the recipe's title — fetch it with get_recipe if unsure.
