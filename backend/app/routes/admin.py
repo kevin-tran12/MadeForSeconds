@@ -41,6 +41,8 @@ async def admin_create_recipe(body: RecipeCreate):
                 f"(slug '{exc.existing['slug']}', id '{exc.existing['id']}')"
             ),
         )
+    except uploads.ImageSanitizationError as exc:
+        raise HTTPException(status_code=422, detail=f"Image could not be attached: {exc}")
 
 
 @router.put("/recipes/{recipe_id}", response_model=Recipe)
@@ -52,6 +54,8 @@ async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
         raise HTTPException(status_code=422, detail=f"Unknown categories: {exc.invalid}")
     except recipe_service.RecipeNotFound:
         raise HTTPException(status_code=404, detail="Recipe not found")
+    except uploads.ImageSanitizationError as exc:
+        raise HTTPException(status_code=422, detail=f"Image could not be attached: {exc}")
 
 
 @router.delete("/recipes/{recipe_id}", status_code=204)

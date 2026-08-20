@@ -295,6 +295,19 @@ def strip_image_metadata(data: bytes, content_type: str) -> bytes:
 PUBLIC_IMAGE_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 
+class ImageSanitizationError(ValueError):
+    """Raised when a recipe image is identified as one of ours but could not
+    be sanitized.
+
+    Distinct from a plain `False` return, which means "nothing to do" — dev
+    mode, a foreign URL, a type this module doesn't strip (HEIC/PDF), or an
+    object already clean. This means "we found an object that needed
+    sanitizing and failed", and callers must treat it as an attachment
+    failure: do not save a recipe pointing at it, and do not delete the image
+    it would have replaced.
+    """
+
+
 def sanitize_public_image_blob(blob_name: str) -> bool:
     """Strip metadata and set caching on an image already sitting in the bucket.
 
@@ -303,9 +316,12 @@ def sanitize_public_image_blob(blob_name: str) -> bool:
     way in. The backend does learn the object's name when the URL is attached to
     a recipe, which is the first and only chance to clean it.
 
-    Returns True if the object was rewritten. Never raises: a recipe save must
-    not fail because of a stray unparseable image. Callers that need to know
-    about failures should read the log.
+    Returns True if the object was rewritten, False if there was nothing to do.
+    Raises ImageSanitizationError — not silently — when the object exists and
+    needs sanitizing but the attempt fails (permission error, GCS outage,
+    unparseable bytes despite a recognised signature). A save that ignored
+    that failure would publish a recipe pointing at a still-unsanitized image
+    with no record anything went wrong.
     """
     bucket_name = settings.gcs_bucket_name
     if settings.is_dev or not bucket_name or not blob_name:
@@ -313,28 +329,53 @@ def sanitize_public_image_blob(blob_name: str) -> bool:
 
     try:
         blob = storage.Client().bucket(bucket_name).get_blob(blob_name)
-        if blob is None:
-            return False
+    except Exception as exc:
+        raise ImageSanitizationError(
+            f"could not reach GCS to sanitize {blob_name}"
+        ) from exc
 
+    if blob is None:
+        # image_url names an object in our own bucket that doesn't exist —
+        # a broken reference, not a legitimate "nothing to sanitize" case.
+        raise ImageSanitizationError(f"{blob_name} does not exist in {bucket_name}")
+
+    try:
         data = blob.download_as_bytes()
-        content_type = sniff_content_type(data)
-        if content_type not in _STRIPPERS:
-            return False
+    except Exception as exc:
+        raise ImageSanitizationError(f"could not download {blob_name}") from exc
 
+    content_type = sniff_content_type(data)
+    if content_type not in _STRIPPERS:
+        # Not a format this module strips. HEIC/PDF aren't allowed recipe-image
+        # types to begin with, so this is unexpected but not itself unsafe —
+        # nothing here claims to have cleaned it.
+        return False
+
+    try:
         cleaned = strip_image_metadata(data, content_type)
-        if cleaned == data and blob.cache_control == PUBLIC_IMAGE_CACHE_CONTROL:
-            return False
+    except MetadataStripError as exc:
+        raise ImageSanitizationError(
+            f"could not parse {blob_name} to strip its metadata"
+        ) from exc
 
+    if cleaned == data and blob.cache_control == PUBLIC_IMAGE_CACHE_CONTROL:
+        return False
+
+    try:
         blob.cache_control = PUBLIC_IMAGE_CACHE_CONTROL
         blob.upload_from_string(cleaned, content_type=content_type)
-        return True
-    except Exception:
-        logger.exception("Failed to sanitize image blob %s", blob_name)
-        return False
+    except Exception as exc:
+        raise ImageSanitizationError(f"could not write sanitized {blob_name}") from exc
+
+    return True
 
 
 def sanitize_recipe_image(url: str | None) -> bool:
-    """Sanitize a recipe image given its public URL (no-op for foreign URLs)."""
+    """Sanitize a recipe image given its public URL (no-op for foreign URLs).
+
+    Propagates ImageSanitizationError from sanitize_public_image_blob — see
+    that function's docstring. Callers must not catch-and-ignore it.
+    """
     if blob := gcs_blob_name(url or "", settings.gcs_bucket_name or ""):
         return sanitize_public_image_blob(blob)
     return False

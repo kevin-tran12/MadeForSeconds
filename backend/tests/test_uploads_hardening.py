@@ -24,6 +24,8 @@ from conftest import (
     PNG_BYTES,
     REAL_PNG_BYTES,
     WEBP_BYTES,
+    _gps_tag_count,
+    _image_with_metadata,
 )
 
 
@@ -176,34 +178,8 @@ class TestUploadRoutesRejectDisguisedContent:
 
 # ── Metadata stripping ────────────────────────────────────────────────────────
 # The images bucket is world-readable, so a phone photo uploaded as-is publishes
-# the GPS coordinates it was taken at. Fixtures are built rather than committed
-# as blobs so the GPS tags being asserted on are visible in the test itself.
-
-def _exif_with_gps():
-    image = Image.new("RGB", (8, 8))
-    exif = image.getexif()
-    exif[0x010F] = "TestMake"
-    gps = exif.get_ifd(0x8825)
-    gps[1], gps[2] = "N", (Fraction(33), Fraction(56), Fraction(1744, 100))
-    gps[3], gps[4] = "W", (Fraction(83), Fraction(56), Fraction(4590, 100))
-    return exif
-
-
-def _image_with_metadata(fmt: str) -> bytes:
-    image = Image.new("RGB", (8, 8), (120, 80, 40))
-    buffer = io.BytesIO()
-    if fmt == "PNG":
-        text = PngImagePlugin.PngInfo()
-        text.add_text("Comment", "kitchen, home address")
-        image.save(buffer, format=fmt, pnginfo=text, exif=_exif_with_gps())
-    else:
-        image.save(buffer, format=fmt, exif=_exif_with_gps())
-    return buffer.getvalue()
-
-
-def _gps_tag_count(data: bytes) -> int:
-    exif = Image.open(io.BytesIO(data)).getexif()
-    return len(exif.get_ifd(0x8825)) if exif else 0
+# the GPS coordinates it was taken at. _image_with_metadata/_gps_tag_count live
+# in conftest.py — test_uploads_service.py needs them too, for sanitize_public_image_blob.
 
 
 class TestStripImageMetadata:

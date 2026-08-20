@@ -119,10 +119,14 @@ def create_recipe(db, body: RecipeCreate, *, source: str) -> Recipe:
     data["updated_at"] = now
     data["created_via"] = source
 
+    # Sanitize before committing anything. uploads.ImageSanitizationError
+    # propagates to the caller as an attachment failure — a recipe must never
+    # be saved pointing at an image we know we failed to strip.
+    uploads.sanitize_recipe_image(data.get("image_url"))
+
     doc_ref = db.collection("recipes").document()
     doc_ref.set(data)
     data["id"] = doc_ref.id
-    uploads.sanitize_recipe_image(data.get("image_url"))
     cache.clear()
     return Recipe(**data)
 
@@ -137,17 +141,28 @@ def update_recipe(db, recipe_id: str, body: RecipeUpdate, *, source: str) -> Rec
     updates = body.model_dump(exclude_unset=True)
     updates["updated_at"] = datetime.now(timezone.utc)
     updates["updated_via"] = source
-    doc_ref.update(updates)
 
-    # Delete replaced image from GCS (only when image_url was explicitly changed)
+    image_changed = False
+    old_image = ""
     if "image_url" in updates:
         old_image = old_data.get("image_url") or ""
-        if old_image != (updates["image_url"] or ""):
-            uploads.delete_recipe_image_blob(old_image)
-        # Attaching is the backend's first sight of an object uploaded straight
-        # to GCS through a signed PUT URL (the MCP path) — the only point where
-        # its metadata can still be stripped before the image goes public.
-        uploads.sanitize_recipe_image(updates["image_url"])
+        image_changed = old_image != (updates["image_url"] or "")
+        if image_changed:
+            # Sanitize the incoming image before anything is committed.
+            # Attaching is the backend's first sight of an object uploaded
+            # straight to GCS through a signed PUT URL (the MCP path) — the
+            # only point where its metadata can still be stripped before the
+            # image goes public. If this raises, the update aborts here:
+            # Firestore is untouched and the old image is never deleted.
+            uploads.sanitize_recipe_image(updates["image_url"])
+
+    doc_ref.update(updates)
+
+    # Delete the old image only once the new one is sanitized AND the
+    # Firestore write has landed — otherwise a later failure could leave the
+    # recipe with neither a valid old image nor a confirmed new one.
+    if image_changed:
+        uploads.delete_recipe_image_blob(old_image)
 
     updated = doc_ref.get().to_dict()
     updated["id"] = recipe_id
