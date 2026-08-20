@@ -3,20 +3,6 @@
 # Alerts at 50%, 80%, and 100%. At 100%, a Pub/Sub message triggers a
 # Cloud Function that scales Cloud Run to 0 instances.
 
-# ─── Notification channel (email) ────────────────────────────────────────────
-
-resource "google_monitoring_notification_channel" "budget_email" {
-  project      = var.gcp_project_id
-  display_name = "Budget Alert Email"
-  type         = "email"
-
-  labels = {
-    email_address = var.alert_email
-  }
-
-  depends_on = [google_project_service.required_apis]
-}
-
 # ─── Pub/Sub topic for budget notifications ──────────────────────────────────
 
 resource "google_pubsub_topic" "budget_alert" {

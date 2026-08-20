@@ -20,11 +20,9 @@ resource "google_monitoring_uptime_check_config" "backend_health" {
     type = "uptime_url"
     labels = {
       project_id = var.gcp_project_id
-      host       = replace(module.backend-service.service_uri, "https://", "")
+      host       = replace(var.backend_service_uri, "https://", "")
     }
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_monitoring_alert_policy" "backend_uptime" {
@@ -54,5 +52,5 @@ resource "google_monitoring_alert_policy" "backend_uptime" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.budget_email.name]
+  notification_channels = [var.notification_channel]
 }

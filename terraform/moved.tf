@@ -226,3 +226,38 @@ moved {
   from = google_cloud_scheduler_job.weekly_usage_report
   to   = module.backend-service.google_cloud_scheduler_job.weekly_usage_report
 }
+
+moved {
+  from = google_monitoring_uptime_check_config.backend_health
+  to   = module.observability.google_monitoring_uptime_check_config.backend_health
+}
+
+moved {
+  from = google_monitoring_alert_policy.backend_uptime
+  to   = module.observability.google_monitoring_alert_policy.backend_uptime
+}
+
+moved {
+  from = google_logging_metric.backend_errors
+  to   = module.observability.google_logging_metric.backend_errors
+}
+
+moved {
+  from = time_sleep.wait_for_log_metrics
+  to   = module.observability.time_sleep.wait_for_log_metrics
+}
+
+moved {
+  from = google_monitoring_alert_policy.backend_errors
+  to   = module.observability.google_monitoring_alert_policy.backend_errors
+}
+
+moved {
+  from = google_logging_metric.backend_5xx
+  to   = module.observability.google_logging_metric.backend_5xx
+}
+
+moved {
+  from = google_monitoring_alert_policy.backend_5xx
+  to   = module.observability.google_monitoring_alert_policy.backend_5xx
+}
