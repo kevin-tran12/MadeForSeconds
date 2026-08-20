@@ -15,7 +15,7 @@ stripe>=8.0.0,<16.0.0
 PyJWT[crypto]>=2.0.0,<3.0.0
 reportlab>=4.0.0,<6.0.0
 pyotp>=2.9.0,<3.0.0
-qrcode[pil]>=7.4.0,<9.0.0
+qrcode[pil]>=8.2,<9.0.0
 # Used directly by services/uploads.py's metadata stripper and its tests
 # (PIL.Image, PIL.PngImagePlugin) — previously only pulled in transitively via
 # qrcode[pil], which is fragile: a future qrcode release dropping or
