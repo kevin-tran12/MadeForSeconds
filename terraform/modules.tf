@@ -58,14 +58,10 @@ module "backend-service" {
   backend_sa_id    = module.security.backend_sa_id
   secret_ids       = module.security.secret_ids
 
-  # Gate the dynamic env blocks in cloud_run.tf. secret_ids carries the value
-  # once a secret exists; these carry "does it exist at all".
-  redis_url             = var.redis_url
-  stripe_secret_key     = var.stripe_secret_key
-  stripe_webhook_secret = var.stripe_webhook_secret
-  stripe_product_id     = var.stripe_product_id
-  subscriber_jwt_secret = var.subscriber_jwt_secret
-  resend_api_key        = var.resend_api_key
+  # Not in Secret Manager, so it cannot come through secret_ids like the other
+  # optional env values do — every secret-backed one is gated on its secret_id
+  # being non-null instead of on a separate flag.
+  stripe_product_id = var.stripe_product_id
 
   images_bucket_name   = module.storage.images_bucket_name
   receipts_bucket_name = module.storage.receipts_bucket_name

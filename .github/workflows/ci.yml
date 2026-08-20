@@ -129,6 +129,13 @@ jobs:
         # -backend=false: validation needs no state or GCP credentials
         run: terraform init -backend=false -input=false && terraform validate -no-color
 
+      # terraform/tests/*.tftest.hcl. mock_provider stands in for the google
+      # providers, so these plan without credentials and without touching the
+      # project — the init above is all the setup they need.
+      - name: terraform test
+        working-directory: terraform
+        run: terraform test -no-color
+
       # The budget circuit breaker lives in terraform/, so the backend pytest
       # job (which runs `pytest --cov=app` from backend/) never collects it.
       # Path follows billing_function/ into modules/cost-controls/ — the module
