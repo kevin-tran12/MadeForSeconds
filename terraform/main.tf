@@ -1,10 +1,12 @@
 terraform {
-  # Pinned, not a floor. The CLI version is also recorded in .terraform-version
+  # Exact, not a floor — "~> 1.15" was wrong despite the comment saying
+  # otherwise: that operator means >= 1.15.0, < 2.0.0, so it would silently
+  # accept 1.16+ too. The CLI version is also recorded in .terraform-version
   # (tfenv/tfswitch) and in the CI workflow — all three must move together, or
   # `fmt -check` starts failing on formatting another version considered clean.
   # State format upgrades are one-way: once a newer CLI writes this state, older
   # CLIs refuse to read it, so every machine has to be on the same version.
-  required_version = "~> 1.15"
+  required_version = "1.15.8"
 
   required_providers {
     google = {
