@@ -9,8 +9,6 @@ resource "google_cloud_run_v2_service" "backend" {
 
   deletion_protection = true
 
-  depends_on = [google_project_service.required_apis]
-
   lifecycle {
     # The running image is owned by the deploy pipeline — `gcloud run services
     # update` or Cloud Build (docs/DEPLOYMENT.md § Updating the backend) — not
@@ -31,7 +29,7 @@ resource "google_cloud_run_v2_service" "backend" {
   }
 
   template {
-    service_account = module.security.backend_sa_email
+    service_account = var.backend_sa_email
     timeout         = "120s"
 
     containers {
@@ -55,11 +53,11 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "GCS_BUCKET_NAME"
-        value = module.storage.images_bucket_name
+        value = var.images_bucket_name
       }
       env {
         name  = "GCS_RECEIPTS_BUCKET_NAME"
-        value = module.storage.receipts_bucket_name
+        value = var.receipts_bucket_name
       }
 
       # ADMIN_EMAILS read from Secret Manager — not passed as plaintext
@@ -67,7 +65,7 @@ resource "google_cloud_run_v2_service" "backend" {
         name = "ADMIN_EMAILS"
         value_source {
           secret_key_ref {
-            secret  = module.security.secret_ids.admin_emails
+            secret  = var.secret_ids.admin_emails
             version = "latest"
           }
         }
@@ -92,7 +90,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "REDIS_URL"
           value_source {
             secret_key_ref {
-              secret  = module.security.secret_ids.redis_url
+              secret  = var.secret_ids.redis_url
               version = "latest"
             }
           }
@@ -106,7 +104,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "STRIPE_SECRET_KEY"
           value_source {
             secret_key_ref {
-              secret  = module.security.secret_ids.stripe_secret_key
+              secret  = var.secret_ids.stripe_secret_key
               version = "latest"
             }
           }
@@ -120,7 +118,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "STRIPE_WEBHOOK_SECRET"
           value_source {
             secret_key_ref {
-              secret  = module.security.secret_ids.stripe_webhook_secret
+              secret  = var.secret_ids.stripe_webhook_secret
               version = "latest"
             }
           }
@@ -143,7 +141,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "SUBSCRIBER_JWT_SECRET"
           value_source {
             secret_key_ref {
-              secret  = module.security.secret_ids.subscriber_jwt_secret
+              secret  = var.secret_ids.subscriber_jwt_secret
               version = "latest"
             }
           }
@@ -157,7 +155,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "RESEND_API_KEY"
           value_source {
             secret_key_ref {
-              secret  = module.security.secret_ids.resend_api_key
+              secret  = var.secret_ids.resend_api_key
               version = "latest"
             }
           }
@@ -194,7 +192,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "INSTAGRAM_REFRESH_INVOKER_EMAIL"
-        value = module.security.backend_sa_email
+        value = var.backend_sa_email
       }
       env {
         name  = "INSTAGRAM_REFRESH_AUDIENCE"

@@ -181,3 +181,48 @@ moved {
   from = google_secret_manager_secret_iam_member.backend_instagram_token_adder
   to   = module.security.google_secret_manager_secret_iam_member.backend_instagram_token_adder
 }
+
+moved {
+  from = google_cloud_run_v2_service.backend
+  to   = module.backend-service.google_cloud_run_v2_service.backend
+}
+
+moved {
+  from = google_cloud_run_v2_service_iam_member.public
+  to   = module.backend-service.google_cloud_run_v2_service_iam_member.public
+}
+
+moved {
+  from = google_artifact_registry_repository.backend
+  to   = module.backend-service.google_artifact_registry_repository.backend
+}
+
+moved {
+  from = google_project_iam_member.cloudbuild_artifact_registry
+  to   = module.backend-service.google_project_iam_member.cloudbuild_artifact_registry
+}
+
+moved {
+  from = google_project_iam_member.cloudbuild_run_developer
+  to   = module.backend-service.google_project_iam_member.cloudbuild_run_developer
+}
+
+moved {
+  from = google_cloudbuild_trigger.backend_deploy
+  to   = module.backend-service.google_cloudbuild_trigger.backend_deploy
+}
+
+moved {
+  from = google_service_account_iam_member.scheduler_mints_backend_oidc
+  to   = module.backend-service.google_service_account_iam_member.scheduler_mints_backend_oidc
+}
+
+moved {
+  from = google_cloud_scheduler_job.instagram_token_refresh
+  to   = module.backend-service.google_cloud_scheduler_job.instagram_token_refresh
+}
+
+moved {
+  from = google_cloud_scheduler_job.weekly_usage_report
+  to   = module.backend-service.google_cloud_scheduler_job.weekly_usage_report
+}

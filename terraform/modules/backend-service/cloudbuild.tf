@@ -1,26 +1,18 @@
 # ─── Cloud Build ──────────────────────────────────────────────────────────────
 # Always-free tier: 2,500 build-minutes/mo on default machine
 
-data "google_project" "project" {
-  project_id = var.gcp_project_id
-}
-
 # Allow Cloud Build (running as mfs-backend SA) to push images to Artifact Registry
 resource "google_project_iam_member" "cloudbuild_artifact_registry" {
   project = var.gcp_project_id
   role    = "roles/artifactregistry.writer"
-  member  = "serviceAccount:${module.security.backend_sa_email}"
-
-  depends_on = [google_project_service.required_apis]
+  member  = "serviceAccount:${var.backend_sa_email}"
 }
 
 # Allow Cloud Build (running as mfs-backend SA) to deploy to Cloud Run
 resource "google_project_iam_member" "cloudbuild_run_developer" {
   project = var.gcp_project_id
   role    = "roles/run.developer"
-  member  = "serviceAccount:${module.security.backend_sa_email}"
-
-  depends_on = [google_project_service.required_apis]
+  member  = "serviceAccount:${var.backend_sa_email}"
 }
 
 # Cloud Build trigger (2nd Gen) — fires on push to main branch
@@ -29,9 +21,7 @@ resource "google_cloudbuild_trigger" "backend_deploy" {
   name     = "mfs-backend-deploy"
   location = var.gcp_region
 
-  depends_on = [google_project_service.required_apis]
-
-  service_account = module.security.backend_sa_id
+  service_account = var.backend_sa_id
 
   repository_event_config {
     # Full absolute path as confirmed via gcloud

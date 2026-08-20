@@ -51,7 +51,7 @@ resource "google_billing_budget" "monthly_cap" {
     # Project NUMBER, not ID. The Budget API always returns the number, so
     # "projects/${var.gcp_project_id}" never matches what comes back and every
     # plan shows the same diff — applying it does not converge, it just re-queues
-    # itself. data.google_project.project is already declared in cloudbuild.tf.
+    # itself. data.google_project.project is declared once in apis.tf and shared with the pubsub grant below.
     projects = ["projects/${data.google_project.project.number}"]
   }
 
@@ -123,7 +123,7 @@ resource "google_service_account" "budget_killer" {
 resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
   project  = var.gcp_project_id
   location = var.gcp_region
-  name     = google_cloud_run_v2_service.backend.name
+  name     = module.backend-service.service_name
   role     = "roles/run.admin"
   member   = "serviceAccount:${google_service_account.budget_killer.email}"
 }
@@ -192,7 +192,7 @@ resource "google_cloudfunctions2_function" "budget_killer" {
     environment_variables = {
       GCP_PROJECT_ID    = var.gcp_project_id
       GCP_REGION        = var.gcp_region
-      CLOUD_RUN_SERVICE = google_cloud_run_v2_service.backend.name
+      CLOUD_RUN_SERVICE = module.backend-service.service_name
     }
   }
 
@@ -279,7 +279,7 @@ resource "google_cloudfunctions2_function" "budget_resetter" {
     environment_variables = {
       GCP_PROJECT_ID    = var.gcp_project_id
       GCP_REGION        = var.gcp_region
-      CLOUD_RUN_SERVICE = google_cloud_run_v2_service.backend.name
+      CLOUD_RUN_SERVICE = module.backend-service.service_name
     }
   }
 
@@ -352,7 +352,7 @@ resource "google_monitoring_alert_policy" "budget_breaker_tripped" {
 
   documentation {
     content   = <<-EOT
-      The monthly budget cap was exceeded and ${google_cloud_run_v2_service.backend.name}
+      The monthly budget cap was exceeded and ${module.backend-service.service_name}
       has been scaled to 0 instances. The site is DOWN.
 
       Investigate the spend before restoring. To restore early:

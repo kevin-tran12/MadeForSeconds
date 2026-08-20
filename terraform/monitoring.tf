@@ -20,7 +20,7 @@ resource "google_monitoring_uptime_check_config" "backend_health" {
     type = "uptime_url"
     labels = {
       project_id = var.gcp_project_id
-      host       = replace(google_cloud_run_v2_service.backend.uri, "https://", "")
+      host       = replace(module.backend-service.service_uri, "https://", "")
     }
   }
 
