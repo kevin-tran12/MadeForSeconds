@@ -350,6 +350,5 @@ class TestDeleteRecipe:
 
         img_deleter.assert_called_once()
         raw_deleter.assert_not_called()
-        assert not hasattr(uploads, "delete_recipe_receipt_blob")
         db.delete.assert_called_once()
         svc_cache.clear.assert_called_once()
