@@ -42,6 +42,4 @@ resource "google_identity_platform_config" "default" {
     "madeforseconds.com",
     "madeforseconds.pages.dev",
   ]
-
-  depends_on = [google_project_service.required_apis]
 }

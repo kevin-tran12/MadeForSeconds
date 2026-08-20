@@ -28,7 +28,7 @@ resource "google_project_service_identity" "cloudscheduler" {
 # backend SA so it can authenticate against internal endpoints (refresh-token,
 # weekly usage report).
 resource "google_service_account_iam_member" "scheduler_mints_backend_oidc" {
-  service_account_id = google_service_account.backend.name
+  service_account_id = module.security.backend_sa_name
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${google_project_service_identity.cloudscheduler.email}"
   depends_on         = [google_project_service_identity.cloudscheduler]
@@ -52,7 +52,7 @@ resource "google_cloud_scheduler_job" "instagram_token_refresh" {
     uri         = local.instagram_refresh_url
 
     oidc_token {
-      service_account_email = google_service_account.backend.email
+      service_account_email = module.security.backend_sa_email
       audience              = local.instagram_refresh_url
     }
   }
@@ -88,7 +88,7 @@ resource "google_cloud_scheduler_job" "weekly_usage_report" {
     uri         = local.usage_report_url
 
     oidc_token {
-      service_account_email = google_service_account.backend.email
+      service_account_email = module.security.backend_sa_email
       audience              = local.usage_report_url
     }
   }

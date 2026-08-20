@@ -10,5 +10,5 @@ output "artifact_registry_repo" {
 
 output "service_account_email" {
   description = "Backend service account email"
-  value       = google_service_account.backend.email
+  value       = module.security.backend_sa_email
 }

@@ -56,3 +56,128 @@ moved {
   from = google_firestore_index.recipes_slug_published
   to   = module.storage.google_firestore_index.recipes_slug_published
 }
+
+moved {
+  from = google_identity_platform_config.default
+  to   = module.security.google_identity_platform_config.default
+}
+
+moved {
+  from = google_secret_manager_secret.admin_emails
+  to   = module.security.google_secret_manager_secret.admin_emails
+}
+
+moved {
+  from = google_secret_manager_secret_version.admin_emails_initial
+  to   = module.security.google_secret_manager_secret_version.admin_emails_initial
+}
+
+moved {
+  from = google_secret_manager_secret.redis_url
+  to   = module.security.google_secret_manager_secret.redis_url
+}
+
+moved {
+  from = google_secret_manager_secret_version.redis_url_initial
+  to   = module.security.google_secret_manager_secret_version.redis_url_initial
+}
+
+moved {
+  from = google_secret_manager_secret.stripe_secret_key
+  to   = module.security.google_secret_manager_secret.stripe_secret_key
+}
+
+moved {
+  from = google_secret_manager_secret_version.stripe_secret_key_initial
+  to   = module.security.google_secret_manager_secret_version.stripe_secret_key_initial
+}
+
+moved {
+  from = google_secret_manager_secret.stripe_webhook_secret
+  to   = module.security.google_secret_manager_secret.stripe_webhook_secret
+}
+
+moved {
+  from = google_secret_manager_secret_version.stripe_webhook_secret_initial
+  to   = module.security.google_secret_manager_secret_version.stripe_webhook_secret_initial
+}
+
+moved {
+  from = google_secret_manager_secret.subscriber_jwt_secret
+  to   = module.security.google_secret_manager_secret.subscriber_jwt_secret
+}
+
+moved {
+  from = google_secret_manager_secret_version.subscriber_jwt_secret_initial
+  to   = module.security.google_secret_manager_secret_version.subscriber_jwt_secret_initial
+}
+
+moved {
+  from = google_secret_manager_secret.resend_api_key
+  to   = module.security.google_secret_manager_secret.resend_api_key
+}
+
+moved {
+  from = google_secret_manager_secret_version.resend_api_key_initial
+  to   = module.security.google_secret_manager_secret_version.resend_api_key_initial
+}
+
+moved {
+  from = google_secret_manager_secret.instagram_access_token
+  to   = module.security.google_secret_manager_secret.instagram_access_token
+}
+
+moved {
+  from = google_secret_manager_secret_version.instagram_access_token_initial
+  to   = module.security.google_secret_manager_secret_version.instagram_access_token_initial
+}
+
+moved {
+  from = google_service_account.backend
+  to   = module.security.google_service_account.backend
+}
+
+moved {
+  from = google_project_iam_member.backend_firestore
+  to   = module.security.google_project_iam_member.backend_firestore
+}
+
+moved {
+  from = google_project_iam_member.backend_logging
+  to   = module.security.google_project_iam_member.backend_logging
+}
+
+moved {
+  from = google_project_iam_member.backend_logging_viewer
+  to   = module.security.google_project_iam_member.backend_logging_viewer
+}
+
+moved {
+  from = google_secret_manager_secret_iam_member.backend_secret_access
+  to   = module.security.google_secret_manager_secret_iam_member.backend_secret_access
+}
+
+moved {
+  from = google_service_account_iam_member.backend_act_as_self
+  to   = module.security.google_service_account_iam_member.backend_act_as_self
+}
+
+moved {
+  from = google_service_account_iam_member.backend_token_creator
+  to   = module.security.google_service_account_iam_member.backend_token_creator
+}
+
+moved {
+  from = google_secret_manager_secret_iam_member.backend_redis_url_access
+  to   = module.security.google_secret_manager_secret_iam_member.backend_redis_url_access
+}
+
+moved {
+  from = google_secret_manager_secret_iam_member.backend_instagram_token_access
+  to   = module.security.google_secret_manager_secret_iam_member.backend_instagram_token_access
+}
+
+moved {
+  from = google_secret_manager_secret_iam_member.backend_instagram_token_adder
+  to   = module.security.google_secret_manager_secret_iam_member.backend_instagram_token_adder
+}

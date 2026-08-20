@@ -9,7 +9,7 @@ data "google_project" "project" {
 resource "google_project_iam_member" "cloudbuild_artifact_registry" {
   project = var.gcp_project_id
   role    = "roles/artifactregistry.writer"
-  member  = "serviceAccount:${google_service_account.backend.email}"
+  member  = "serviceAccount:${module.security.backend_sa_email}"
 
   depends_on = [google_project_service.required_apis]
 }
@@ -18,7 +18,7 @@ resource "google_project_iam_member" "cloudbuild_artifact_registry" {
 resource "google_project_iam_member" "cloudbuild_run_developer" {
   project = var.gcp_project_id
   role    = "roles/run.developer"
-  member  = "serviceAccount:${google_service_account.backend.email}"
+  member  = "serviceAccount:${module.security.backend_sa_email}"
 
   depends_on = [google_project_service.required_apis]
 }
@@ -31,7 +31,7 @@ resource "google_cloudbuild_trigger" "backend_deploy" {
 
   depends_on = [google_project_service.required_apis]
 
-  service_account = google_service_account.backend.id
+  service_account = module.security.backend_sa_id
 
   repository_event_config {
     # Full absolute path as confirmed via gcloud
