@@ -261,3 +261,93 @@ moved {
   from = google_monitoring_alert_policy.backend_5xx
   to   = module.observability.google_monitoring_alert_policy.backend_5xx
 }
+
+moved {
+  from = google_pubsub_topic.budget_alert
+  to   = module.cost-controls.google_pubsub_topic.budget_alert
+}
+
+moved {
+  from = google_pubsub_topic_iam_member.budget_alert_publisher
+  to   = module.cost-controls.google_pubsub_topic_iam_member.budget_alert_publisher
+}
+
+moved {
+  from = data.google_billing_account.account
+  to   = module.cost-controls.data.google_billing_account.account
+}
+
+moved {
+  from = google_billing_budget.monthly_cap
+  to   = module.cost-controls.google_billing_budget.monthly_cap
+}
+
+moved {
+  from = google_service_account.budget_killer
+  to   = module.cost-controls.google_service_account.budget_killer
+}
+
+moved {
+  from = google_cloud_run_v2_service_iam_member.budget_killer_admin
+  to   = module.cost-controls.google_cloud_run_v2_service_iam_member.budget_killer_admin
+}
+
+moved {
+  from = data.archive_file.budget_killer_source
+  to   = module.cost-controls.data.archive_file.budget_killer_source
+}
+
+moved {
+  from = google_storage_bucket.function_source
+  to   = module.cost-controls.google_storage_bucket.function_source
+}
+
+moved {
+  from = google_storage_bucket_object.budget_killer_source
+  to   = module.cost-controls.google_storage_bucket_object.budget_killer_source
+}
+
+moved {
+  from = google_cloudfunctions2_function.budget_killer
+  to   = module.cost-controls.google_cloudfunctions2_function.budget_killer
+}
+
+moved {
+  from = google_cloud_run_v2_service_iam_member.budget_killer_invoker
+  to   = module.cost-controls.google_cloud_run_v2_service_iam_member.budget_killer_invoker
+}
+
+moved {
+  from = google_project_iam_member.budget_killer_eventarc
+  to   = module.cost-controls.google_project_iam_member.budget_killer_eventarc
+}
+
+moved {
+  from = google_service_account_iam_member.pubsub_token_creator
+  to   = module.cost-controls.google_service_account_iam_member.pubsub_token_creator
+}
+
+moved {
+  from = google_cloudfunctions2_function.budget_resetter
+  to   = module.cost-controls.google_cloudfunctions2_function.budget_resetter
+}
+
+moved {
+  from = google_cloud_run_v2_service_iam_member.budget_resetter_invoker
+  to   = module.cost-controls.google_cloud_run_v2_service_iam_member.budget_resetter_invoker
+}
+
+moved {
+  from = google_service_account_iam_member.scheduler_mints_budget_killer_oidc
+  to   = module.cost-controls.google_service_account_iam_member.scheduler_mints_budget_killer_oidc
+}
+
+moved {
+  from = google_monitoring_alert_policy.budget_breaker_tripped
+  to   = module.cost-controls.google_monitoring_alert_policy.budget_breaker_tripped
+}
+
+moved {
+  from = google_cloud_scheduler_job.budget_breaker_reset
+  to   = module.cost-controls.google_cloud_scheduler_job.budget_breaker_reset
+}

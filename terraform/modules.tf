@@ -84,3 +84,19 @@ module "observability" {
 
   depends_on = [google_project_service.required_apis]
 }
+
+module "cost-controls" {
+  source = "./modules/cost-controls"
+
+  gcp_project_id        = var.gcp_project_id
+  gcp_region            = var.gcp_region
+  billing_account       = var.billing_account
+  monthly_budget_amount = var.monthly_budget_amount
+
+  project_number        = data.google_project.project.number
+  backend_service_name  = module.backend-service.service_name
+  notification_channel  = google_monitoring_notification_channel.budget_email.name
+  scheduler_agent_email = google_project_service_identity.cloudscheduler.email
+
+  depends_on = [google_project_service.required_apis]
+}

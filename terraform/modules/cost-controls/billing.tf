@@ -8,8 +8,6 @@
 resource "google_pubsub_topic" "budget_alert" {
   project = var.gcp_project_id
   name    = "budget-alert"
-
-  depends_on = [google_project_service.required_apis]
 }
 
 # Grant the Cloud Billing Budgets service agent permission to publish to this
@@ -38,7 +36,7 @@ resource "google_billing_budget" "monthly_cap" {
     # "projects/${var.gcp_project_id}" never matches what comes back and every
     # plan shows the same diff — applying it does not converge, it just re-queues
     # itself. data.google_project.project is declared once in apis.tf and shared with the pubsub grant below.
-    projects = ["projects/${data.google_project.project.number}"]
+    projects = ["projects/${var.project_number}"]
   }
 
   amount {
@@ -77,12 +75,10 @@ resource "google_billing_budget" "monthly_cap" {
 
   all_updates_rule {
     monitoring_notification_channels = [
-      google_monitoring_notification_channel.budget_email.name,
+      var.notification_channel,
     ]
     pubsub_topic = google_pubsub_topic.budget_alert.id
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 # ─── Service account for the kill function ───────────────────────────────────
@@ -109,7 +105,7 @@ resource "google_service_account" "budget_killer" {
 resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
   project  = var.gcp_project_id
   location = var.gcp_region
-  name     = module.backend-service.service_name
+  name     = var.backend_service_name
   role     = "roles/run.admin"
   member   = "serviceAccount:${google_service_account.budget_killer.email}"
 }
@@ -141,8 +137,6 @@ resource "google_storage_bucket" "function_source" {
   location                    = var.gcp_region
   uniform_bucket_level_access = true
   force_destroy               = true
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_storage_bucket_object" "budget_killer_source" {
@@ -178,7 +172,7 @@ resource "google_cloudfunctions2_function" "budget_killer" {
     environment_variables = {
       GCP_PROJECT_ID    = var.gcp_project_id
       GCP_REGION        = var.gcp_region
-      CLOUD_RUN_SERVICE = module.backend-service.service_name
+      CLOUD_RUN_SERVICE = var.backend_service_name
     }
   }
 
@@ -191,8 +185,6 @@ resource "google_cloudfunctions2_function" "budget_killer" {
     # message must not silently skip the shutdown
     retry_policy = "RETRY_POLICY_RETRY"
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 # ─── IAM for Eventarc custom trigger SA ──────────────────────────────────────
@@ -223,7 +215,7 @@ resource "google_project_iam_member" "budget_killer_eventarc" {
 resource "google_service_account_iam_member" "pubsub_token_creator" {
   service_account_id = google_service_account.budget_killer.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:service-${data.google_project.project.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
+  member             = "serviceAccount:service-${var.project_number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }
 
 # ─── Breaker reset function ──────────────────────────────────────────────────
@@ -265,11 +257,9 @@ resource "google_cloudfunctions2_function" "budget_resetter" {
     environment_variables = {
       GCP_PROJECT_ID    = var.gcp_project_id
       GCP_REGION        = var.gcp_region
-      CLOUD_RUN_SERVICE = module.backend-service.service_name
+      CLOUD_RUN_SERVICE = var.backend_service_name
     }
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 # The scheduler job presents an OIDC token as the budget_killer SA, so that SA
@@ -290,9 +280,7 @@ resource "google_cloud_run_v2_service_iam_member" "budget_resetter_invoker" {
 resource "google_service_account_iam_member" "scheduler_mints_budget_killer_oidc" {
   service_account_id = google_service_account.budget_killer.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${google_project_service_identity.cloudscheduler.email}"
-
-  depends_on = [google_project_service_identity.cloudscheduler]
+  member             = "serviceAccount:${var.scheduler_agent_email}"
 }
 
 # ─── Breaker-tripped alert ───────────────────────────────────────────────────
@@ -334,11 +322,11 @@ resource "google_monitoring_alert_policy" "budget_breaker_tripped" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.budget_email.name]
+  notification_channels = [var.notification_channel]
 
   documentation {
     content   = <<-EOT
-      The monthly budget cap was exceeded and ${module.backend-service.service_name}
+      The monthly budget cap was exceeded and ${var.backend_service_name}
       has been scaled to 0 instances. The site is DOWN.
 
       Investigate the spend before restoring. To restore early:
@@ -348,4 +336,39 @@ resource "google_monitoring_alert_policy" "budget_breaker_tripped" {
     EOT
     mime_type = "text/markdown"
   }
+}
+# ─── Budget breaker reset ─────────────────────────────────────────────────────
+# Closes the circuit breaker at month rollover. The billing budget window resets
+# on the 1st, but the Cloud Run max_instance_count = 0 the killer set does not —
+# without this the site stays down until someone notices.
+#
+# The function is idempotent (no-op when already at 1 instance), so this is a
+# cheap no-op in every month the breaker never tripped.
+
+resource "google_cloud_scheduler_job" "budget_breaker_reset" {
+  project     = var.gcp_project_id
+  region      = var.gcp_region
+  name        = "budget-breaker-reset"
+  description = "Restore mfs-backend scaling after a budget breaker trip"
+  schedule    = "0 8 1 * *" # 08:00 UTC on the 1st, after the budget window rolls over
+  time_zone   = "Etc/UTC"
+
+  retry_config {
+    retry_count = 3
+  }
+
+  http_target {
+    http_method = "POST"
+    uri         = google_cloudfunctions2_function.budget_resetter.service_config[0].uri
+
+    oidc_token {
+      service_account_email = google_service_account.budget_killer.email
+      audience              = google_cloudfunctions2_function.budget_resetter.service_config[0].uri
+    }
+  }
+
+  depends_on = [
+    google_cloud_run_v2_service_iam_member.budget_resetter_invoker,
+    google_service_account_iam_member.scheduler_mints_budget_killer_oidc,
+  ]
 }

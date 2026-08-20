@@ -126,13 +126,15 @@ jobs:
 
       # The budget circuit breaker lives in terraform/, so the backend pytest
       # job (which runs `pytest --cov=app` from backend/) never collects it.
+      # Path follows billing_function/ into modules/cost-controls/ — the module
+      # refactor moves it because billing.tf resolves it via ${path.module}.
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
       - name: Test budget circuit breaker
-        working-directory: terraform/billing_function
+        working-directory: terraform/modules/cost-controls/billing_function
         run: |
           pip install -r requirements.txt pytest
           python -m pytest -q
