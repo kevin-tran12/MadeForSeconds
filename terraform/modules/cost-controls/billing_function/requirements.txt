@@ -1,2 +1,21 @@
-functions-framework==3.*
-google-cloud-run==0.*
+# Exact pins, not 3.*/0.* wildcards. This file is one of the archive_file
+# `source` blocks in billing.tf — the whole point of that explicit-blocks
+# change was a byte-identical, reproducible deployment archive, and a
+# wildcard range here would silently undermine it: GCP resolves this file
+# fresh at *build* time (Cloud Functions buildpacks, not this repo's Docker
+# image), so the same unchanged source could still deploy different code
+# on a later rebuild. That is a real risk specifically for the budget
+# breaker — its whole job is to behave identically every time it fires.
+#
+# Resolved and verified inside python:3.12-slim, matching the function's
+# `runtime = "python312"` in billing.tf.
+#
+# Transitive dependencies (Flask, gunicorn, grpcio, etc.) are intentionally
+# left unpinned here: Cloud Functions' Python buildpack installs this file
+# directly rather than through this repo's own Docker build, and pinning
+# ~35 transitive packages via a constraints file would need a real deploy to
+# confirm the buildpack actually honours it — not something verifiable from
+# a local check. The two direct dependencies below are what matters most and
+# what a wildcard range was actually floating.
+functions-framework==3.10.2
+google-cloud-run==0.16.1

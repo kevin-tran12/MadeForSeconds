@@ -43,8 +43,10 @@ jobs:
         run: bandit -r backend/app -ll
 
       - name: pip-audit — Python dependency CVEs
+        # requirements.lock, not requirements.txt: audit what actually ships,
+        # not whatever a range happens to resolve to on a given day.
         # CVE-2026-4539: pygments (via rich) — no fix released yet, ignore until patch ships
-        run: pip-audit -r backend/requirements.txt --ignore-vuln CVE-2026-4539
+        run: pip-audit -r backend/requirements.lock --ignore-vuln CVE-2026-4539
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -70,7 +72,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install -r backend/requirements.txt
+        # requirements.lock, not requirements.txt — CI and the production
+        # Docker image must resolve identically. See requirements.lock's
+        # header for what generates it and why.
+        run: pip install -r backend/requirements.lock
 
       - name: Run pytest
         working-directory: backend

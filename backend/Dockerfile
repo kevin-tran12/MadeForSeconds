@@ -2,8 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.lock, not requirements.txt: the lock pins every transitive
+# dependency to the exact version resolved and tested against, so the same
+# commit installs the same bytes on every build. requirements.txt states
+# intent (deliberate ranges); it is not what actually gets installed here.
+COPY requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 COPY . .
 

@@ -1,0 +1,109 @@
+# Fully-resolved dependency lock — generated, do not hand-edit.
+#
+# requirements.txt states intent (deliberate ranges — see the comment at its
+# top on why majors are gated but minors/patches float between test runs).
+# This file pins every one of those ranges to the exact version, PLUS every
+# transitive dependency, that Docker and CI actually install — so the same
+# commit installs the same bytes regardless of which day it's built.
+#
+# Resolved inside python:3.12-slim (the real production base image — see
+# backend/Dockerfile), not on a developer's host OS, since pure-version
+# resolution can differ by platform even for identical constraints. Verified
+# concretely while generating this file: reportlab>=4.0.0,<6.0.0 resolved to
+# 5.0.1 here and had resolved to 5.0.0 on Windows earlier the same week — the
+# exact class of drift this file exists to eliminate.
+#
+# Regenerate after any requirements.txt change:
+#   docker build -f Dockerfile -t mfs-lock-tmp --target lock-export . \
+#     && docker run --rm mfs-lock-tmp > requirements.lock
+# (or see the one-off build used to generate this file in the PR/commit that
+# added it, if the Dockerfile has no such stage — a plain
+#   docker run --rm -w /app -v "$(pwd)":/app python:3.12-slim \
+#     sh -c "pip install -q -r requirements.txt && pip freeze"
+# works too.)
+#
+# uvloop is Linux/Unix-only (uvicorn[standard] pulls it conditionally) and
+# will not appear if this is ever regenerated on Windows or macOS without a
+# container — that would be a real regression, not noise, since production
+# is always Linux.
+
+PyJWT==2.13.0
+PyOTP==2.10.0
+PyYAML==6.0.3
+Pygments==2.21.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.14.2
+attrs==26.1.0
+cachetools==5.5.2
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.4.2
+coverage==7.15.4
+cryptography==50.0.0
+fastapi==0.141.1
+google-api-core==2.33.0
+google-auth==2.37.0
+google-cloud-appengine-logging==1.10.0
+google-cloud-audit-log==0.6.0
+google-cloud-core==2.6.1
+google-cloud-firestore==2.19.0
+google-cloud-logging==3.11.2
+google-cloud-secret-manager==2.21.1
+google-cloud-storage==2.19.0
+google-crc32c==1.8.0
+google-resumable-media==2.10.1
+googleapis-common-protos==1.75.0
+grpc-google-iam-v1==0.14.4
+grpcio-status==1.71.2
+grpcio==1.83.0
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx-sse==0.4.3
+httpx==0.28.1
+idna==3.19
+iniconfig==2.3.0
+jsonschema-specifications==2025.9.1
+jsonschema==4.26.0
+markdown-it-py==4.2.0
+mcp==1.29.0
+mdurl==0.1.2
+opentelemetry-api==1.44.0
+packaging==26.3
+pillow==12.3.0
+pluggy==1.6.0
+proto-plus==1.28.2
+protobuf==5.29.6
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
+pycparser==3.0
+pydantic-settings==2.7.1
+pydantic==2.13.4
+pydantic_core==2.46.4
+pytest-asyncio==1.4.0
+pytest-cov==6.0.0
+pytest==9.1.0
+python-dotenv==1.2.3
+python-multipart==0.0.32
+qrcode==8.2
+redis==8.1.0
+referencing==0.37.0
+reportlab==5.0.1
+requests==2.34.2
+rich==15.0.0
+rpds-py==2026.6.3
+rsa==4.9.1
+shellingham==1.5.4
+sse-starlette==3.4.8
+starlette==1.6.0
+stripe==15.5.1
+typer==0.27.1
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+urllib3==2.7.0
+uvicorn==0.34.0
+uvloop==0.22.1
+watchfiles==1.2.0
+websockets==17.0.1
