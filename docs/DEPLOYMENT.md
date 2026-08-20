@@ -236,6 +236,31 @@ Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild
 > exactly how a budget-config apply once tried to deploy an unrelated image that
 > could not boot. Roll back or forward with `gcloud run services update`.
 
+> **Apply Terraform before pushing a backend revision that depends on it.**
+> Pushing to `main` deploys automatically via Cloud Build; Terraform is
+> applied manually and separately. If a code change needs a new Terraform
+> resource — a bucket, an env var, an IAM grant — apply Terraform *first*.
+>
+> A revision missing something `validate_production_settings()` requires
+> (`backend/app/config.py`) — currently the three GCS bucket names, the
+> WorkOS domain, the MCP resource URL, and a few others — crashes at import
+> time before it ever binds a port. This is the safe failure mode, not a
+> dangerous one: `cloudbuild.yaml` runs plain `gcloud run deploy` with no
+> `--no-traffic` flag, so Cloud Run waits for the new revision to pass its
+> startup probe before routing any traffic to it. A revision that crash-loops
+> here never goes live — the previous, working revision keeps serving, and
+> **no manual rollback step is needed.** Check Cloud Run's revision list and
+> the crash-looping revision's logs for the `RuntimeError` message, fix the
+> ordering (apply Terraform, then re-push or re-deploy the same image), and
+> the next revision will start normally.
+>
+> This check exists because earlier code silently fell back to a fake
+> "upload succeeded" placeholder response whenever a bucket was unconfigured
+> — in production exactly as in local dev — so a revision deployed ahead of
+> `terraform apply` would report every image upload as successful while
+> attaching nothing real. The startup check turns that into an impossible
+> state instead of a silent one.
+
 ### What requires what kind of deploy?
 
 | Change | Action |

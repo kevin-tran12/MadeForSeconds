@@ -84,8 +84,14 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
 
     filename = f"{uuid.uuid4()}-{uploads.sanitize_filename(file.filename or '')}"
 
-    if settings.is_dev or not settings.gcs_bucket_name:
+    if settings.is_dev:
         return {"url": f"https://placehold.co/800x400?text={filename}"}
+    if not settings.gcs_bucket_name:
+        # Reserved for is_dev above — a missing bucket in production must
+        # not fall back to the same placeholder. config.validate_production_settings
+        # already refuses to start the process in that state; this is the
+        # backstop in case that check ever has a gap.
+        raise HTTPException(status_code=500, detail="GCS_BUCKET_NAME is not configured")
 
     # Phone photos carry a GPS IFD. This bucket is world-readable, so uploading
     # one unmodified publishes the coordinates it was taken at. Lossless — only
@@ -127,8 +133,10 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
 
     filename = f"{uuid.uuid4()}-{uploads.sanitize_filename(file.filename or '')}"
 
-    if settings.is_dev or not settings.gcs_receipts_bucket_name:
+    if settings.is_dev:
         return {"url": f"https://placehold.co/400x300?text=receipt-{filename}"}
+    if not settings.gcs_receipts_bucket_name:
+        raise HTTPException(status_code=500, detail="GCS_RECEIPTS_BUCKET_NAME is not configured")
 
     try:
         client = storage.Client()

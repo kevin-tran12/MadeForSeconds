@@ -484,9 +484,7 @@ def request_image_upload(filename: str, content_type: str, kind: str = "recipe_i
         blob_name = f"receipts/{uuid4()}-{safe_name}"
         final_url = f"gs://{upload_bucket}/{blob_name}"
 
-    # recipe_image needs both buckets configured; receipt needs only one.
-    missing_bucket = not upload_bucket or (kind == "recipe_image" and not public_bucket)
-    if settings.is_dev or missing_bucket:
+    if settings.is_dev:
         dev_final = (
             f"https://placehold.co/800x400?text={blob_name}"
             if kind == "recipe_image"
@@ -500,6 +498,22 @@ def request_image_upload(filename: str, content_type: str, kind: str = "recipe_i
             "expires_in_seconds": 0,
             "note": "Dev mode: no real upload happens; use final_url directly.",
         }
+
+    # recipe_image needs both buckets configured; receipt needs only one.
+    # Reserved for is_dev above — a bucket missing in production must raise,
+    # not silently fall back to the same dev-mode placeholder. That placeholder
+    # is not a real upload URL; a caller saving it as a recipe's image_url or
+    # an expense's receipt_url would be attaching fake data to real content.
+    # config.validate_production_settings already refuses to start the
+    # process in that state; this is the backstop in case that check ever has
+    # a gap. Not a ValueError — this is a server misconfiguration, not bad
+    # input, so it should surface through _tool_errors' generic
+    # `except Exception` branch as {"error": "internal", ...} and get logged,
+    # not read like something the caller could fix by retrying differently.
+    if not upload_bucket or (kind == "recipe_image" and not public_bucket):
+        raise uploads.StorageNotConfiguredError(
+            f"backend storage is not fully configured for kind={kind!r}"
+        )
 
     result = uploads.signed_put_url(upload_bucket, blob_name, content_type)
     header_flags = " ".join(f"-H '{k}: {v}'" for k, v in result["required_headers"].items())

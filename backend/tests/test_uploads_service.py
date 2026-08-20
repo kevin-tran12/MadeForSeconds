@@ -228,6 +228,22 @@ class TestFetchImageToGcs:
 
         assert "placehold.co" in url
 
+    def test_raises_in_production_when_bucket_not_configured(self):
+        """The placeholder is reserved for is_dev — a missing bucket in
+        production must fail loudly, not silently report a fetched-and-fake
+        URL that could get saved as a recipe's real image_url."""
+        with (
+            patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
+            patch("app.services.uploads.httpx") as mock_httpx,
+            patch("app.services.uploads.settings") as mock_settings,
+        ):
+            _mock_response(mock_httpx)
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = None
+
+            with pytest.raises(uploads.StorageNotConfiguredError, match="GCS_BUCKET_NAME"):
+                uploads.fetch_image_to_gcs("https://example.com/x.jpg")
+
 
 # ── blob URL helpers (bucket-aware wrappers) ──────────────────────────────────
 

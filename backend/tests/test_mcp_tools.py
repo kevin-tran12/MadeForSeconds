@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app import mcp_server
+from app.services import uploads
 
 
 def _chain_db():
@@ -331,9 +332,14 @@ class TestRequestImageUpload:
         assert bucket_arg == "staging-bucket"
         assert blob_name.endswith("-my_photo.jpg")
 
-    def test_falls_back_to_dev_when_staging_not_configured(self):
-        """The public bucket alone being set is not enough for recipe_image —
-        signing a PUT against a None staging bucket must never happen."""
+    def test_raises_in_production_when_staging_not_configured(self):
+        """The public bucket alone being set is not enough for recipe_image.
+        Signing a PUT against a None staging bucket must never happen — and
+        this must not silently fall back to the dev-mode placeholder either,
+        which would report a fake upload as if it succeeded. Cloud Build
+        auto-deploys the backend on every push to main while Terraform is
+        applied manually and separately, so a revision can genuinely reach
+        production with this unset."""
         with (
             patch("app.mcp_server.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url") as signer,
@@ -344,8 +350,46 @@ class TestRequestImageUpload:
 
             result = mcp_server.request_image_upload("photo.jpg", "image/jpeg")
 
-        assert result["upload_url"] == "dev://noop"
+        assert result["error"] == "internal"
+        assert "upload_url" not in result  # not the dev-mode shape either
         signer.assert_not_called()
+
+    def test_raises_in_production_when_public_bucket_not_configured(self):
+        with (
+            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.services.uploads.signed_put_url") as signer,
+        ):
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = None
+            mock_settings.gcs_staging_bucket_name = "staging-bucket"
+
+            result = mcp_server.request_image_upload("photo.jpg", "image/jpeg")
+
+        assert result["error"] == "internal"
+        signer.assert_not_called()
+
+    def test_raises_in_production_when_receipts_bucket_not_configured(self):
+        with (
+            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.services.uploads.signed_put_url") as signer,
+        ):
+            mock_settings.is_dev = False
+            mock_settings.gcs_receipts_bucket_name = None
+
+            result = mcp_server.request_image_upload("r.pdf", "application/pdf", kind="receipt")
+
+        assert result["error"] == "internal"
+        signer.assert_not_called()
+
+    def test_dev_mode_still_returns_placeholder_regardless_of_bucket_config(self):
+        """is_dev is the only thing that should ever produce the placeholder
+        response — confirmed here with buckets unset, which used to also
+        trigger it via the old `is_dev or missing_bucket` check."""
+        # settings.is_dev is True in the test environment by default
+        result = mcp_server.request_image_upload("photo.jpg", "image/jpeg")
+
+        assert result["upload_url"] == "dev://noop"
+        assert "placehold.co" in result["final_url"]
 
     def test_production_receipt_goes_to_private_bucket(self):
         signed = {"upload_url": "u", "method": "PUT", "required_headers": {}, "expires_in_seconds": 900}
@@ -385,6 +429,18 @@ class TestUploadImageFromUrl:
 
         assert result["error"] == "invalid_request"
         assert "https" in result["message"]
+
+    def test_storage_misconfiguration_surfaces_as_internal_not_invalid_request(self):
+        """A missing bucket is a server problem, not something the caller
+        could fix by adjusting its input — distinct from the ValueError case
+        above, which _tool_errors reports as invalid_request."""
+        with patch(
+            "app.services.uploads.fetch_image_to_gcs",
+            side_effect=uploads.StorageNotConfiguredError("GCS_BUCKET_NAME is not configured"),
+        ):
+            result = mcp_server.upload_image_from_url("https://example.com/x.jpg")
+
+        assert result["error"] == "internal"
 
 
 # ── create_expense receipt_url ────────────────────────────────────────────────

@@ -167,6 +167,31 @@ def test_admin_upload_image_dev_mode(authenticated_client):
         assert response.status_code == 200
         assert "placehold.co" in response.json()["url"]
 
+def test_admin_upload_image_fails_closed_when_unconfigured_in_production(authenticated_client):
+    """The placeholder response is reserved for is_dev. Cloud Build
+    auto-deploys the backend on every push to main while Terraform (which
+    creates the bucket and wires GCS_BUCKET_NAME) is applied manually and
+    separately — a revision that reaches production ahead of that apply
+    must fail loudly, not silently report a fake upload success that could
+    get saved as a recipe's real image_url."""
+    with patch("app.routes.admin.settings") as mock_settings:
+        mock_settings.is_dev = False
+        mock_settings.gcs_bucket_name = None
+        file_data = {"file": ("test.jpg", JPEG_BYTES, "image/jpeg")}
+        response = authenticated_client.post("/api/admin/upload-image", files=file_data)
+        assert response.status_code == 500
+        assert "GCS_BUCKET_NAME" in response.json()["detail"]
+        assert "placehold.co" not in response.text
+
+def test_admin_upload_receipt_fails_closed_when_unconfigured_in_production(authenticated_client):
+    with patch("app.routes.admin.settings") as mock_settings:
+        mock_settings.is_dev = False
+        mock_settings.gcs_receipts_bucket_name = None
+        file_data = {"file": ("r.pdf", PDF_BYTES, "application/pdf")}
+        response = authenticated_client.post("/api/admin/upload-receipt", files=file_data)
+        assert response.status_code == 500
+        assert "GCS_RECEIPTS_BUCKET_NAME" in response.json()["detail"]
+
 def test_admin_upload_image_rejects_oversize(authenticated_client):
     """Uploads over 10MB are rejected before touching storage."""
     with patch("app.routes.admin.settings") as mock_settings:

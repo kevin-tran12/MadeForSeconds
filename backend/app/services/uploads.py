@@ -28,6 +28,22 @@ ALLOWED_RECEIPT_TYPES = ALLOWED_IMAGE_TYPES | {"image/heic", "application/pdf"}
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
+class StorageNotConfiguredError(RuntimeError):
+    """Raised when an upload path needs a GCS bucket setting that is unset,
+    outside dev mode.
+
+    validate_production_settings() in config.py is the primary defense — it
+    refuses to let the process start in production without every bucket name
+    set, so this should be unreachable there. This is the belt-and-suspenders
+    backstop for that check having a gap, or Settings() being constructed
+    outside the normal app-startup path (a script, a test harness). It exists
+    so a misconfigured deploy fails loudly instead of the upload routes
+    falling back to their dev-mode placeholder response — a fabricated
+    "upload succeeded" that a caller could go on to save as a recipe's real
+    image_url or an expense's real receipt_url.
+    """
+
+
 # ── Blob naming & cleanup ─────────────────────────────────────────────────────
 
 def gcs_blob_name(url: str, bucket_name: str) -> str | None:
@@ -563,8 +579,10 @@ def fetch_image_to_gcs(source_url: str) -> str:
     filename = sanitize_filename(parsed.path.rsplit("/", 1)[-1] or "image")
     blob_name = f"{uuid4()}-{filename}"
 
-    if settings.is_dev or not settings.gcs_bucket_name:
+    if settings.is_dev:
         return f"https://placehold.co/800x400?text={blob_name}"
+    if not settings.gcs_bucket_name:
+        raise StorageNotConfiguredError("GCS_BUCKET_NAME is not configured")
 
     # Bytes are already in the backend's hands here — unlike the signed-PUT
     # flow, there is no reason to route this through staging. Sanitize before
