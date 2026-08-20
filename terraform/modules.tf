@@ -69,6 +69,7 @@ module "backend-service" {
 
   images_bucket_name   = module.storage.images_bucket_name
   receipts_bucket_name = module.storage.receipts_bucket_name
+  staging_bucket_name  = module.storage.staging_bucket_name
 
   scheduler_agent_email = google_project_service_identity.cloudscheduler.email
 

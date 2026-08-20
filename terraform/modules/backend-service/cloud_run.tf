@@ -59,6 +59,10 @@ resource "google_cloud_run_v2_service" "backend" {
         name  = "GCS_RECEIPTS_BUCKET_NAME"
         value = var.receipts_bucket_name
       }
+      env {
+        name  = "GCS_STAGING_BUCKET_NAME"
+        value = var.staging_bucket_name
+      }
 
       # ADMIN_EMAILS read from Secret Manager — not passed as plaintext
       env {

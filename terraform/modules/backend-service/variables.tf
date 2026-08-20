@@ -143,6 +143,11 @@ variable "receipts_bucket_name" {
   type        = string
 }
 
+variable "staging_bucket_name" {
+  description = "Private staging bucket for unsanitized recipe-image uploads — injected as GCS_STAGING_BUCKET_NAME"
+  type        = string
+}
+
 # ─── Root-level shared prerequisite ────────────────────────────────────────
 
 variable "scheduler_agent_email" {

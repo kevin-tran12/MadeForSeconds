@@ -106,3 +106,44 @@ resource "google_storage_bucket_iam_member" "backend_receipts" {
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${var.backend_sa_email}"
 }
+
+# ─── GCS Bucket for Staged (Unsanitized) Recipe Images ─────────────────────
+# Private landing zone for the signed-PUT recipe-image flow. The backend has
+# no visibility into bytes uploaded that way until update_recipe attaches the
+# URL — this bucket exists so those bytes are never publicly readable before
+# sanitize_public_image_blob() has stripped them and promoted the result into
+# the public images bucket. Ephemeral by design: no versioning, force_destroy
+# unlike images/receipts, and auto-deleted after a couple of days to clean up
+# uploads that were never attached to a recipe — a real case for an
+# LLM-driven agent that PUTs a file and then never calls update_recipe.
+resource "google_storage_bucket" "staging" {
+  project                     = var.gcp_project_id
+  name                        = "${var.gcp_project_id}-images-staging"
+  location                    = var.gcp_region
+  force_destroy               = true
+  uniform_bucket_level_access = true
+  # Explicit, unlike images/receipts: UBLA alone doesn't stop a future
+  # accidental allUsers grant. This bucket protects nothing permanent, so
+  # there is no reason to leave that door open even in principle.
+  public_access_prevention = "enforced"
+
+  lifecycle_rule {
+    condition {
+      age = 2
+    }
+    action {
+      type = "Delete"
+    }
+  }
+}
+
+# Needs create (for the signed PUT to validate — V4 signed URLs are checked
+# against the signer's live IAM grants at request time, not frozen at
+# generation time), plus get/delete for the promotion step in
+# sanitize_public_image_blob(). objectUser bundles get/create/update/delete/
+# list, matching the grant already used on the public images bucket.
+resource "google_storage_bucket_iam_member" "backend_staging" {
+  bucket = google_storage_bucket.staging.name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${var.backend_sa_email}"
+}
