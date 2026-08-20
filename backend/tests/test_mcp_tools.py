@@ -299,6 +299,11 @@ class TestRequestImageUpload:
         assert "placehold.co" in result["final_url"]
 
     def test_production_returns_signed_url_and_curl(self):
+        """The signed PUT must target the private staging bucket while
+        final_url keeps pointing at the public one — a single shared bucket
+        variable here would silently break either the upload or the
+        eventual sanitize-on-attach lookup (gcs_blob_name matches final_url
+        against the PUBLIC bucket name)."""
         signed = {
             "upload_url": "https://storage.googleapis.com/signed-put",
             "method": "PUT",
@@ -314,6 +319,7 @@ class TestRequestImageUpload:
         ):
             mock_settings.is_dev = False
             mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = "staging-bucket"
 
             result = mcp_server.request_image_upload("my photo.jpg", "image/jpeg")
 
@@ -321,21 +327,41 @@ class TestRequestImageUpload:
         assert result["final_url"].endswith("-my_photo.jpg")
         assert "curl -X PUT" in result["curl_example"]
         assert "x-goog-content-length-range" in result["curl_example"]
-        blob_name = signer.call_args[0][1]
+        bucket_arg, blob_name = signer.call_args[0][0], signer.call_args[0][1]
+        assert bucket_arg == "staging-bucket"
         assert blob_name.endswith("-my_photo.jpg")
+
+    def test_falls_back_to_dev_when_staging_not_configured(self):
+        """The public bucket alone being set is not enough for recipe_image —
+        signing a PUT against a None staging bucket must never happen."""
+        with (
+            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.services.uploads.signed_put_url") as signer,
+        ):
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = None
+
+            result = mcp_server.request_image_upload("photo.jpg", "image/jpeg")
+
+        assert result["upload_url"] == "dev://noop"
+        signer.assert_not_called()
 
     def test_production_receipt_goes_to_private_bucket(self):
         signed = {"upload_url": "u", "method": "PUT", "required_headers": {}, "expires_in_seconds": 900}
         with (
             patch("app.mcp_server.settings") as mock_settings,
-            patch("app.services.uploads.signed_put_url", return_value=signed),
+            patch("app.services.uploads.signed_put_url", return_value=signed) as signer,
         ):
             mock_settings.is_dev = False
             mock_settings.gcs_receipts_bucket_name = "receipts-bucket"
+            # Deliberately not set — receipts must never reference staging.
+            mock_settings.gcs_staging_bucket_name = None
 
             result = mcp_server.request_image_upload("r.pdf", "application/pdf", kind="receipt")
 
         assert result["final_url"].startswith("gs://receipts-bucket/receipts/")
+        assert signer.call_args[0][0] == "receipts-bucket"
 
 
 # ── upload_image_from_url ─────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173"  # comma-separated list
     gcs_bucket_name: str | None = None
     gcs_receipts_bucket_name: str | None = None
+    gcs_staging_bucket_name: str | None = None
     # MCP OAuth (WorkOS AuthKit is the authorization server; the MCP server is a resource
     # server that only validates tokens). workos_authkit_domain is the OAuth issuer URL.
     workos_authkit_domain: str = ""  # e.g. https://<slug>.authkit.app

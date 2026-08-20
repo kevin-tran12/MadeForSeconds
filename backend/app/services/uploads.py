@@ -308,13 +308,101 @@ class ImageSanitizationError(ValueError):
     """
 
 
+def _promote_staged_image(blob_name: str) -> bool:
+    """Look for `blob_name` in the staging bucket and, if found, sanitize it
+    into the public images bucket, then best-effort delete the staged copy.
+
+    Called only from sanitize_public_image_blob when the object is not (yet)
+    in the public bucket — i.e. it may have come in through the signed-PUT
+    flow, which lands bytes in a private staging bucket rather than the
+    public one, since the backend has no visibility into that upload at all.
+
+    Returns True if a staged object was found and promoted. Returns False —
+    not an error — when there is nothing to promote: staging isn't
+    configured, or no object exists there either. The caller falls through
+    to its own "does not exist" handling in that case.
+
+    Raises ImageSanitizationError if a staged object exists but cannot be
+    safely promoted: unparseable bytes, or a content type that isn't one of
+    the three request_image_upload declares as allowed for recipe images.
+    Unlike the tolerant "unstrippable type" case in sanitize_public_image_blob
+    for objects already in the public bucket (legacy content that predates
+    this design), nothing should ever reach staging except what
+    request_image_upload allowed — GCS does not verify a signed PUT's
+    declared Content-Type header against the actual bytes, so this
+    sniff-and-reject is the only backstop against a spoofed header landing
+    arbitrary bytes in a world-readable bucket.
+    """
+    staging_bucket_name = settings.gcs_staging_bucket_name
+    if not staging_bucket_name:
+        return False
+
+    try:
+        staged_blob = storage.Client().bucket(staging_bucket_name).get_blob(blob_name)
+    except Exception as exc:
+        raise ImageSanitizationError(
+            f"could not reach GCS staging bucket to look up {blob_name}"
+        ) from exc
+
+    if staged_blob is None:
+        return False
+
+    try:
+        data = staged_blob.download_as_bytes()
+    except Exception as exc:
+        raise ImageSanitizationError(f"could not download staged {blob_name}") from exc
+
+    content_type = sniff_content_type(data)
+    if content_type not in _STRIPPERS:
+        logger.warning(
+            "staged %s sniffed as %s, not an allowed recipe-image type — refusing to promote",
+            blob_name, content_type,
+        )
+        raise ImageSanitizationError(
+            f"staged {blob_name} is not a recognised recipe-image type (JPEG/PNG/WebP only)"
+        )
+
+    try:
+        cleaned = strip_image_metadata(data, content_type)
+    except MetadataStripError as exc:
+        raise ImageSanitizationError(
+            f"could not parse staged {blob_name} to strip its metadata"
+        ) from exc
+
+    public_bucket_name = settings.gcs_bucket_name
+    try:
+        public_blob = storage.Client().bucket(public_bucket_name).blob(blob_name)
+        public_blob.cache_control = PUBLIC_IMAGE_CACHE_CONTROL
+        public_blob.upload_from_string(cleaned, content_type=content_type)
+    except Exception as exc:
+        raise ImageSanitizationError(
+            f"could not promote staged {blob_name} to {public_bucket_name}"
+        ) from exc
+
+    try:
+        staged_blob.delete()
+    except Exception:
+        # The public object is already correctly live at this point — a
+        # leftover staged copy is cleaned up by the staging bucket's
+        # lifecycle rule regardless, so this is not an attachment failure.
+        logger.warning(
+            "could not delete staged copy of %s after promotion; the staging "
+            "bucket's lifecycle rule will clean it up", blob_name,
+        )
+
+    return True
+
+
 def sanitize_public_image_blob(blob_name: str) -> bool:
     """Strip metadata and set caching on an image already sitting in the bucket.
 
     The MCP flow hands out a signed PUT URL, so the client uploads directly to
-    GCS and the backend never sees those bytes — they cannot be cleaned on the
-    way in. The backend does learn the object's name when the URL is attached to
-    a recipe, which is the first and only chance to clean it.
+    a private staging bucket and the backend never sees those bytes at upload
+    time — they cannot be cleaned on the way in. The backend does learn the
+    object's name when the URL is attached to a recipe, which is the first
+    chance to clean it: if it's not yet in the public bucket, this promotes
+    it from staging (see _promote_staged_image) rather than treating that as
+    a plain miss.
 
     Returns True if the object was rewritten, False if there was nothing to do.
     Raises ImageSanitizationError — not silently — when the object exists and
@@ -335,9 +423,24 @@ def sanitize_public_image_blob(blob_name: str) -> bool:
         ) from exc
 
     if blob is None:
-        # image_url names an object in our own bucket that doesn't exist —
-        # a broken reference, not a legitimate "nothing to sanitize" case.
-        raise ImageSanitizationError(f"{blob_name} does not exist in {bucket_name}")
+        if _promote_staged_image(blob_name):
+            return True
+        # A concurrent call can promote (and delete the staged copy of) this
+        # exact blob_name between our get_blob above and now — e.g. two
+        # update_recipe calls racing on the same freshly-attached image_url.
+        # Recheck the public bucket once before concluding the reference is
+        # actually broken.
+        try:
+            if storage.Client().bucket(bucket_name).get_blob(blob_name) is not None:
+                return False
+        except Exception:
+            pass
+        raise ImageSanitizationError(
+            f"{blob_name} does not exist in {bucket_name} or in staging. If this "
+            "was uploaded via request_image_upload, staged uploads not attached "
+            "within a couple of days are automatically cleaned up — re-upload "
+            "and attach it again."
+        )
 
     try:
         data = blob.download_as_bytes()
@@ -462,6 +565,15 @@ def fetch_image_to_gcs(source_url: str) -> str:
 
     if settings.is_dev or not settings.gcs_bucket_name:
         return f"https://placehold.co/800x400?text={blob_name}"
+
+    # Bytes are already in the backend's hands here — unlike the signed-PUT
+    # flow, there is no reason to route this through staging. Sanitize before
+    # it ever touches the public bucket, same as the backend-mediated upload
+    # route in routes/admin.py.
+    try:
+        data = strip_image_metadata(data, content_type)
+    except MetadataStripError as exc:
+        raise ValueError(f"Fetched image could not be processed: {exc}")
 
     storage.Client().bucket(settings.gcs_bucket_name).blob(blob_name).upload_from_string(
         data, content_type=content_type
