@@ -13,7 +13,9 @@ Guide to deploying MadeForSeconds on GCP + Cloudflare.
   gcloud auth login
   gcloud auth application-default login
   ```
-- [Terraform ≥ 1.5](https://developer.hashicorp.com/terraform/install)
+- [Terraform 1.15.8](https://developer.hashicorp.com/terraform/install) —
+  pinned exactly, not a floor. See [State storage & locking](#state-storage--locking)
+  for why the version matters more than usual here.
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - A [Cloudflare account](https://cloudflare.com/) with your domain added
 - A [Stripe account](https://stripe.com/) (for subscriptions + donations)
@@ -54,12 +56,24 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `alert_email` | Address that receives budget and uptime alerts |
 | `instagram_user_id` | Instagram Creator account numeric ID (optional — leave blank to skip) |
 | `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy) |
+| `environment` | `production` or `development` — only these two are meaningful, injected as `ENVIRONMENT`. Defaults to `production`; leave unset unless you know why you're changing it |
+| `state_admin_email` | Google account of whoever runs `terraform apply` — granted `objectAdmin` on the state bucket. Must match the casing already in state if you're picking up an existing deployment; IAM preserves case and a mismatch forces the binding to be replaced |
 
 > `terraform.tfvars` is gitignored — never commit it. It holds live Stripe keys
 > and the billing account ID in plaintext. CI runs gitleaks over the full git
 > history on every PR as a backstop, but the gitignore is the real defence.
+>
+> Every optional secret above is gated on `count = var.X != "" ? 1 : 0` in
+> Terraform. A blank value doesn't just skip creating the secret — on an
+> *existing* deployment it plans to destroy it. Fill in every value that
+> applies to your setup before running `plan` against a live environment.
 
 ### Step 2 — Initialize and apply Terraform
+
+Install **Terraform 1.15.8** specifically — `terraform/.terraform-version`
+pins it, and `required_version` in `main.tf` enforces it. The CLI version is
+part of the state format: a newer Terraform writing state makes it unreadable
+to an older one on a machine you haven't upgraded yet.
 
 ```bash
 cd terraform
@@ -67,7 +81,8 @@ terraform init
 terraform apply
 ```
 
-This provisions:
+This provisions, across five modules (`modules/security`, `modules/storage`,
+`modules/backend-service`, `modules/observability`, `modules/cost-controls`):
 - Firestore database + indexes
 - Artifact Registry repository (with cleanup policy — keeps ≤ 5 images)
 - Cloud Run service (scale-to-zero, 512 MB, startup CPU boost)
@@ -75,8 +90,11 @@ This provisions:
 - Identity Platform (Firebase Auth) for admin login
 - Cloud Build CI/CD trigger
 - GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, Instagram token)
-- Cloud Scheduler job for weekly Instagram token rotation (when `instagram_access_token` is set)
-- Cloudflare DNS record for the API subdomain
+- Cloud Scheduler jobs (weekly Instagram token rotation when
+  `instagram_access_token` is set, weekly usage report, monthly budget-breaker
+  reset)
+- Budget alerting and the auto-kill Cloud Functions
+- Uptime and error-rate monitoring
 - All required GCP APIs and IAM service accounts
 
 ### Step 3 — Connect GitHub to Cloud Build (one-time)
@@ -126,8 +144,8 @@ gcloud run services update mfs-backend \
 
 The admin panel authenticates only with Google (`GoogleAuthProvider` in
 `src/lib/auth.ts`). Email/password sign-in is deliberately disabled in
-`terraform/identity_platform.tf` — it was an unused code path that kept a live
-password-hashing signer key in the project config.
+`terraform/modules/security/identity_platform.tf` — it was an unused code path
+that kept a live password-hashing signer key in the project config.
 
 1. Go to [GCP console → Identity Platform → Providers](https://console.cloud.google.com/customer-identity/providers)
 2. Add the **Google** provider if it is not already present. It is configured
@@ -210,7 +228,7 @@ gcloud run services update mfs-backend \
 
 Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild.yaml`.
 
-> **The deploy pipeline owns the running image, not Terraform.** `cloud_run.tf`
+> **The deploy pipeline owns the running image, not Terraform.** `terraform/modules/backend-service/cloud_run.tf`
 > sets `ignore_changes` on the container image, so `terraform apply` never
 > re-pins the service to `var.backend_image`. That variable only seeds the
 > service on first create. Without this guard an infrastructure-only apply would
@@ -232,9 +250,14 @@ Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild
 
 ```bash
 cd terraform
-terraform plan     # Preview changes
-terraform apply    # Apply changes
+terraform plan -lock-timeout=5m     # Preview changes
+terraform apply -lock-timeout=5m    # Apply changes
 ```
+
+`-lock-timeout` matters more than it looks: state locking on the GCS backend
+is automatic (see [State storage & locking](#state-storage--locking) below),
+and without it a second `apply` started while one is already running fails
+immediately instead of waiting its turn.
 
 Common reasons to run `terraform apply`:
 - Adding a new allowed CORS origin
@@ -242,19 +265,34 @@ Common reasons to run `terraform apply`:
 - Adding or rotating a secret
 - Any other `.tf` file change
 
-### Migrating Terraform state to GCS (one-time)
+Infrastructure is organized into five modules under `terraform/modules/` —
+`security`, `storage`, `backend-service`, `observability`, `cost-controls` —
+plus a handful of root-level files for providers, variables, and the handful
+of resources genuinely shared across modules (the scheduler service identity,
+the shared alert notification channel, project metadata). A resource's module
+tells you where to look for it; the root files are everything no single module
+owns.
 
-State currently lives in `terraform/terraform.tfstate` on one machine — losing
-that file means losing track of every managed resource, and it contains secret
-material. A versioned state bucket is defined in `state_backend.tf`:
+### State storage & locking
+
+State lives in the versioned GCS bucket `state_backend.tf` defines
+(`made-for-seconds-tf-state`), not on any one machine. A fresh clone only needs:
 
 ```bash
 cd terraform
-terraform apply                 # creates the made-for-seconds-tf-state bucket
-# Uncomment the backend "gcs" block in state_backend.tf, then:
-terraform init -migrate-state   # copies local state into the bucket
-terraform plan                  # should show no changes
-rm terraform.tfstate terraform.tfstate.backup
+terraform init
+```
+
+Locking is automatic — the GCS backend takes a lock object for the duration of
+a write, so a concurrent `apply` is refused rather than interleaved with
+another. There is no separate locking service to provision. If an `apply` is
+killed mid-flight the lock can outlive it; `terraform force-unlock <id>` clears
+a *genuinely* stale one, but only after confirming no other apply is actually
+still running — forcing while one is corrupts state. The lock ID and holder
+are visible in the error message, or by reading the `.tflock` object directly:
+
+```bash
+gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
 ```
 
 ### Backups & monitoring
@@ -311,7 +349,7 @@ Recover early, without waiting for the 1st:
 gcloud scheduler jobs run budget-breaker-reset --location us-central1 --project made-for-seconds
 ```
 
-> Note: `cloud_run.tf` declares `max_instance_count = 1`, so a `terraform apply`
+> Note: `terraform/modules/backend-service/cloud_run.tf` declares `max_instance_count = 1`, so a `terraform apply`
 > while the breaker is tripped will also restore service — silently. If you get
 > the breaker alert, find out why before applying.
 
