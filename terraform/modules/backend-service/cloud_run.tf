@@ -9,8 +9,6 @@ resource "google_cloud_run_v2_service" "backend" {
 
   deletion_protection = true
 
-  depends_on = [google_project_service.required_apis]
-
   lifecycle {
     # The running image is owned by the deploy pipeline — `gcloud run services
     # update` or Cloud Build (docs/DEPLOYMENT.md § Updating the backend) — not
@@ -31,7 +29,7 @@ resource "google_cloud_run_v2_service" "backend" {
   }
 
   template {
-    service_account = google_service_account.backend.email
+    service_account = var.backend_sa_email
     timeout         = "120s"
 
     containers {
@@ -47,7 +45,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "ENVIRONMENT"
-        value = "production"
+        value = var.environment
       }
       env {
         name  = "ALLOWED_ORIGINS"
@@ -55,11 +53,15 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "GCS_BUCKET_NAME"
-        value = google_storage_bucket.images.name
+        value = var.images_bucket_name
       }
       env {
         name  = "GCS_RECEIPTS_BUCKET_NAME"
-        value = google_storage_bucket.receipts.name
+        value = var.receipts_bucket_name
+      }
+      env {
+        name  = "GCS_STAGING_BUCKET_NAME"
+        value = var.staging_bucket_name
       }
 
       # ADMIN_EMAILS read from Secret Manager — not passed as plaintext
@@ -67,7 +69,7 @@ resource "google_cloud_run_v2_service" "backend" {
         name = "ADMIN_EMAILS"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.admin_emails.secret_id
+            secret  = var.secret_ids.admin_emails
             version = "latest"
           }
         }
@@ -92,7 +94,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "REDIS_URL"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.redis_url[0].secret_id
+              secret  = var.secret_ids.redis_url
               version = "latest"
             }
           }
@@ -106,7 +108,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "STRIPE_SECRET_KEY"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.stripe_secret_key[0].secret_id
+              secret  = var.secret_ids.stripe_secret_key
               version = "latest"
             }
           }
@@ -120,7 +122,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "STRIPE_WEBHOOK_SECRET"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.stripe_webhook_secret[0].secret_id
+              secret  = var.secret_ids.stripe_webhook_secret
               version = "latest"
             }
           }
@@ -143,7 +145,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "SUBSCRIBER_JWT_SECRET"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.subscriber_jwt_secret[0].secret_id
+              secret  = var.secret_ids.subscriber_jwt_secret
               version = "latest"
             }
           }
@@ -157,7 +159,7 @@ resource "google_cloud_run_v2_service" "backend" {
           name = "RESEND_API_KEY"
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.resend_api_key[0].secret_id
+              secret  = var.secret_ids.resend_api_key
               version = "latest"
             }
           }
@@ -194,7 +196,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "INSTAGRAM_REFRESH_INVOKER_EMAIL"
-        value = google_service_account.backend.email
+        value = var.backend_sa_email
       }
       env {
         name  = "INSTAGRAM_REFRESH_AUDIENCE"

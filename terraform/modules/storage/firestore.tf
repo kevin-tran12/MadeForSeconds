@@ -7,8 +7,6 @@ resource "google_firestore_database" "default" {
   location_id             = var.gcp_region
   type                    = "FIRESTORE_NATIVE"
   delete_protection_state = "DELETE_PROTECTION_ENABLED"
-
-  depends_on = [google_project_service.required_apis]
 }
 
 # Daily managed backup, 7-day retention. Expenses are tax records — losing

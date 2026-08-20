@@ -31,3 +31,13 @@ resource "google_project_service" "required_apis" {
   service            = each.value
   disable_on_destroy = false
 }
+
+# Shared project metadata. Declared here rather than beside whichever resource
+# happened to need it first — data.google_project.project is consumed by both
+# billing.tf (budget_filter's project number, and the pubsub service agent
+# email) and, historically, cloudbuild.tf. A data source that lives inside a
+# resource's file but is used by a different file becomes a hazard the moment
+# either file moves into a module.
+data "google_project" "project" {
+  project_id = var.gcp_project_id
+}

@@ -7,6 +7,8 @@ from google.auth import credentials as google_auth_credentials
 
 from app.services import uploads
 
+from conftest import _gps_tag_count, _image_with_metadata
+
 
 # ── sanitize_filename ─────────────────────────────────────────────────────────
 
@@ -170,13 +172,14 @@ class TestFetchImageToGcs:
                 uploads.fetch_image_to_gcs("https://example.com/huge.jpg")
 
     def test_uploads_to_images_bucket_in_production(self):
+        original = _image_with_metadata("JPEG")
         with (
             patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
             patch("app.services.uploads.httpx") as mock_httpx,
             patch("app.services.uploads.settings") as mock_settings,
             patch("app.services.uploads.storage") as mock_storage,
         ):
-            _mock_response(mock_httpx)
+            _mock_response(mock_httpx, chunks=[original])
             mock_settings.is_dev = False
             mock_settings.gcs_bucket_name = "img-bucket"
 
@@ -185,7 +188,35 @@ class TestFetchImageToGcs:
         assert url.startswith("https://storage.googleapis.com/img-bucket/")
         assert url.endswith("-dish.jpg")
         blob = mock_storage.Client.return_value.bucket.return_value.blob.return_value
-        blob.upload_from_string.assert_called_once_with(b"image-bytes", content_type="image/jpeg")
+        blob.upload_from_string.assert_called_once()
+        uploaded, kwargs = blob.upload_from_string.call_args
+        assert kwargs["content_type"] == "image/jpeg"
+        # The point of this fix: fetched bytes are sanitized before upload,
+        # not passed through as-fetched — the raw response body carried GPS.
+        assert uploaded[0] != original
+        assert _gps_tag_count(uploaded[0]) == 0
+
+    def test_raises_when_fetched_image_unparseable(self):
+        """A declared image/jpeg Content-Type is attacker-controlled — the
+        same principle sniff_content_type/verify_upload_type already apply to
+        the backend-mediated upload routes. Bytes that don't actually parse
+        as an image must not reach the public bucket."""
+        with (
+            patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
+            patch("app.services.uploads.httpx") as mock_httpx,
+            patch("app.services.uploads.settings") as mock_settings,
+            patch("app.services.uploads.storage") as mock_storage,
+        ):
+            # Valid JPEG signature, truncated — sniffs as image/jpeg, then
+            # fails to parse as a real one.
+            _mock_response(mock_httpx, chunks=[b"\xff\xd8\xff\xe0" + b"\x00" * 16])
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+
+            with pytest.raises(ValueError, match="could not be processed"):
+                uploads.fetch_image_to_gcs("https://example.com/broken.jpg")
+
+        mock_storage.Client.assert_not_called()
 
     def test_dev_mode_returns_placeholder(self):
         with (
@@ -196,6 +227,22 @@ class TestFetchImageToGcs:
             url = uploads.fetch_image_to_gcs("https://example.com/x.jpg")
 
         assert "placehold.co" in url
+
+    def test_raises_in_production_when_bucket_not_configured(self):
+        """The placeholder is reserved for is_dev — a missing bucket in
+        production must fail loudly, not silently report a fetched-and-fake
+        URL that could get saved as a recipe's real image_url."""
+        with (
+            patch("socket.getaddrinfo", return_value=_PUBLIC_ADDR),
+            patch("app.services.uploads.httpx") as mock_httpx,
+            patch("app.services.uploads.settings") as mock_settings,
+        ):
+            _mock_response(mock_httpx)
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = None
+
+            with pytest.raises(uploads.StorageNotConfiguredError, match="GCS_BUCKET_NAME"):
+                uploads.fetch_image_to_gcs("https://example.com/x.jpg")
 
 
 # ── blob URL helpers (bucket-aware wrappers) ──────────────────────────────────
@@ -221,5 +268,282 @@ class TestBlobWrappers:
             mock_settings.gcs_bucket_name = "img-bucket"
             uploads.delete_recipe_image_blob("https://placehold.co/800x400?text=x.jpg")
             uploads.delete_recipe_image_blob(None)
+
+        mock_storage.Client.assert_not_called()
+
+
+# ── sanitize_public_image_blob / sanitize_recipe_image ─────────────────────────
+# https://storage.googleapis.com/{bucket}/{blob} is the URL shape gcs_blob_name
+# parses; the fixtures below build it to match img-bucket.
+
+def _mock_blob(data: bytes, cache_control=None):
+    blob = MagicMock()
+    blob.download_as_bytes.return_value = data
+    blob.cache_control = cache_control
+    return blob
+
+
+class TestSanitizePublicImageBlob:
+    def test_noop_in_dev_mode(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = True
+            mock_settings.gcs_bucket_name = "img-bucket"
+            assert uploads.sanitize_public_image_blob("x.jpg") is False
+        mock_storage.Client.assert_not_called()
+
+    def test_noop_when_bucket_not_configured(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = ""
+            assert uploads.sanitize_public_image_blob("x.jpg") is False
+        mock_storage.Client.assert_not_called()
+
+    def test_raises_when_object_does_not_exist(self):
+        """A blob name that should be ours but isn't there is a broken
+        reference, not a silent no-op — the old behaviour returned False and
+        the caller had no way to tell "nothing to do" from "something's wrong".
+        Staging explicitly unconfigured here, so this exercises the "nothing
+        to promote either" fallthrough deterministically rather than by luck
+        of an unset mock attribute being truthy."""
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = None
+            mock_storage.Client.return_value.bucket.return_value.get_blob.return_value = None
+
+            with pytest.raises(uploads.ImageSanitizationError, match="does not exist"):
+                uploads.sanitize_public_image_blob("missing.jpg")
+
+    def test_raises_when_get_blob_errors(self):
+        """A permission error (e.g. the SA lacking storage.objects.get/update)
+        must not be swallowed — the recipe save has to know sanitization
+        failed rather than silently publishing the unstripped image."""
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_storage.Client.return_value.bucket.return_value.get_blob.side_effect = (
+                Exception("403 Forbidden")
+            )
+
+            with pytest.raises(uploads.ImageSanitizationError, match="could not reach GCS"):
+                uploads.sanitize_public_image_blob("x.jpg")
+
+    def test_raises_when_upload_back_errors(self):
+        """The overwrite step — the one that actually needs delete/update
+        permission, not just objectCreator. If this fails the object is left
+        exactly as it was: still public, still carrying its metadata."""
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            blob = _mock_blob(_image_with_metadata("JPEG"))
+            blob.upload_from_string.side_effect = Exception("403 Forbidden")
+            mock_storage.Client.return_value.bucket.return_value.get_blob.return_value = blob
+
+            with pytest.raises(uploads.ImageSanitizationError, match="could not write"):
+                uploads.sanitize_public_image_blob("x.jpg")
+
+    def test_raises_on_unparseable_bytes(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            # Valid JPEG signature, but truncated — sniffs as image/jpeg, then
+            # fails to parse as a real one.
+            blob = _mock_blob(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
+            mock_storage.Client.return_value.bucket.return_value.get_blob.return_value = blob
+
+            with pytest.raises(uploads.ImageSanitizationError, match="could not parse"):
+                uploads.sanitize_public_image_blob("x.jpg")
+
+    def test_returns_false_for_unstrippable_type_without_raising(self):
+        """HEIC/PDF aren't allowed recipe-image types, so finding one here is
+        surprising but not itself a sanitization failure — nothing claimed it
+        would be cleaned."""
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            blob = _mock_blob(b"%PDF-1.4\n" + b"\x00" * 16)
+            mock_storage.Client.return_value.bucket.return_value.get_blob.return_value = blob
+
+            assert uploads.sanitize_public_image_blob("x.pdf") is False
+            blob.upload_from_string.assert_not_called()
+
+    def test_rewrites_when_metadata_present(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            blob = _mock_blob(_image_with_metadata("JPEG"))
+            mock_storage.Client.return_value.bucket.return_value.get_blob.return_value = blob
+
+            assert uploads.sanitize_public_image_blob("x.jpg") is True
+            blob.upload_from_string.assert_called_once()
+            assert blob.cache_control == uploads.PUBLIC_IMAGE_CACHE_CONTROL
+
+    def test_returns_false_when_already_clean(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            clean = uploads.strip_image_metadata(_image_with_metadata("JPEG"), "image/jpeg")
+            blob = _mock_blob(clean, cache_control=uploads.PUBLIC_IMAGE_CACHE_CONTROL)
+            mock_storage.Client.return_value.bucket.return_value.get_blob.return_value = blob
+
+            assert uploads.sanitize_public_image_blob("x.jpg") is False
+            blob.upload_from_string.assert_not_called()
+
+
+# ── Promotion from the private staging bucket ──────────────────────────────────
+# The signed-PUT recipe-image flow lands bytes in a private staging bucket the
+# backend never sees at upload time — sanitize_public_image_blob's "blob is
+# None" branch is what promotes them into the public bucket on attach. These
+# tests need a mock that distinguishes which bucket .bucket(name) was called
+# with, unlike the plain shared mock above, since promotion genuinely talks to
+# two different buckets in one call.
+
+def _two_bucket_client(mock_storage, *, public_blob=None, staging_blob=None):
+    """Wire mock_storage.Client() so .bucket("img-bucket") and
+    .bucket("staging-bucket") return independently controllable get_blob
+    results, matching how the real client is keyed by bucket name."""
+    buckets = {"img-bucket": MagicMock(), "staging-bucket": MagicMock()}
+    buckets["img-bucket"].get_blob.return_value = public_blob
+    buckets["staging-bucket"].get_blob.return_value = staging_blob
+    mock_storage.Client.return_value.bucket.side_effect = lambda name: buckets[name]
+    return buckets
+
+
+class TestPromoteStagedImage:
+    def test_promotes_and_deletes_staged_copy(self):
+        staged = _mock_blob(_image_with_metadata("JPEG"))
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = "staging-bucket"
+            buckets = _two_bucket_client(mock_storage, public_blob=None, staging_blob=staged)
+
+            assert uploads.sanitize_public_image_blob("x.jpg") is True
+
+        public_blob = buckets["img-bucket"].blob.return_value
+        public_blob.upload_from_string.assert_called_once()
+        uploaded, kwargs = public_blob.upload_from_string.call_args
+        assert kwargs["content_type"] == "image/jpeg"
+        assert _gps_tag_count(uploaded[0]) == 0
+        assert public_blob.cache_control == uploads.PUBLIC_IMAGE_CACHE_CONTROL
+        staged.delete.assert_called_once()
+
+    def test_falls_through_to_not_found_when_staging_not_configured(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = None
+            _two_bucket_client(mock_storage, public_blob=None, staging_blob=None)
+
+            with pytest.raises(uploads.ImageSanitizationError, match="does not exist"):
+                uploads.sanitize_public_image_blob("x.jpg")
+
+    def test_falls_through_to_not_found_when_staged_object_missing_too(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = "staging-bucket"
+            _two_bucket_client(mock_storage, public_blob=None, staging_blob=None)
+
+            with pytest.raises(uploads.ImageSanitizationError, match="does not exist in img-bucket or in staging"):
+                uploads.sanitize_public_image_blob("x.jpg")
+
+    def test_raises_when_staged_content_is_wrong_type(self):
+        """The signed PUT's declared Content-Type is not verified against the
+        actual bytes by GCS — sniffing at promotion time is the only backstop
+        against a spoofed header landing arbitrary bytes in a public bucket."""
+        staged = _mock_blob(b"%PDF-1.4\n" + b"\x00" * 16)
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = "staging-bucket"
+            buckets = _two_bucket_client(mock_storage, public_blob=None, staging_blob=staged)
+
+            with pytest.raises(uploads.ImageSanitizationError, match="not a recognised recipe-image type"):
+                uploads.sanitize_public_image_blob("x.jpg")
+
+        buckets["img-bucket"].blob.return_value.upload_from_string.assert_not_called()
+
+    def test_raises_when_staged_bytes_unparseable(self):
+        staged = _mock_blob(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = "staging-bucket"
+            _two_bucket_client(mock_storage, public_blob=None, staging_blob=staged)
+
+            with pytest.raises(uploads.ImageSanitizationError, match="could not parse staged"):
+                uploads.sanitize_public_image_blob("x.jpg")
+
+    def test_delete_failure_after_promotion_does_not_fail_the_call(self):
+        """The public write already succeeded — a stray staged copy is the
+        lifecycle rule's problem, not an attachment failure."""
+        staged = _mock_blob(_image_with_metadata("JPEG"))
+        staged.delete.side_effect = Exception("403 Forbidden")
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = "staging-bucket"
+            buckets = _two_bucket_client(mock_storage, public_blob=None, staging_blob=staged)
+
+            assert uploads.sanitize_public_image_blob("x.jpg") is True
+
+        buckets["img-bucket"].blob.return_value.upload_from_string.assert_called_once()
+
+    def test_recheck_public_bucket_closes_promotion_race(self):
+        """Two update_recipe calls can race on the same freshly-staged
+        image_url. If a concurrent call already promoted (and deleted the
+        staged copy of) this blob_name between our first get_blob and now,
+        the recheck must find it and return False rather than raise."""
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_settings.gcs_staging_bucket_name = "staging-bucket"
+            buckets = _two_bucket_client(mock_storage, public_blob=None, staging_blob=None)
+            # First two calls (initial check, then promotion's own lookup)
+            # see nothing; the recheck call is the one that finds the
+            # concurrently-promoted object.
+            already_promoted = _mock_blob(b"irrelevant", cache_control=uploads.PUBLIC_IMAGE_CACHE_CONTROL)
+            buckets["img-bucket"].get_blob.side_effect = [None, already_promoted]
+
+            assert uploads.sanitize_public_image_blob("x.jpg") is False
+
+        buckets["img-bucket"].blob.return_value.upload_from_string.assert_not_called()
+
+
+class TestSanitizeRecipeImagePropagation:
+    def test_propagates_sanitization_error_for_own_bucket_url(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            mock_storage.Client.return_value.bucket.return_value.get_blob.return_value = None
+
+            with pytest.raises(uploads.ImageSanitizationError):
+                uploads.sanitize_recipe_image("https://storage.googleapis.com/img-bucket/missing.jpg")
+
+    def test_foreign_url_never_reaches_gcs(self):
+        with patch("app.services.uploads.settings") as mock_settings, \
+             patch("app.services.uploads.storage") as mock_storage:
+            mock_settings.is_dev = False
+            mock_settings.gcs_bucket_name = "img-bucket"
+            assert uploads.sanitize_recipe_image("https://placehold.co/x.jpg") is False
+            assert uploads.sanitize_recipe_image(None) is False
 
         mock_storage.Client.assert_not_called()

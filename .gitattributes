@@ -1,0 +1,34 @@
+# Line endings are LF in the repository AND in every working tree, on every OS.
+#
+# Without this, Windows checkouts get CRLF (core.autocrlf=true is the Git for
+# Windows default) while macOS and Linux get LF. Terraform then reads different
+# bytes from the same commit depending on which machine ran it:
+#
+#   - Heredoc filters in logging_alerts.tf and billing.tf differ by line ending,
+#     so google_logging_metric and google_monitoring_alert_policy show a diff
+#     whose - and + lines look character-for-character identical.
+#   - terraform/billing_function/*.py hash differently, which changes the
+#     archive_file output_md5, which renames the source object and forces both
+#     Cloud Functions to redeploy.
+#
+# Applying from Windows writes CRLF, applying from macOS writes LF back, forever.
+# This file is what stops that; pinning the CLI and provider versions does not.
+* text=auto eol=lf
+
+# Binary formats — never transform these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.heic binary
+*.pdf  binary
+*.zip  binary
+*.woff binary
+*.woff2 binary
+
+# Windows-only scripts genuinely need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

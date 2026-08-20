@@ -12,6 +12,9 @@ def _settings(**over):
     base = dict(
         environment="production",
         subscriber_jwt_secret="s" * 40,
+        gcs_bucket_name="mfs-images",
+        gcs_receipts_bucket_name="mfs-receipts",
+        gcs_staging_bucket_name="mfs-images-staging",
         workos_authkit_domain="https://example.authkit.app",
         mcp_resource_url="https://mfs-backend.example.com/mcp",
         usage_report_audience="https://mfs-backend.example.com/api/internal/usage/weekly-report",
@@ -41,6 +44,23 @@ class TestValidateProductionSettings:
     def test_rejects_short_jwt_secret(self):
         with pytest.raises(RuntimeError, match="at least 32"):
             validate_production_settings(_settings(subscriber_jwt_secret="short"))
+
+    def test_rejects_missing_images_bucket(self):
+        """Cloud Build auto-deploys the backend on every push to main while
+        Terraform (which creates this bucket) is applied manually and
+        separately — a revision that reaches production ahead of that apply
+        must refuse to start, not silently fall back to a placeholder upload
+        response later at request time."""
+        with pytest.raises(RuntimeError, match="GCS_BUCKET_NAME"):
+            validate_production_settings(_settings(gcs_bucket_name=""))
+
+    def test_rejects_missing_receipts_bucket(self):
+        with pytest.raises(RuntimeError, match="GCS_RECEIPTS_BUCKET_NAME"):
+            validate_production_settings(_settings(gcs_receipts_bucket_name=""))
+
+    def test_rejects_missing_staging_bucket(self):
+        with pytest.raises(RuntimeError, match="GCS_STAGING_BUCKET_NAME"):
+            validate_production_settings(_settings(gcs_staging_bucket_name=""))
 
     def test_rejects_missing_workos_domain(self):
         with pytest.raises(RuntimeError, match="WORKOS_AUTHKIT_DOMAIN"):

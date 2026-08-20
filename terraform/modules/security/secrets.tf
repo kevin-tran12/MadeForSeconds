@@ -15,8 +15,6 @@ resource "google_secret_manager_secret" "admin_emails" {
   replication {
     auto {}
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_secret_manager_secret_version" "admin_emails_initial" {
@@ -39,8 +37,6 @@ resource "google_secret_manager_secret" "redis_url" {
   replication {
     auto {}
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_secret_manager_secret_version" "redis_url_initial" {
@@ -62,8 +58,6 @@ resource "google_secret_manager_secret" "stripe_secret_key" {
   replication {
     auto {}
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_secret_manager_secret_version" "stripe_secret_key_initial" {
@@ -85,8 +79,6 @@ resource "google_secret_manager_secret" "stripe_webhook_secret" {
   replication {
     auto {}
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_secret_manager_secret_version" "stripe_webhook_secret_initial" {
@@ -108,8 +100,6 @@ resource "google_secret_manager_secret" "subscriber_jwt_secret" {
   replication {
     auto {}
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_secret_manager_secret_version" "subscriber_jwt_secret_initial" {
@@ -131,8 +121,6 @@ resource "google_secret_manager_secret" "resend_api_key" {
   replication {
     auto {}
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_secret_manager_secret_version" "resend_api_key_initial" {
@@ -156,8 +144,6 @@ resource "google_secret_manager_secret" "instagram_access_token" {
   replication {
     auto {}
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_secret_manager_secret_version" "instagram_access_token_initial" {

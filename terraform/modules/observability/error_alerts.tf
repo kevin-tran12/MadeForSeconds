@@ -27,8 +27,6 @@ resource "google_logging_metric" "backend_errors" {
     value_type  = "INT64"
     unit        = "1"
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 # Creating a log-based metric registers it with Logging immediately, but the
@@ -79,7 +77,7 @@ resource "google_monitoring_alert_policy" "backend_errors" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.budget_email.name]
+  notification_channels = [var.notification_channel]
 }
 
 # ─── HTTP 5xx responses ───────────────────────────────────────────────────────
@@ -103,8 +101,6 @@ resource "google_logging_metric" "backend_5xx" {
     value_type  = "INT64"
     unit        = "1"
   }
-
-  depends_on = [google_project_service.required_apis]
 }
 
 resource "google_monitoring_alert_policy" "backend_5xx" {
@@ -135,5 +131,5 @@ resource "google_monitoring_alert_policy" "backend_5xx" {
     }
   }
 
-  notification_channels = [google_monitoring_notification_channel.budget_email.name]
+  notification_channels = [var.notification_channel]
 }

@@ -1,5 +1,12 @@
 terraform {
-  required_version = ">= 1.5"
+  # Exact, not a floor — "~> 1.15" was wrong despite the comment saying
+  # otherwise: that operator means >= 1.15.0, < 2.0.0, so it would silently
+  # accept 1.16+ too. The CLI version is also recorded in .terraform-version
+  # (tfenv/tfswitch) and in the CI workflow — all three must move together, or
+  # `fmt -check` starts failing on formatting another version considered clean.
+  # State format upgrades are one-way: once a newer CLI writes this state, older
+  # CLIs refuse to read it, so every machine has to be on the same version.
+  required_version = "1.15.9"
 
   required_providers {
     google = {
@@ -14,6 +21,14 @@ terraform {
     time = {
       source  = "hashicorp/time"
       version = "~> 0.12"
+    }
+    # Zips the budget-breaker function source in billing.tf. Declared explicitly
+    # because it was previously inferred with no constraint at all — and its
+    # output_md5 names the deployed object, so a silent version bump here changes
+    # what gets deployed.
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.8"
     }
   }
 }

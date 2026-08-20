@@ -43,8 +43,10 @@ jobs:
         run: bandit -r backend/app -ll
 
       - name: pip-audit — Python dependency CVEs
+        # requirements.lock, not requirements.txt: audit what actually ships,
+        # not whatever a range happens to resolve to on a given day.
         # CVE-2026-4539: pygments (via rich) — no fix released yet, ignore until patch ships
-        run: pip-audit -r backend/requirements.txt --ignore-vuln CVE-2026-4539
+        run: pip-audit -r backend/requirements.lock --ignore-vuln CVE-2026-4539
 
       - name: Set up Node
         uses: actions/setup-node@v7
@@ -70,7 +72,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install -r backend/requirements.txt
+        # requirements.lock, not requirements.txt — CI and the production
+        # Docker image must resolve identically. See requirements.lock's
+        # header for what generates it and why.
+        run: pip install -r backend/requirements.lock
 
       - name: Run pytest
         working-directory: backend
@@ -106,10 +111,18 @@ jobs:
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          # Must match terraform/.terraform-version and required_version in
+          # main.tf. Unpinned, this installs whatever is newest that day, and
+          # fmt rules drift between releases — CI then fails on formatting a
+          # developer's pinned CLI just produced.
+          terraform_version: 1.15.9
 
       - name: terraform fmt
         working-directory: terraform
-        run: terraform fmt -check -diff
+        # -recursive: fmt only walks the given directory otherwise, so module
+        # subdirectories would go unchecked.
+        run: terraform fmt -check -recursive -diff
 
       - name: terraform validate
         working-directory: terraform
@@ -118,13 +131,15 @@ jobs:
 
       # The budget circuit breaker lives in terraform/, so the backend pytest
       # job (which runs `pytest --cov=app` from backend/) never collects it.
+      # Path follows billing_function/ into modules/cost-controls/ — the module
+      # refactor moves it because billing.tf resolves it via ${path.module}.
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
       - name: Test budget circuit breaker
-        working-directory: terraform/billing_function
+        working-directory: terraform/modules/cost-controls/billing_function
         run: |
           pip install -r requirements.txt pytest
           python -m pytest -q
