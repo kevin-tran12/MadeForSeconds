@@ -28,7 +28,10 @@ terraform/*.tfstate.backup
 # .terraform.lock.hcl is deliberately TRACKED — it pins provider versions so
 # every machine and CI resolve identically. HashiCorp's own guidance is to commit it.
 terraform/terraform.tfvars
-terraform/.tmp/
+# Anchored with ** so it also catches .tmp/ inside module subdirectories
+# (e.g. terraform/modules/cost-controls/.tmp/) — a plain terraform/.tmp/ only
+# matches that exact path and let a generated archive get committed once.
+terraform/**/.tmp/
 # Plan files embed the fully resolved config, secrets included. Never commit one.
 terraform/tfplan
 terraform/*.tfplan

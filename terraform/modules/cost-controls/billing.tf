@@ -114,19 +114,35 @@ resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
 
 # Zip the function source for upload.
 #
-# output_file_mode is what makes the archive reproducible across machines.
-# Without it the provider records each file's real mode, and Windows has no Unix
-# permissions — Go reports 0666 there against 0644 on macOS and Linux. Different
-# mode bits produce different zip bytes, so output_md5 differs, which renames the
-# source object and forces BOTH Cloud Functions to redeploy. That happened on
-# every switch between machines, for no functional change to the code.
+# Explicit `source` blocks, not `source_dir` — source_dir zips every file
+# physically present in billing_function/ regardless of what's tracked in git,
+# so running pytest locally (which leaves __pycache__/ and .pytest_cache/ on
+# disk) or having test_main.py present at all changes output_md5, renames the
+# deployed object, and redeploys both Cloud Functions for no code change. This
+# way the archive is provably exactly main.py + requirements.txt on every
+# machine, test artifacts present or not.
 #
-# Timestamps are already normalised by the provider (it stamps 2049-01-01), so
-# mode was the only remaining source of drift.
+# output_file_mode is what makes the archive reproducible across machines on
+# top of that. Without it the provider records each file's real mode, and
+# Windows has no Unix permissions — Go reports 0666 there against 0644 on
+# macOS and Linux. Different mode bits produce different zip bytes, which was
+# forcing a redeploy on every switch between machines even before the
+# test-artifact issue above.
+#
+# Timestamps are already normalised by the provider (it stamps 2049-01-01).
 data "archive_file" "budget_killer_source" {
-  type             = "zip"
-  source_dir       = "${path.module}/billing_function"
-  output_path      = "${path.module}/.tmp/billing_function.zip"
+  type        = "zip"
+  output_path = "${path.module}/.tmp/billing_function.zip"
+
+  source {
+    content  = file("${path.module}/billing_function/main.py")
+    filename = "main.py"
+  }
+  source {
+    content  = file("${path.module}/billing_function/requirements.txt")
+    filename = "requirements.txt"
+  }
+
   output_file_mode = "0644"
 }
 
