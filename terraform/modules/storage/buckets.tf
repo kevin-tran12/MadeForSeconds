@@ -42,10 +42,23 @@ resource "google_storage_bucket_iam_member" "public_read" {
   member = "allUsers"
 }
 
-# Grant backend service account upload access — scoped to this bucket only
+# Grant backend service account read/write access — scoped to this bucket only.
+#
+# objectCreator alone cannot overwrite or delete an existing object (GCP: "Can
+# create new objects... but cannot view, delete, or overwrite objects, even
+# ones they created themselves"). Every place the backend already replaces an
+# object under that role has therefore been silently failing in production:
+#   - sanitize_public_image_blob() downloads an object, strips metadata, and
+#     calls upload_from_string on the SAME name — an overwrite.
+#   - delete_recipe_image_blob() deletes the previous image when a recipe's
+#     image_url changes — delete_gcs_blob() wraps the call in a bare
+#     try/except: pass, so this has never surfaced as an error anywhere.
+# objectUser is the predefined role covering get/create/update/delete/list on
+# objects — narrower custom roles are tracked as Epic 2.2 (least-privilege
+# pass), not done here to keep this fix small and reviewable.
 resource "google_storage_bucket_iam_member" "backend_upload" {
   bucket = google_storage_bucket.images.name
-  role   = "roles/storage.objectCreator"
+  role   = "roles/storage.objectUser"
   member = "serviceAccount:${var.backend_sa_email}"
 }
 
