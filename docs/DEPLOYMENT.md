@@ -444,6 +444,51 @@ something that should happen approximately never.
 > Then set `is_locked = true` in `buckets.tf` so Terraform's view matches
 > reality — the field is not reversible there either once the API call lands.
 
+#### What the backup schedules cost
+
+Firestore backup storage has **no free-tier allowance** — unlike the 1 GiB of
+live Firestore storage, every byte of backup is billed from the first one. This
+is a deliberate, approved recurring charge, not an oversight, so the arithmetic
+is written down here rather than left as "cents".
+
+Backups are **full copies, not incremental**, and each is billed for the
+fraction of the month it is retained. That works out to the same number as
+counting concurrent copies at steady state:
+
+| Schedule | Retention | Copies held | Cost per GiB of live DB |
+|---|---|---|---|
+| Daily (pre-existing) | 7 days | 7 | ≈ $0.21 /mo |
+| Weekly (added here) | 14 weeks | 14 | ≈ $0.42 /mo |
+| **Total** | | **21** | **≈ $0.63 /mo** |
+
+Rate is $0.00004 per GiB-hour (≈$0.029 per GiB-month; Google's published table
+rounds to $0.03). The **incremental** cost of this change is the 14 weekly
+copies — the 7 daily ones were already being paid for.
+
+Because that scales with database size, the useful number is the bound: live
+Firestore storage stays inside its 1 GiB free allowance at this scale, and at
+1 GiB the whole backup bill is **≈$0.63/month**. Realistic today is far less —
+a recipe/expense database of a few MiB costs low single-digit cents. Measure the
+actual size before assuming:
+
+```bash
+gcloud monitoring time-series list \
+  --project made-for-seconds \
+  --filter 'metric.type="firestore.googleapis.com/document/storage_bytes"' \
+  --format 'value(points[0].value.int64Value)'
+```
+
+Not covered by the table, and deliberately left for the aggregate cost model
+rather than guessed at here: restore operations (billed separately, per GiB
+restored, only when a restore actually happens), and the scratch database a
+restore lands in (billed as a normal database for as long as it exists — delete
+it when done).
+
+> **Approved:** the recurring weekly-backup charge is accepted at the bound
+> above. The 14-week depth is load-bearing *only* until receipts carry their own
+> durable association record; once that ships, this depth should be
+> re-evaluated rather than kept by inertia.
+
 ### Cost circuit breaker
 
 The project cannot quietly bill past `monthly_budget_amount` (default **$15**).

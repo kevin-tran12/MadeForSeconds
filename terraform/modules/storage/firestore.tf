@@ -34,6 +34,19 @@ resource "google_firestore_backup_schedule" "daily" {
 # tail. 14 weeks is the maximum Firestore allows for a backup schedule, and
 # daily schedules are separately capped at 7 days, which is why depth needs a
 # second schedule rather than a longer retention on the first.
+#
+# COST: this is a real recurring charge — Firestore backup storage has no free
+# allowance, and backups are full copies, not incremental. These 14 weekly
+# copies add ≈$0.42 per GiB of live database per month on top of the ≈$0.21 the
+# 7 daily copies already cost. Bounded at ≈$0.63/mo total because live storage
+# stays inside the 1 GiB free tier at this scale. Approved on that basis; the
+# arithmetic, the measurement command, and what is deliberately excluded are in
+# docs/DEPLOYMENT.md § What the backup schedules cost.
+#
+# The depth is load-bearing only while a recipe-attached receipt's sole record
+# of what it belongs to is the recipe document. Once receipts carry a durable
+# association record of their own, re-evaluate this rather than keeping it out
+# of habit.
 resource "google_firestore_backup_schedule" "weekly" {
   project   = var.gcp_project_id
   database  = google_firestore_database.default.name
