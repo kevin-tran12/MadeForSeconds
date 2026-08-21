@@ -81,6 +81,24 @@ run "every_injected_secret_is_readable_with_all_features_enabled" {
 run "no_optional_secrets_leaves_only_admin_emails" {
   command = plan
 
+  # Explicit, not relied-on-by-omission: every optional secret variable
+  # defaults to "" (variables.tf), which is only "blank" for as long as
+  # nothing else sets it. terraform test still auto-loads terraform.tfvars
+  # from the working directory the same as plan/apply does — CI never has one
+  # committed (it's gitignored), so this run passed there by coincidence, but
+  # it fails for anyone running `terraform test` locally against a real
+  # terraform.tfvars with Redis/Stripe/subscriber values already filled in.
+  # Assigning "" here overrides whatever the ambient tfvars file says, so this
+  # run actually tests the blank configuration it claims to.
+  variables {
+    redis_url              = ""
+    stripe_secret_key      = ""
+    stripe_webhook_secret  = ""
+    subscriber_jwt_secret  = ""
+    resend_api_key         = ""
+    instagram_access_token = ""
+  }
+
   assert {
     condition     = length(output.secrets_missing_accessor) == 0
     error_message = "Secrets injected without a readable binding on a default deployment: ${join(", ", output.secrets_missing_accessor)}"
