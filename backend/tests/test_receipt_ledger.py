@@ -48,11 +48,24 @@ def _chain_db():
 
 
 def _recipe(**over):
+    """A recipe dict shaped for both call sites that read it: delete_recipe only
+    ever reads a few fields off the raw dict, but update_recipe's happy path
+    round-trips the merged result through Recipe(**updated) — so this needs
+    every field the model requires, not just the ones receipt_ledger touches.
+    """
     data = {
         "title": "Braised Short Ribs",
         "slug": "braised-short-ribs",
+        "description": "Rich and fall-apart tender",
+        "ingredients": [{"item": "Short ribs", "amount": "2", "unit": "lb"}],
+        "instructions": [{"step": 1, "text": "Sear, then braise."}],
+        "prep_time_minutes": 20,
+        "cook_time_minutes": 180,
+        "servings": 4,
+        "difficulty": "medium",
         "categories": ["dinner"],
         "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        "updated_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
         "created_via": "admin",
         "receipt_urls": [],
         "published": False,
