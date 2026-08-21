@@ -55,17 +55,37 @@ module "storage" {
 # Same shape as observability/error_alerts.tf's wait_for_log_metrics:
 # depends_on the whole producing module — matching this file's existing
 # all-or-nothing dependency idiom (google_project_service.required_apis
-# below) rather than hand-picking the specific accessor-binding resources —
-# delays on create only, so this costs nothing on subsequent applies and
-# nothing at all once the bindings exist. If a from-scratch apply still races
-# the documented worst case, re-running apply is safe: Cloud Run's revision
-# creation is idempotent, and the previous working revision keeps serving
-# until a new one passes its startup probe (docs/DEPLOYMENT.md § Updating the
-# backend).
+# below) rather than hand-picking the specific accessor-binding resources.
+#
+# time_sleep only sleeps on create, so a bare depends_on protects the very
+# first apply and nothing after: docs/DEPLOYMENT.md lists "adding or rotating
+# a secret" as an ordinary reason to run apply later, and turning on Stripe,
+# subscriber cancellation, or Resend for the first time — this resource's own
+# motivating example — is exactly that case. Without a reason to replace it,
+# an already-applied time_sleep is a no-op on every later apply, so the new
+# accessor binding for a freshly-enabled secret would race the Cloud Run
+# update again, unprotected, on whichever apply first grants it.
+#
+# triggers closes that: it's keyed on the actual set of granted accessors, not
+# on which optional tfvars are non-blank, so it tracks what Terraform is about
+# to create rather than what the operator typed. Any change to that set
+# — a secret added or removed — forces this resource to be replaced, which
+# means a fresh 180s sleep ordered before backend-service's update, on
+# whichever apply introduces the change. An apply that changes nothing about
+# the granted set costs nothing, same as before.
+#
+# If a from-scratch (or newly-triggered) apply still races the documented
+# worst case, re-running apply is safe: Cloud Run's revision creation is
+# idempotent, and the previous working revision keeps serving until a new one
+# passes its startup probe (docs/DEPLOYMENT.md § Updating the backend).
 resource "time_sleep" "wait_for_secret_accessors" {
   depends_on = [module.security]
 
   create_duration = "180s"
+
+  triggers = {
+    accessors = join(",", sort(tolist(module.security.granted_secret_accessors)))
+  }
 }
 
 module "backend-service" {
