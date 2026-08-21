@@ -151,7 +151,15 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
 
 @router.delete("/recipes/{recipe_id}/receipts", status_code=204)
 async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
-    """Remove a single receipt URL from a recipe and delete its GCS blob."""
+    """Unlink a single receipt URL from a recipe. The stored object is kept.
+
+    Detaching a receipt is an editing action — the wrong file was attached, or
+    it belongs on a different recipe. Destroying a tax record is not, so this
+    only updates Firestore. The receipts bucket enforces seven-year retention
+    (terraform/modules/storage/buckets.tf), which would reject the delete in
+    any case; the object remains reachable by its URL and in the Firestore
+    backups that record which expense it belonged to.
+    """
     url = body.url
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
@@ -168,8 +176,6 @@ async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
         raise HTTPException(status_code=404, detail="Receipt not found on this recipe")
 
     doc_ref.update({"receipt_urls": [u for u in current_urls if u != url]})
-
-    uploads.delete_recipe_receipt_blob(url)
 
     cache.clear()
 
