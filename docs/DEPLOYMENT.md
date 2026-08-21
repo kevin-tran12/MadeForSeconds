@@ -428,6 +428,51 @@ All secrets are stored in GCP Secret Manager. To rotate (e.g. Stripe keys):
    gcloud run services update mfs-backend --region us-central1 --project made-for-seconds
    ```
 
+### Removing an optional secret
+
+Blanking a previously-set optional tfvar (`redis_url`, `stripe_secret_key`,
+`stripe_webhook_secret`, `subscriber_jwt_secret`, `resend_api_key`,
+`instagram_access_token`) and running a plain `terraform apply` is **not
+safe**. `modules.tf`'s `time_sleep.wait_for_secret_accessors` only protects
+the opposite direction — filling in a blank secret. On a removal, Terraform
+destroys the secret and its accessor binding first, then Cloud Run's revision
+is updated to stop referencing it — `-target` doesn't help split this into two
+applies either, since backend-service's plan pulls in module.security's
+pending destroy as a dependency either way. Any instance start that lands in
+that window — a scale-to-zero cold start, or Cloud Run replacing an existing
+instance for its own reasons (host maintenance, a crash) — resolves a secret
+reference that no longer exists and fails.
+
+Forcing a warm instance (`--min-instances=1`) only lowers how often that
+window gets hit; Cloud Run doesn't guarantee an existing instance is never
+replaced, so it's a reduction, not a fix. The only way to actually close the
+window is to make sure nothing references the secret *before* it's
+destroyed, which needs a temporary code change, not just a tfvar change:
+
+1. In `modules/backend-service/cloud_run.tf`, temporarily exclude the entry
+   for the secret you're removing from `local.optional_secret_env` (e.g. add
+   `if entry.name != "RESEND_API_KEY"` to its `for` expression). Leave the
+   tfvar as it is. Apply:
+   ```bash
+   cd terraform && terraform apply -lock-timeout=5m
+   ```
+   This produces a new Cloud Run revision that no longer references the
+   secret. `module.security` is untouched by this apply — the secret and its
+   accessor binding still exist, so nothing about this step is destructive.
+2. Confirm the new revision is serving all traffic and the old one has no
+   instances left:
+   ```bash
+   gcloud run revisions list --service mfs-backend --region us-central1 --project made-for-seconds
+   ```
+3. Revert the temporary exclusion, blank the tfvar, and apply again. The
+   currently-serving revision was already confirmed in step 2 to not
+   reference this secret, so its destruction — whenever Terraform gets to it,
+   with or without the 180s wait — cannot break a running or restarting
+   instance: there's nothing left to reference.
+
+Steps 1–2 are the part that actually matters; skipping straight to blanking
+the tfvar is what reintroduces the race.
+
 ---
 
 ## Cloudflare Pages previews
