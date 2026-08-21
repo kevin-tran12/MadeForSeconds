@@ -386,6 +386,7 @@ different failures:
 | Bucket retention policy, 7 years | Deletion or replacement of the object, by anyone — application bug, compromised runtime, or an admin with `objectAdmin` | `terraform/modules/storage/buckets.tf` |
 | Object versioning | Overwrites, by keeping the superseded generation | same file |
 | Firestore backups, daily 7d + weekly 14w | Loss of the *metadata* — which expense a receipt belongs to, for how much, on what date | `terraform/modules/storage/firestore.tf` |
+| `receipt_associations` records | Loss of the *association* when a recipe-attached receipt is detached or its recipe deleted — written before the link goes away, so it does not expire with a backup | `backend/app/services/receipt_ledger.py` |
 
 The retention policy is what makes the seven-year claim real. Versioning alone
 does not: a caller holding `objectAdmin` can delete every generation
@@ -398,6 +399,24 @@ policy anyway; unlinking makes that the intended behaviour rather than a
 swallowed error.
 
 **Restoring a receipt whose link was removed:**
+
+Start with the association record — it says what the object was without needing
+a backup, and unlike a backup it does not expire:
+
+```bash
+gcloud firestore documents list \
+  --collection-ids=receipt_associations --project made-for-seconds
+```
+
+Each record carries the receipt URL, the recipe's id/title/slug/categories as
+they were, why it was detached (`unlinked`, `recipe_deleted`,
+`replaced_by_update`), when, through which interface, and which admin did it.
+Records are append-only: nothing updates or deletes them.
+
+Receipts reached through the **expenses** ledger never need this — an expense is
+voided rather than deleted, and `expense_revisions` keeps the full history.
+`receipt_associations` covers the narrower case of receipts attached straight to
+a recipe, where the recipe document was previously the only record.
 
 ```bash
 # The object never went anywhere — list by prefix to find it

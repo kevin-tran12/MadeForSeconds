@@ -324,7 +324,7 @@ class TestDeleteRecipe:
         db.get.return_value = _doc(published=True)
 
         with pytest.raises(svc.RecipeServiceError):
-            svc.delete_recipe(db, "doc-id", require_draft=True)
+            svc.delete_recipe(db, "doc-id", source="admin", require_draft=True)
 
         db.delete.assert_not_called()
 
@@ -346,7 +346,7 @@ class TestDeleteRecipe:
             patch("app.services.uploads.delete_recipe_image_blob") as img_deleter,
             patch("app.services.uploads.delete_gcs_blob") as raw_deleter,
         ):
-            svc.delete_recipe(db, "doc-id")
+            svc.delete_recipe(db, "doc-id", source="admin")
 
         img_deleter.assert_called_once()
         raw_deleter.assert_not_called()

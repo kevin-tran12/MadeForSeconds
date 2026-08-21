@@ -15,7 +15,7 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from ..cache import cache
 from ..models import Recipe, RecipeCreate, RecipeUpdate
 from ..validation import get_invalid_categories
-from . import uploads
+from . import receipt_ledger, uploads
 
 
 class RecipeServiceError(Exception):
@@ -131,7 +131,9 @@ def create_recipe(db, body: RecipeCreate, *, source: str) -> Recipe:
     return Recipe(**data)
 
 
-def update_recipe(db, recipe_id: str, body: RecipeUpdate, *, source: str) -> Recipe:
+def update_recipe(
+    db, recipe_id: str, body: RecipeUpdate, *, source: str, actor: str | None = None
+) -> Recipe:
     if body.categories is not None:
         _validate_categories(db, body.categories)
     doc_ref, doc = _get_doc_or_raise(db, recipe_id)
@@ -155,6 +157,20 @@ def update_recipe(db, recipe_id: str, body: RecipeUpdate, *, source: str) -> Rec
             # image goes public. If this raises, the update aborts here:
             # Firestore is untouched and the old image is never deleted.
             uploads.sanitize_recipe_image(updates["image_url"])
+
+    # An update carrying a shorter receipt_urls list detaches receipts just as
+    # surely as the DELETE endpoint does, and nothing about the request says so.
+    # Same ordering rule: record before the write that drops them.
+    if removed := receipt_ledger.removed_receipt_urls(old_data, updates):
+        receipt_ledger.record_detachment(
+            db,
+            receipt_urls=removed,
+            recipe_id=recipe_id,
+            recipe=old_data,
+            reason=receipt_ledger.DETACH_REPLACED,
+            source=source,
+            actor=actor,
+        )
 
     doc_ref.update(updates)
 
@@ -201,12 +217,27 @@ def set_published(db, recipe_id: str, published: bool, *, source: str) -> tuple[
     return Recipe(**updated), warnings
 
 
-def delete_recipe(db, recipe_id: str, *, require_draft: bool = False) -> None:
+def delete_recipe(
+    db, recipe_id: str, *, source: str, require_draft: bool = False, actor: str | None = None
+) -> None:
     doc_ref, doc = _get_doc_or_raise(db, recipe_id)
     data = doc.to_dict()
 
     if require_draft and data.get("published"):
         raise RecipeServiceError("Refusing to delete a published recipe — unpublish it first")
+
+    # Record what the receipts belonged to before the only thing that says so
+    # disappears. Deliberately before delete_recipe_image_blob and the Firestore
+    # delete: if this raises, nothing has been destroyed yet.
+    receipt_ledger.record_detachment(
+        db,
+        receipt_urls=data.get("receipt_urls") or [],
+        recipe_id=recipe_id,
+        recipe=data,
+        reason=receipt_ledger.DETACH_RECIPE_DELETED,
+        source=source,
+        actor=actor,
+    )
 
     uploads.delete_recipe_image_blob(data.get("image_url"))
 
@@ -214,7 +245,7 @@ def delete_recipe(db, recipe_id: str, *, require_draft: bool = False) -> None:
     # can be thrown away; the receipts attached to it are expense records that
     # have to survive the recipe by years. The receipts bucket enforces that
     # itself with a seven-year retention policy, so deleting them here would
-    # fail regardless — and the Firestore backups keep the association for the
-    # window in which anyone would go looking.
+    # fail regardless — and the association record written above outlives both
+    # the recipe and any backup window.
     doc_ref.delete()
     cache.clear()
