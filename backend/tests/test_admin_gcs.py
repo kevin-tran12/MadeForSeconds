@@ -240,9 +240,16 @@ class TestDeleteRecipeGcsCascade:
         mock_storage.Client.return_value.bucket.return_value.blob.assert_called_with("photo.jpg")
         mock_blob.delete.assert_called_once()
 
-    def test_deletes_all_receipt_urls_on_recipe_delete(
+    def test_keeps_receipt_objects_on_recipe_delete(
         self, authenticated_client, mock_db, mock_cache
     ):
+        """Receipts outlive the recipe they were attached to.
+
+        A recipe is content and can be thrown away; its receipts are expense
+        records held under a seven-year retention policy on the bucket
+        (terraform/modules/storage/buckets.tf), which would refuse the delete
+        anyway. This used to cascade into deleting both objects.
+        """
         receipt1 = "https://storage.googleapis.com/test-receipts/r1.jpg"
         receipt2 = "https://storage.googleapis.com/test-receipts/r2.pdf"
         mock_doc = MagicMock()
@@ -265,8 +272,11 @@ class TestDeleteRecipeGcsCascade:
             response = authenticated_client.delete("/api/admin/recipes/test-id")
 
         assert response.status_code == 204
-        # Both receipt blobs should be deleted
-        assert mock_blob.delete.call_count == 2
+        # The Firestore document goes; every receipt object stays. Asserted at
+        # the storage client, so no helper — existing or reintroduced — can
+        # delete a receipt without failing here.
+        mock_db.collection.return_value.document.return_value.delete.assert_called_once()
+        mock_blob.delete.assert_not_called()
 
     def test_no_gcs_calls_when_no_image_or_receipts(
         self, authenticated_client, mock_db, mock_cache
@@ -337,9 +347,17 @@ class TestUploadReceipt:
 # ── delete receipt endpoint ───────────────────────────────────────────────────
 
 class TestDeleteReceipt:
-    def test_removes_url_from_recipe_and_deletes_gcs_blob(
+    def test_unlinks_url_from_recipe_without_deleting_gcs_blob(
         self, authenticated_client, mock_db, mock_cache
     ):
+        """Detaching a receipt is an edit; destroying a tax record is not.
+
+        The endpoint drops the URL from Firestore and leaves the object. It
+        used to delete the blob too — which the bucket's seven-year retention
+        policy now refuses, and delete_gcs_blob swallows exceptions, so keeping
+        the call would have turned a refused deletion into a silent no-op that
+        still read like intent.
+        """
         receipt_url = "https://storage.googleapis.com/test-receipts/r1.jpg"
         mock_doc = MagicMock()
         mock_doc.exists = True
@@ -364,8 +382,9 @@ class TestDeleteReceipt:
         mock_db.collection.return_value.document.return_value.update.assert_called_once_with(
             {"receipt_urls": []}
         )
-        # GCS blob deleted
-        mock_blob.delete.assert_called_once()
+        # The object stays — no blob delete, and no storage client built at all.
+        mock_blob.delete.assert_not_called()
+        mock_storage.Client.assert_not_called()
 
     def test_returns_404_when_url_not_on_recipe(
         self, authenticated_client, mock_db, mock_cache
