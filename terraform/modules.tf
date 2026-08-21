@@ -35,6 +35,39 @@ module "storage" {
   depends_on = [google_project_service.required_apis]
 }
 
+# Bridges Secret Manager IAM's eventual consistency between module.security's
+# accessor bindings and module.backend-service's Cloud Run revision.
+#
+# module.backend-service only takes module.security.secret_ids as an input —
+# an output that depends on the secret *containers*, not the accessor
+# bindings that grant read access to them (see secrets.tf and
+# service_accounts.tf in modules/security). Referencing that output alone
+# creates no ordering guarantee: Terraform is free to apply the Cloud Run
+# update and the accessor bindings in parallel once the secret containers
+# exist, since neither references the other. On first-time enablement of
+# Stripe, subscriber cancellation, or Resend, that meant a Cloud Run revision
+# could be created — and validated against Secret Manager IAM — before the
+# binding granting it access even finished applying, let alone before
+# Google's IAM system had propagated it (Google documents ~2 minutes typical,
+# up to 7+ minutes). Cloud Run checks every referenced secret synchronously
+# at revision creation, so this was a hard failure, not a degraded one.
+#
+# Same shape as observability/error_alerts.tf's wait_for_log_metrics:
+# depends_on the whole producing module — matching this file's existing
+# all-or-nothing dependency idiom (google_project_service.required_apis
+# below) rather than hand-picking the specific accessor-binding resources —
+# delays on create only, so this costs nothing on subsequent applies and
+# nothing at all once the bindings exist. If a from-scratch apply still races
+# the documented worst case, re-running apply is safe: Cloud Run's revision
+# creation is idempotent, and the previous working revision keeps serving
+# until a new one passes its startup probe (docs/DEPLOYMENT.md § Updating the
+# backend).
+resource "time_sleep" "wait_for_secret_accessors" {
+  depends_on = [module.security]
+
+  create_duration = "180s"
+}
+
 module "backend-service" {
   source = "./modules/backend-service"
 
@@ -69,7 +102,7 @@ module "backend-service" {
 
   scheduler_agent_email = google_project_service_identity.cloudscheduler.email
 
-  depends_on = [google_project_service.required_apis]
+  depends_on = [google_project_service.required_apis, time_sleep.wait_for_secret_accessors]
 }
 
 module "observability" {

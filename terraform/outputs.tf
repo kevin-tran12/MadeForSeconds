@@ -19,13 +19,35 @@ output "service_account_email" {
 # rather than reconstructing by hand from two modules. Asserted in
 # terraform/tests/secret_access.tftest.hcl; also usable as a standing check:
 #   terraform output secrets_missing_accessor   # must always be []
+#
+# Both sides normalized to the terminal secret id ("admin-emails") before
+# comparing. Every resource here is *configured* with that short form, but on
+# a live plan against already-applied state, an existing
+# google_secret_manager_secret_iam_member resource can refresh secret_id back
+# from the real API as the fully qualified projects/P/secrets/NAME form —
+# observed specifically for admin-emails and redis-url, the two bindings that
+# pre-date this PR and are migrated in place via moved.tf rather than freshly
+# created. Comparing the raw values then reports a working, already-granted
+# binding as missing. regex() strips whichever prefix (if any) either side's
+# provider happens to echo back, so the comparison is representation-agnostic
+# regardless of which side normalizes and which doesn't — see
+# terraform/tests/secret_access.tftest.hcl's already_qualified_accessor_names_
+# still_match run for the regression this guards.
+locals {
+  secrets_injected_into_cloud_run = toset([
+    for id in module.backend-service.referenced_secret_ids : regex("[^/]+$", id)
+  ])
+  secrets_granted_accessor = toset([
+    for id in module.security.granted_secret_accessors : regex("[^/]+$", id)
+  ])
+}
 
 output "secrets_injected_into_cloud_run" {
-  description = "Every Secret Manager secret the Cloud Run template reads, optional features included"
-  value       = module.backend-service.referenced_secret_ids
+  description = "Every Secret Manager secret the Cloud Run template reads, optional features included, normalized to its terminal id"
+  value       = local.secrets_injected_into_cloud_run
 }
 
 output "secrets_missing_accessor" {
-  description = "Secrets Cloud Run injects that the runtime service account cannot read. Any entry here is a revision that will fail to start — this must be empty."
-  value       = setsubtract(module.backend-service.referenced_secret_ids, module.security.granted_secret_accessors)
+  description = "Secrets Cloud Run injects that the runtime service account cannot read, after normalizing away any short-name/fully-qualified-name mismatch between how each side's resource happens to report itself. Any entry here is a revision that will fail to start — this must be empty."
+  value       = setsubtract(local.secrets_injected_into_cloud_run, local.secrets_granted_accessor)
 }

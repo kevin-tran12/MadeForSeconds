@@ -91,3 +91,78 @@ run "no_optional_secrets_leaves_only_admin_emails" {
     error_message = "With every optional secret blank, admin-emails should be the only one injected, got: ${join(", ", output.secrets_injected_into_cloud_run)}"
   }
 }
+
+# Reproduces a bug mock_provider cannot reach on its own: on a live plan
+# against already-applied state, google_secret_manager_secret_iam_member.
+# secret_id can refresh from the real API as the fully qualified
+# projects/P/secrets/NAME form even though every resource here configures it
+# with the short form — observed specifically for admin-emails and redis-url,
+# the two bindings that pre-date this PR and are migrated in place via
+# moved.tf rather than freshly created. mock_provider always echoes back
+# exactly what was configured, so by default this asymmetry never appears in
+# a mocked plan; override_module injects the shape a live plan actually
+# showed, so the regression stays caught without needing a real GCP project.
+#
+# override_module replaces every output of the targeted module for this run,
+# so all five of module.security's outputs are supplied here — module.storage
+# and module.backend-service both consume some of them, and an omitted one
+# would plan as null rather than skip straight to a test failure.
+run "already_qualified_accessor_names_still_match" {
+  command = plan
+
+  variables {
+    redis_url              = "redis://placeholder.example.invalid:6379"
+    stripe_secret_key      = "placeholder-stripe-key"
+    stripe_webhook_secret  = "placeholder-stripe-webhook"
+    stripe_product_id      = "placeholder-stripe-product"
+    subscriber_jwt_secret  = "placeholder-subscriber-jwt-signing-value"
+    resend_api_key         = "placeholder-resend-key"
+    instagram_access_token = "placeholder-instagram-token"
+    workos_authkit_domain  = "https://example.authkit.app"
+    mcp_resource_url       = "https://backend.example.invalid/mcp"
+  }
+
+  override_module {
+    target = module.security
+    outputs = {
+      backend_sa_email = "mfs-backend@mfs-test.iam.gserviceaccount.com"
+      backend_sa_name  = "projects/mfs-test/serviceAccounts/mfs-backend@mfs-test.iam.gserviceaccount.com"
+      backend_sa_id    = "projects/mfs-test/serviceAccounts/mfs-backend@mfs-test.iam.gserviceaccount.com"
+      secret_ids = {
+        admin_emails           = "admin-emails"
+        redis_url              = "redis-url"
+        stripe_secret_key      = "stripe-secret-key"
+        stripe_webhook_secret  = "stripe-webhook-secret"
+        subscriber_jwt_secret  = "subscriber-jwt-secret"
+        resend_api_key         = "resend-api-key"
+        instagram_access_token = "instagram-access-token"
+      }
+      # The form a live plan against existing state actually returned —
+      # every entry fully qualified, unlike secret_ids above.
+      granted_secret_accessors = toset([
+        "projects/mfs-test/secrets/admin-emails",
+        "projects/mfs-test/secrets/redis-url",
+        "projects/mfs-test/secrets/stripe-secret-key",
+        "projects/mfs-test/secrets/stripe-webhook-secret",
+        "projects/mfs-test/secrets/subscriber-jwt-secret",
+        "projects/mfs-test/secrets/resend-api-key",
+        "projects/mfs-test/secrets/instagram-access-token",
+      ])
+    }
+  }
+
+  # Not vacuously true: confirm the short-form set is still non-empty and
+  # complete before trusting that the (long-form vs short-form) difference
+  # came out empty.
+  assert {
+    condition = output.secrets_injected_into_cloud_run == toset(
+      ["admin-emails", "redis-url", "stripe-secret-key", "stripe-webhook-secret", "subscriber-jwt-secret", "resend-api-key"]
+    )
+    error_message = "Expected the usual six secrets Cloud Run injects with every feature enabled, got: ${join(", ", output.secrets_injected_into_cloud_run)}"
+  }
+
+  assert {
+    condition     = length(output.secrets_missing_accessor) == 0
+    error_message = "A fully qualified accessor name — the form a live plan against existing state actually returns — was wrongly treated as a different secret than its short-form counterpart: ${join(", ", output.secrets_missing_accessor)}"
+  }
+}
