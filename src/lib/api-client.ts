@@ -4,6 +4,28 @@ if (!API_URL) {
   throw new Error('Missing VITE_API_URL environment variable')
 }
 
+/** Fired whenever a request reaches a server at all, even a non-2xx response. */
+export const API_REACHABLE_EVENT = 'api-reachable'
+/** Fired when `fetch` itself rejects — no response came back at all. */
+export const API_UNREACHABLE_EVENT = 'api-unreachable'
+
+/**
+ * Wraps `fetch` to report connectivity on the way past, for useSiteStatus to
+ * pick up. A thrown response body (4xx/5xx) still means the server answered —
+ * only a rejected fetch() itself (network failure, DNS, a CORS-opaque refusal)
+ * counts as unreachable.
+ */
+async function fetchWithConnectivitySignal(input: string, init: RequestInit): Promise<Response> {
+  try {
+    const response = await fetch(input, init)
+    window.dispatchEvent(new Event(API_REACHABLE_EVENT))
+    return response
+  } catch (error) {
+    window.dispatchEvent(new Event(API_UNREACHABLE_EVENT))
+    throw error
+  }
+}
+
 let _getToken: (() => Promise<string | null>) | null = null
 
 /** Called once by AuthContext to wire up token retrieval. */
@@ -50,7 +72,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     headers['X-TOTP-Session'] = totpToken
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchWithConnectivitySignal(`${API_URL}${path}`, {
     ...options,
     headers,
   })
@@ -90,7 +112,7 @@ export async function apiUpload<T>(path: string, formData: FormData): Promise<T>
     headers['X-TOTP-Session'] = totpToken
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetchWithConnectivitySignal(`${API_URL}${path}`, {
     method: 'POST',
     headers,
     body: formData,
