@@ -219,6 +219,29 @@ class TestDeleteRecipeRecordsAssociation:
         db.delete.assert_not_called()
         img_deleter.assert_not_called()
 
+    def test_mcp_deletion_is_attributed_to_mcp_with_no_admin_actor(self):
+        """Provenance survives the interface it came through.
+
+        An agent deleting a draft over MCP has no admin email behind it, so the
+        record has to say "mcp" and leave detached_by null rather than silently
+        looking like an admin action.
+        """
+        db = _chain_db()
+        doc = MagicMock()
+        doc.exists = True
+        doc.to_dict.return_value = _recipe(receipt_urls=[R1])
+        db.get.return_value = doc
+
+        with (
+            patch("app.services.recipes.cache"),
+            patch("app.services.uploads.delete_recipe_image_blob"),
+        ):
+            svc.delete_recipe(db, "rec-1", source="mcp", require_draft=True)
+
+        payload = _written_payloads(db)[0]
+        assert payload["detached_via"] == "mcp"
+        assert payload["detached_by"] is None
+
     def test_recipe_without_receipts_records_nothing(self):
         db = _chain_db()
         doc = MagicMock()
