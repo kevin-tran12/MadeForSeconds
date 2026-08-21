@@ -428,6 +428,41 @@ All secrets are stored in GCP Secret Manager. To rotate (e.g. Stripe keys):
    gcloud run services update mfs-backend --region us-central1 --project made-for-seconds
    ```
 
+### Removing an optional secret
+
+Blanking a previously-set optional tfvar (`redis_url`, `stripe_secret_key`,
+`stripe_webhook_secret`, `subscriber_jwt_secret`, `resend_api_key`,
+`instagram_access_token`) and running a plain `terraform apply` is **not
+safe**. `modules.tf`'s `time_sleep.wait_for_secret_accessors` only protects
+the opposite direction — filling in a blank secret. On a removal, Terraform
+destroys the secret and its accessor binding first, then Cloud Run's revision
+is updated to stop referencing it — `-target` doesn't help split this into two
+applies either, since backend-service's plan pulls in module.security's
+pending destroy as a dependency either way. If the service is asked to
+scale up from zero anywhere in that window, the new instance fails to start:
+it resolves a secret reference that no longer exists.
+
+The service scales to zero (`min_instance_count = 0` in `cloud_run.tf`), so
+that window is a real risk, not a hypothetical one. Force a warm instance
+before touching Secret Manager, so nothing needs to cold-start while the
+secret is briefly gone:
+
+```bash
+# 1. Keep at least one instance running for the duration of the apply.
+gcloud run services update mfs-backend --region us-central1 \
+  --project made-for-seconds --min-instances=1
+
+# 2. Blank the tfvar and apply as normal. The already-running instance keeps
+#    serving on the old revision throughout — it resolved the secret at its
+#    own startup, before this apply, and doesn't re-resolve it — while the new
+#    revision (with the secret already gone) is created behind the scenes.
+cd terraform && terraform apply -lock-timeout=5m
+
+# 3. This apply also reconciles Cloud Run's scaling block back to
+#    min_instance_count = 0, so no manual revert is needed. Confirm the new
+#    revision is serving before moving on.
+```
+
 ---
 
 ## Cloudflare Pages previews

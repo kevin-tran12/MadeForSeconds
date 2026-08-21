@@ -74,17 +74,40 @@ module "storage" {
 # whichever apply introduces the change. An apply that changes nothing about
 # the granted set costs nothing, same as before.
 #
+# Normalized the same way as terraform/outputs.tf's secrets_missing_accessor:
+# a live plan against already-applied state can echo an existing accessor's
+# secret_id back fully qualified (projects/P/secrets/NAME) while a
+# freshly-created one is still the short form this module configures. Left
+# unnormalized, that representation-only difference changes this value and
+# replaces the resource — a spurious 180s wait with no accessor actually
+# added or removed.
+#
 # If a from-scratch (or newly-triggered) apply still races the documented
 # worst case, re-running apply is safe: Cloud Run's revision creation is
 # idempotent, and the previous working revision keeps serving until a new one
 # passes its startup probe (docs/DEPLOYMENT.md § Updating the backend).
+#
+# One-directional: this protects additions (a blank secret being filled in),
+# not removals. Depends_on the whole module gives one apply-order guarantee
+# in both directions — module.security (including any destroys) fully
+# completes before backend-service — which is correct for additions but
+# backwards for removing an optional secret: the secret and its accessor
+# binding are destroyed, then this resource replaces and re-sleeps 180s,
+# and only then does backend-service drop the now-dangling env reference.
+# A scale-to-zero cold start landing in that window fails, referencing a
+# secret that no longer exists. See docs/DEPLOYMENT.md § Removing an
+# optional secret for the safe procedure — this cannot be fixed with a
+# smarter trigger, because the trigger only controls how long to wait, and
+# the removal case needs the opposite ordering, not a wait.
 resource "time_sleep" "wait_for_secret_accessors" {
   depends_on = [module.security]
 
   create_duration = "180s"
 
   triggers = {
-    accessors = join(",", sort(tolist(module.security.granted_secret_accessors)))
+    accessors = join(",", sort([
+      for id in module.security.granted_secret_accessors : regex("[^/]+$", id)
+    ]))
   }
 }
 
