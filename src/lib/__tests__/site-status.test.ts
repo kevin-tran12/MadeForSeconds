@@ -124,6 +124,41 @@ describe('diagnoseSiteStatus', () => {
     expect(statusCalls).toBe(4)
   })
 
+  it('stops retrying immediately if a retry attempt itself fails, rather than exhausting all attempts', async () => {
+    // A confirmed 404 is worth retrying (GCS is fine, the write just isn't
+    // there yet). A read that fails outright means GCS itself is the one
+    // having trouble right now — more attempts at the same timeout won't
+    // help, so this must not burn through all 3 regardless.
+    let statusCalls = 0
+    mockFetch({
+      status: () => {
+        statusCalls += 1
+        if (statusCalls === 1) return jsonResponse({}, false) // confirmed absent — worth one retry
+        return Promise.reject(new TypeError('Failed to fetch')) // GCS itself fails on the retry
+      },
+      probe: () => ({}) as Response,
+    })
+
+    expect(await diagnoseWithFakeTimers()).toEqual({ kind: 'refused' })
+    expect(statusCalls).toBe(2)
+  })
+
+  it('does not retry at all when the initial read itself fails, only when it is confirmed absent', async () => {
+    // If GCS never answers the first check, it is unreachable right now, not
+    // "answered with a 404" — no basis to expect a retry to land any better.
+    let statusCalls = 0
+    mockFetch({
+      status: () => {
+        statusCalls += 1
+        return Promise.reject(new TypeError('Failed to fetch'))
+      },
+      probe: () => ({}) as Response,
+    })
+
+    expect(await diagnoseWithFakeTimers()).toEqual({ kind: 'refused' })
+    expect(statusCalls).toBe(1)
+  })
+
   it('reports unreachable when nothing answers at all', async () => {
     mockFetch({})
 

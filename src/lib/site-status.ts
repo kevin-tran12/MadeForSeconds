@@ -43,16 +43,23 @@ const PROBE_TIMEOUT_MS = 4000
 // re-runs diagnoseSiteStatus once it settles, until some other request
 // happens to fail again. A short bounded retry here catches the common case
 // instead of settling permanently on the less-confident "refused".
+//
+// The retry timeout is deliberately much shorter than PROBE_TIMEOUT_MS: these
+// exist to catch a write landing moments ago, not to wait out a slow GCS. At
+// PROBE_TIMEOUT_MS each, three retries could add ~12s on top of the initial
+// read before a visitor sees any banner at all — far worse than the race
+// they're meant to fix.
 const STATUS_RETRY_ATTEMPTS = 3
 const STATUS_RETRY_DELAY_MS = 1000
+const STATUS_RETRY_TIMEOUT_MS = 1500
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function withTimeout(input: string, init: RequestInit): Promise<Response> {
+async function withTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
     return await fetch(input, { ...init, signal: controller.signal })
   } finally {
@@ -60,21 +67,29 @@ async function withTimeout(input: string, init: RequestInit): Promise<Response> 
   }
 }
 
+type PublishedStatusCheck =
+  /** The breaker published a cost-cap status. */
+  | { kind: 'confirmed'; since: string | null }
+  /** GCS answered; no cost-cap status (including a plain 404 — the normal healthy state). */
+  | { kind: 'absent' }
+  /** The read itself failed or timed out — GCS didn't answer within timeoutMs. */
+  | { kind: 'error' }
+
 /**
- * Did the breaker publish a cost-cap status?
- *
- * Returns null for "cannot confirm" — including a 404, which is the normal
- * healthy state. Only a positive, well-formed answer counts.
+ * Did the breaker publish a cost-cap status? Distinguishes a definitive "no"
+ * (worth retrying — GCS answered fine, the write just isn't there yet) from
+ * "couldn't tell" (not worth retrying — GCS itself isn't answering right now,
+ * and more attempts at a timeout that already elapsed won't fix that).
  */
-async function readPublishedStatus(): Promise<{ since: string | null } | null> {
-  if (!STATUS_URL) return null
+async function checkPublishedStatus(timeoutMs: number): Promise<PublishedStatusCheck> {
+  if (!STATUS_URL) return { kind: 'error' }
   try {
-    const res = await withTimeout(STATUS_URL, { cache: 'no-store' })
-    if (!res.ok) return null
+    const res = await withTimeout(STATUS_URL, { cache: 'no-store' }, timeoutMs)
+    if (!res.ok) return { kind: 'absent' }
     const body = (await res.json()) as { status?: string; since?: string }
-    return body.status === 'budget_cap' ? { since: body.since ?? null } : null
+    return body.status === 'budget_cap' ? { kind: 'confirmed', since: body.since ?? null } : { kind: 'absent' }
   } catch {
-    return null
+    return { kind: 'error' }
   }
 }
 
@@ -87,7 +102,7 @@ async function readPublishedStatus(): Promise<{ since: string | null } | null> {
  */
 async function serverIsAnswering(): Promise<boolean> {
   try {
-    await withTimeout(`${API_URL}/api/health`, { mode: 'no-cors', cache: 'no-store' })
+    await withTimeout(`${API_URL}/api/health`, { mode: 'no-cors', cache: 'no-store' }, PROBE_TIMEOUT_MS)
     return true
   } catch {
     return false
@@ -106,7 +121,7 @@ async function serverIsAnswering(): Promise<boolean> {
  */
 export async function isApiHealthy(): Promise<boolean> {
   try {
-    const res = await withTimeout(`${API_URL}/api/health`, { cache: 'no-store' })
+    const res = await withTimeout(`${API_URL}/api/health`, { cache: 'no-store' }, PROBE_TIMEOUT_MS)
     return res.ok
   } catch {
     return false
@@ -115,7 +130,11 @@ export async function isApiHealthy(): Promise<boolean> {
 
 /**
  * Diagnose a failed API request. Call this only after a request has actually
- * failed — it costs two network round-trips. This never resolves to "healthy" —
+ * failed — it costs at least two network round-trips, and up to a handful
+ * more while retrying an unconfirmed refusal (bounded — see
+ * STATUS_RETRY_ATTEMPTS/STATUS_RETRY_TIMEOUT_MS above; worst case is one
+ * PROBE_TIMEOUT_MS wait plus a few STATUS_RETRY_TIMEOUT_MS ones, never
+ * several full-length timeouts stacked). This never resolves to "healthy" —
  * it exists to explain a failure, not to detect its absence. Use isApiHealthy
  * for that.
  */
@@ -126,18 +145,23 @@ export async function diagnoseSiteStatus(): Promise<SiteStatus> {
     return { kind: 'client-offline' }
   }
 
-  const published = await readPublishedStatus()
-  if (published) return { kind: 'budget-cap', since: published.since }
+  const initial = await checkPublishedStatus(PROBE_TIMEOUT_MS)
+  if (initial.kind === 'confirmed') return { kind: 'budget-cap', since: initial.since }
 
   if (!(await serverIsAnswering())) return { kind: 'unreachable' }
 
-  // Something answered, but nothing confirmed why yet — retry the read
-  // briefly before settling on the least-confident verdict. Bounded: this
-  // must resolve well before a visitor gives up waiting.
-  for (let attempt = 0; attempt < STATUS_RETRY_ATTEMPTS; attempt++) {
-    await sleep(STATUS_RETRY_DELAY_MS)
-    const retried = await readPublishedStatus()
-    if (retried) return { kind: 'budget-cap', since: retried.since }
+  // Retry only on a confirmed absence (GCS answered; no cost-cap file yet) —
+  // that's the write-landed-a-moment-later race this is for. A read that
+  // itself failed or timed out means GCS is the one having trouble right
+  // now, which more short-timeout attempts at the same unreachable origin
+  // won't fix; bail out immediately rather than stacking delay for nothing.
+  if (initial.kind === 'absent') {
+    for (let attempt = 0; attempt < STATUS_RETRY_ATTEMPTS; attempt++) {
+      await sleep(STATUS_RETRY_DELAY_MS)
+      const retried = await checkPublishedStatus(STATUS_RETRY_TIMEOUT_MS)
+      if (retried.kind === 'confirmed') return { kind: 'budget-cap', since: retried.since }
+      if (retried.kind === 'error') break
+    }
   }
 
   return { kind: 'refused' }
