@@ -404,16 +404,24 @@ Start with the association record — it says what the object was without needin
 a backup, and unlike a backup it does not expire:
 
 `gcloud` has no document-level read/list command — `firestore` only covers
-`backups`/`databases`/`export`/`import`/`indexes`; document access is the
-Firestore REST API or the console. Either works:
+`backups`/`databases`/`export`/`import`/`indexes`. A single REST `list` call
+isn't a safe substitute either: Firestore paginates past the first page via
+`nextPageToken`, so a bare `curl` silently omits anything beyond page one once
+the collection grows past it — exactly the kind of gap that shouldn't exist in
+a recovery procedure. Use the same client library the backend already depends
+on (`google-cloud-firestore` — `backend/requirements.txt`); `.stream()`
+handles pagination internally, so there's no token loop to get wrong:
 
 ```bash
-curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  "https://firestore.googleapis.com/v1/projects/made-for-seconds/databases/(default)/documents/receipt_associations" \
-  | python3 -m json.tool
+pip install google-cloud-firestore  # if not already available locally
+python3 -c "
+from google.cloud import firestore
+for doc in firestore.Client(project='made-for-seconds').collection('receipt_associations').stream():
+    print(doc.id, doc.to_dict())
+"
 ```
 
-Or browse it directly: [GCP console → Firestore → Data](https://console.cloud.google.com/firestore/databases) → `(default)` → `receipt_associations`.
+Or browse it directly: [GCP console → Firestore → Data](https://console.cloud.google.com/firestore/databases) → `(default)` → `receipt_associations` — the console's viewer paginates for you.
 
 Each record carries the receipt URL, the recipe's id/title/slug/categories as
 they were, why it was detached (`unlinked`, `recipe_deleted`,
