@@ -155,3 +155,34 @@ resource "google_secret_manager_secret_version" "instagram_access_token_initial"
     ignore_changes = [secret_data]
   }
 }
+
+# ─── One list of secrets, not three ───────────────────────────────────────────
+#
+# Every secret above, keyed by logical name. Optional ones are null when their
+# source variable was blank — try() turns the count-0 index-out-of-range into
+# null rather than an error.
+#
+# This map is the single source of truth for the two things that must never
+# disagree: the secret_ids this module hands to Cloud Run, and the
+# secretAccessor bindings the runtime SA holds. They used to be written out
+# separately, and they drifted — cloud_run.tf injected stripe-secret-key,
+# stripe-webhook-secret, subscriber-jwt-secret and resend-api-key while
+# service_accounts.tf granted access to none of them. Cloud Run rejects a
+# revision that references a secret its service identity cannot read, so
+# filling in any of those four documented tfvars would have failed the deploy
+# outright. Deriving both from one map is what stops that recurring.
+locals {
+  created_secrets = {
+    admin_emails           = google_secret_manager_secret.admin_emails.secret_id
+    redis_url              = try(google_secret_manager_secret.redis_url[0].secret_id, null)
+    stripe_secret_key      = try(google_secret_manager_secret.stripe_secret_key[0].secret_id, null)
+    stripe_webhook_secret  = try(google_secret_manager_secret.stripe_webhook_secret[0].secret_id, null)
+    subscriber_jwt_secret  = try(google_secret_manager_secret.subscriber_jwt_secret[0].secret_id, null)
+    resend_api_key         = try(google_secret_manager_secret.resend_api_key[0].secret_id, null)
+    instagram_access_token = try(google_secret_manager_secret.instagram_access_token[0].secret_id, null)
+  }
+
+  # The subset that exists for this deployment — every one of them needs an
+  # accessor binding, because every one of them exists to be read by the backend.
+  existing_secrets = { for name, secret_id in local.created_secrets : name => secret_id if secret_id != null }
+}
