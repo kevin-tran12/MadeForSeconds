@@ -61,7 +61,7 @@ steps:
       - update-traffic
       - mfs-backend
       - --region=$LOCATION
-      - --to-latest
+      - --to-tags=candidate-$SHORT_SHA=100
       - --quiet
 
 options:
