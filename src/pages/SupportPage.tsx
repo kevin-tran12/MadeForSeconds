@@ -137,7 +137,7 @@ export function SupportPage() {
         <button
           onClick={handleCheckout}
           disabled={!valid || loading}
-          className="w-full rounded-xl bg-cta py-3 text-sm font-bold text-cta-content shadow-sm hover:bg-cta transition-colors disabled:opacity-50"
+          className="w-full rounded-xl bg-cta py-3 text-sm font-bold text-cta-content shadow-sm hover:bg-cta-hover transition-colors disabled:opacity-50"
         >
           {loading
             ? 'Redirecting...'
@@ -172,7 +172,7 @@ export function SupportPage() {
 
       {/* Subscription confirmation modal */}
       {showConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-modal-scrim px-4">
           <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-xl">
             <h2 className="font-display text-lg font-bold text-content mb-2">
               Confirm recurring donation
@@ -185,7 +185,7 @@ export function SupportPage() {
               <button
                 onClick={doCheckout}
                 disabled={loading}
-                className="flex-1 rounded-lg bg-cta py-2.5 text-sm font-bold text-cta-content hover:bg-cta transition-colors disabled:opacity-50"
+                className="flex-1 rounded-lg bg-cta py-2.5 text-sm font-bold text-cta-content hover:bg-cta-hover transition-colors disabled:opacity-50"
               >
                 {loading ? 'Redirecting...' : 'Continue'}
               </button>

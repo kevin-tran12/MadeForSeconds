@@ -43,7 +43,7 @@ export function AboutPage() {
                 href="https://instagram.com/madeforseconds"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-card-border bg-card p-3 text-sm font-medium text-content-body transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm"
+                className="flex items-center gap-3 rounded-xl border border-card-border bg-card p-3 text-sm font-medium text-content-body transition-all hover:border-brand-border hover:bg-brand-surface hover:text-brand shadow-sm"
               >
                 Instagram
               </a>
@@ -51,7 +51,7 @@ export function AboutPage() {
                 href="https://tiktok.com/@madeforseconds"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-card-border bg-card p-3 text-sm font-medium text-content-body transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm"
+                className="flex items-center gap-3 rounded-xl border border-card-border bg-card p-3 text-sm font-medium text-content-body transition-all hover:border-brand-border hover:bg-brand-surface hover:text-brand shadow-sm"
               >
                 TikTok
               </a>
@@ -59,7 +59,7 @@ export function AboutPage() {
                 href="https://linktr.ee/madeforseconds"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 rounded-xl border border-card-border bg-card p-3 text-sm font-medium text-content-body transition-all hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 shadow-sm"
+                className="flex items-center gap-3 rounded-xl border border-card-border bg-card p-3 text-sm font-medium text-content-body transition-all hover:border-brand-border hover:bg-brand-surface hover:text-brand shadow-sm"
               >
                 Linktree
               </a>

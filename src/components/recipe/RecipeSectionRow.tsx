@@ -59,11 +59,11 @@ export function RecipeSectionRow({ title, recipes, category }: RecipeSectionRowP
     <section className="mb-10">
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-display text-xl font-bold text-gray-900">{title}</h2>
+        <h2 className="font-display text-xl font-bold text-content">{title}</h2>
         {category && (
           <button
             onClick={handleSeeAll}
-            className="text-sm font-semibold text-primary-600 transition-colors hover:text-primary-700"
+            className="text-sm font-semibold text-brand transition-colors hover:text-brand-hover"
           >
             See all &rarr;
           </button>
@@ -76,10 +76,10 @@ export function RecipeSectionRow({ title, recipes, category }: RecipeSectionRowP
         {canScrollLeft && (
           <button
             onClick={() => scroll('left')}
-            className="absolute -left-3 top-1/2 z-10 hidden -translate-y-1/2 rounded-full bg-white/90 p-2 shadow-lg backdrop-blur transition-opacity hover:bg-white md:block"
+            className="absolute -left-3 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border border-card-border bg-card/95 p-2 shadow-lg backdrop-blur transition-colors hover:border-brand-border hover:bg-control-hover md:block"
             aria-label="Scroll left"
           >
-            <svg className="h-5 w-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-5 w-5 text-content-body" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
@@ -100,10 +100,10 @@ export function RecipeSectionRow({ title, recipes, category }: RecipeSectionRowP
         {canScrollRight && (
           <button
             onClick={() => scroll('right')}
-            className="absolute -right-3 top-1/2 z-10 hidden -translate-y-1/2 rounded-full bg-white/90 p-2 shadow-lg backdrop-blur transition-opacity hover:bg-white md:block"
+            className="absolute -right-3 top-1/2 z-10 hidden -translate-y-1/2 rounded-full border border-card-border bg-card/95 p-2 shadow-lg backdrop-blur transition-colors hover:border-brand-border hover:bg-control-hover md:block"
             aria-label="Scroll right"
           >
-            <svg className="h-5 w-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-5 w-5 text-content-body" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </button>

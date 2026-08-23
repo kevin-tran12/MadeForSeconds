@@ -13,7 +13,7 @@ export function Header() {
 
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     `text-sm font-medium transition-colors ${
-      isActive ? 'text-primary-600' : 'text-content-body hover:text-primary-600'
+      isActive ? 'text-brand' : 'text-content-body hover:text-brand'
     }`
 
   return (
@@ -22,7 +22,7 @@ export function Header() {
         {/* Logo */}
         <Link
           to="/"
-          className="font-display text-xl font-bold text-primary-600 hover:text-primary-700 shrink-0"
+          className="font-display text-xl font-bold text-brand hover:text-brand-hover shrink-0"
         >
           MadeForSeconds
         </Link>
@@ -70,8 +70,8 @@ export function Header() {
             onClick={() => setSearchOpen((v) => !v)}
             className={`rounded-lg p-1.5 transition-all duration-200 ${
               searchOpen
-                ? 'text-primary-600'
-                : 'text-content-muted hover:text-primary-600'
+                ? 'text-brand'
+                : 'text-content-muted hover:text-brand'
             }`}
             aria-label={searchOpen ? 'Close search' : 'Open search'}
           >
@@ -110,7 +110,7 @@ export function Header() {
         {/* Dark mode toggle (desktop) */}
         <button
           onClick={toggleDark}
-          className="hidden md:flex items-center justify-center rounded-lg p-1.5 text-content-muted transition-colors hover:text-primary-600 dark:hover:text-primary-400"
+          className="hidden md:flex items-center justify-center rounded-lg p-1.5 text-content-muted transition-colors hover:text-brand"
           aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
           title={isDark ? 'Light mode' : 'Dark mode'}
         >
@@ -143,7 +143,7 @@ export function Header() {
 
         {/* Mobile hamburger */}
         <button
-          className="md:hidden p-2 text-content-muted hover:text-gray-900 dark:hover:text-stone-100"
+          className="md:hidden p-2 text-content-muted hover:text-content"
           onClick={() => setMobileOpen((v) => !v)}
           aria-label="Toggle menu"
         >
@@ -169,7 +169,7 @@ export function Header() {
             {/* Dark mode toggle (mobile) */}
             <button
               onClick={toggleDark}
-              className="flex items-center gap-2 text-sm font-medium text-content-body hover:text-primary-600"
+              className="flex items-center gap-2 text-sm font-medium text-content-body hover:text-brand"
             >
               {isDark ? (
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

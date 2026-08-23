@@ -208,7 +208,7 @@ export function SearchWithSuggestions({
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-content">{recipe.title}</p>
                 {matchedIngredients.length > 0 && (
-                  <p className="truncate text-xs text-primary-500 mt-0.5">
+                  <p className="truncate text-xs text-brand mt-0.5">
                     Contains: {matchedIngredients.slice(0, 3).join(', ')}
                     {matchedIngredients.length > 3 && ` +${matchedIngredients.length - 3} more`}
                   </p>

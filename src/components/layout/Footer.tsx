@@ -21,7 +21,7 @@ export function Footer() {
               Supported by
             </p>
             <p className="text-sm text-content-muted">{topSupporters.join(' · ')}</p>
-            <Link to="/about/#supporters" className="mt-0.5 inline-block text-xs text-content-muted hover:text-gray-600 dark:hover:text-stone-300 transition-colors">
+            <Link to="/about/#supporters" className="mt-0.5 inline-block text-xs text-content-muted hover:text-content-body transition-colors">
               See all →
             </Link>
           </div>
@@ -38,9 +38,9 @@ export function Footer() {
             href="https://linktr.ee/madeforseconds"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 rounded-lg bg-white dark:bg-stone-800 px-4 py-2 text-sm font-medium text-content-body shadow-sm transition-all hover:bg-gray-50 dark:hover:bg-stone-700 hover:shadow"
+            className="flex items-center gap-2 rounded-lg border border-card-border bg-card px-4 py-2 text-sm font-medium text-content-body shadow-sm transition-all hover:bg-control-hover hover:shadow"
           >
-            <svg className="h-4 w-4 text-primary-600" fill="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4 text-brand" fill="currentColor" viewBox="0 0 24 24">
               <path d="M13.511 5.833L17.5 1.2h-3.132l-2.47 2.871L9.421 1.2H6.289l3.989 4.633L6.289 10.43h3.132l2.477-2.871 2.477 2.871h3.132l-3.998-4.597zM12 10.43V22.8h3V10.43h-3z" />
             </svg>
             Socials
@@ -56,7 +56,7 @@ export function Footer() {
             </Link>
             <Link
               to="/support/cancel/"
-              className="rounded-md border border-gray-300 dark:border-stone-600 bg-white dark:bg-stone-800 px-3 py-1.5 text-xs font-medium text-content-muted hover:border-gray-400 dark:hover:border-stone-500 hover:text-gray-900 dark:hover:text-stone-200 transition-colors"
+              className="rounded-md border border-control-border bg-control px-3 py-1.5 text-xs font-medium text-content-muted hover:border-brand-border hover:text-content transition-colors"
             >
               Cancel recurring donation
             </Link>

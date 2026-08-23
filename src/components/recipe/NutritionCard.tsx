@@ -56,20 +56,20 @@ export function NutritionCard({ nutrition, scale = 1 }: NutritionCardProps) {
   const rest = entries.filter((e) => e.label.toLowerCase() !== 'calories')
 
   return (
-    <section className="mt-10 overflow-hidden rounded-3xl border-2 border-gray-900 dark:border-stone-300 bg-white dark:bg-stone-900 shadow-sm">
+    <section className="mt-10 overflow-hidden rounded-3xl border-2 border-content bg-card shadow-sm">
       {/* Header */}
-      <div className="border-b-8 border-gray-900 dark:border-stone-300 px-5 pt-4 pb-1">
-        <h2 className="font-display text-3xl font-black tracking-tight text-gray-900 dark:text-stone-100">
+      <div className="border-b-8 border-content px-5 pt-4 pb-1">
+        <h2 className="font-display text-3xl font-black tracking-tight text-content">
           Nutrition Facts
         </h2>
-        <p className="text-sm text-gray-500 dark:text-stone-400">{servingLabel}</p>
+        <p className="text-sm text-content-muted">{servingLabel}</p>
       </div>
 
       {/* Calories — big display */}
       {caloriesEntry && (
-        <div className="flex items-end justify-between border-b-4 border-gray-900 dark:border-stone-300 px-5 py-2">
-          <span className="text-sm font-bold text-gray-900 dark:text-stone-100">Calories</span>
-          <span className="font-display text-4xl font-black text-gray-900 dark:text-stone-100">
+        <div className="flex items-end justify-between border-b-4 border-content px-5 py-2">
+          <span className="text-sm font-bold text-content">Calories</span>
+          <span className="font-display text-4xl font-black text-content">
             {formatValue(caloriesEntry.value)}
           </span>
         </div>
@@ -77,13 +77,13 @@ export function NutritionCard({ nutrition, scale = 1 }: NutritionCardProps) {
 
       {/* % Daily Value header */}
       {rest.length > 0 && (
-        <div className="border-b border-gray-300 dark:border-stone-600 px-5 py-1 text-right">
-          <span className="text-xs font-bold text-gray-500 dark:text-stone-400">% Daily Value*</span>
+        <div className="border-b border-card-border px-5 py-1 text-right">
+          <span className="text-xs font-bold text-content-muted">% Daily Value*</span>
         </div>
       )}
 
       {/* Nutrient rows */}
-      <div className="divide-y divide-gray-200 dark:divide-stone-700 px-5">
+      <div className="divide-y divide-card-border px-5">
         {rest.map(({ label, value, unit }) => {
           const lower = label.toLowerCase()
           const isPrimary = PRIMARY_LABELS.has(lower)
@@ -96,20 +96,20 @@ export function NutritionCard({ nutrition, scale = 1 }: NutritionCardProps) {
               className={`flex items-center justify-between py-1 ${isSub ? 'pl-5' : ''}`}
             >
               <span
-                className={`text-sm ${isPrimary ? 'font-bold' : 'font-normal'} text-gray-900 dark:text-stone-100`}
+                className={`text-sm ${isPrimary ? 'font-bold' : 'font-normal'} text-content`}
               >
                 {label}
                 {unit && (
-                  <span className="ml-1 font-normal text-gray-500 dark:text-stone-400">
+                  <span className="ml-1 font-normal text-content-muted">
                     {formatValue(value)}{unit}
                   </span>
                 )}
               </span>
               {pct !== null ? (
-                <span className="text-sm font-bold text-gray-900 dark:text-stone-100">{pct}%</span>
+                <span className="text-sm font-bold text-content">{pct}%</span>
               ) : (
                 !unit && (
-                  <span className="text-sm font-normal text-gray-700 dark:text-stone-300">
+                  <span className="text-sm font-normal text-content-body">
                     {formatValue(value)}
                   </span>
                 )
@@ -121,8 +121,8 @@ export function NutritionCard({ nutrition, scale = 1 }: NutritionCardProps) {
 
       {/* Footer */}
       {rest.some((e) => dailyPct(e.label.toLowerCase(), e.value) !== null) && (
-        <div className="border-t-4 border-gray-900 dark:border-stone-300 px-5 py-2">
-          <p className="text-xs text-gray-500 dark:text-stone-400">
+        <div className="border-t-4 border-content px-5 py-2">
+          <p className="text-xs text-content-muted">
             * The % Daily Value tells you how much a nutrient in a serving of food
             contributes to a daily diet. 2,000 calories a day is used for general
             nutrition advice.

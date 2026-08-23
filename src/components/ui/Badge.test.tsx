@@ -10,12 +10,12 @@ describe('Badge', () => {
 
   it('applies primary variant classes', () => {
     const { container } = render(<Badge variant="primary">Primary</Badge>);
-    expect(container.firstChild).toHaveClass('bg-primary-100');
+    expect(container.firstChild).toHaveClass('bg-badge-primary-surface', 'text-badge-primary');
   });
 
   it('applies success variant classes', () => {
     const { container } = render(<Badge variant="success">Success</Badge>);
-    expect(container.firstChild).toHaveClass('bg-green-100');
+    expect(container.firstChild).toHaveClass('bg-success-surface', 'text-success');
   });
 
   it('applies custom className', () => {
