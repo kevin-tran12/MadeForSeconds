@@ -52,7 +52,7 @@ export function RecipesPage() {
   const { categories } = useCategories()
 
   const {
-    recipes, grouped, loading, loadingMore, error, hasMore, loadMore, isFiltering, isFlat,
+    recipes, grouped, loading, loadingMore, error, isConnectionError, hasMore, loadMore, isFiltering, isFlat,
   } = useRecipes({ search, category: category || undefined, searchBy, forceFlat: categories.length === 0 })
 
   return (
@@ -74,8 +74,9 @@ export function RecipesPage() {
         />
       </div>
 
-      {/* Error */}
-      {error && (
+      {/* A connectivity failure is already explained by the global
+          SiteStatusNotice banner — don't repeat it in a raw fetch error. */}
+      {error && !isConnectionError && (
         <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p>
       )}
 

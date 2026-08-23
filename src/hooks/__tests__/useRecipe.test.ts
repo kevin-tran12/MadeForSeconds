@@ -39,6 +39,19 @@ describe('useRecipe', () => {
 
     expect(result.current.error).toBe('Recipe not found')
     expect(result.current.recipe).toBeNull()
+    expect(result.current.isConnectionError).toBe(false)
+  })
+
+  it('flags a connectivity failure separately from a real 404', async () => {
+    ;(getRecipe as any).mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const { result } = renderHook(() => useRecipe('carbonara'))
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    expect(result.current.isConnectionError).toBe(true)
   })
 
   it('does not fetch if slug is undefined', () => {

@@ -40,6 +40,19 @@ describe('useRecipes', () => {
 
     expect(result.current.error).toBe('Fetch failed')
     expect(result.current.recipes).toEqual([])
+    expect(result.current.isConnectionError).toBe(false)
+  })
+
+  it('flags a connectivity failure separately from an ordinary error', async () => {
+    ;(getGroupedRecipes as any).mockRejectedValue(new TypeError('Failed to fetch'))
+
+    const { result } = renderHook(() => useRecipes())
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false)
+    })
+
+    expect(result.current.isConnectionError).toBe(true)
   })
 
   it('refetches with listPublicRecipes when search param changes', async () => {

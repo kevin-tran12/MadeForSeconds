@@ -18,10 +18,23 @@ function RecipeDetailMeta({ recipe }: { recipe: { title: string; description: st
 
 export function RecipeDetailPage() {
   const { slug } = useParams<{ slug: string }>()
-  const { recipe, loading, error } = useRecipe(slug)
+  const { recipe, loading, error, isConnectionError } = useRecipe(slug)
 
   if (loading) {
     return <LoadingSpinner size="lg" className="py-24" />
+  }
+
+  // Connectivity failures are already explained by the global SiteStatusNotice
+  // banner above — claiming the recipe "might not exist" here would be false,
+  // and often the more alarming of the two messages.
+  if (isConnectionError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
+        <div className="text-5xl">🍳</div>
+        <h1 className="font-display text-2xl font-bold text-gray-900">Couldn't load this recipe</h1>
+        <p className="text-gray-500">Try again in a moment.</p>
+      </div>
+    )
   }
 
   if (error || !recipe) {
