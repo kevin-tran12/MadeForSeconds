@@ -432,7 +432,7 @@ def delete_recipe(recipe_id: str, confirm_title: str) -> dict:
             "expected_title": actual_title,
         }
 
-    recipe_service.delete_recipe(db, recipe_id, require_draft=True)
+    recipe_service.delete_recipe(db, recipe_id, source="mcp", require_draft=True)
     logger.info("MCP delete_recipe: %s (%s)", actual_title, recipe_id)
     return {"deleted": True, "id": recipe_id, "title": actual_title}
 

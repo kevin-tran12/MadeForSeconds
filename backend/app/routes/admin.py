@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from google.cloud import storage
 
 from ..auth import require_admin
@@ -11,6 +11,7 @@ from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
 from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
+from ..services import receipt_ledger
 from ..services import recipes as recipe_service
 from ..services import uploads
 
@@ -46,10 +47,16 @@ async def admin_create_recipe(body: RecipeCreate):
 
 
 @router.put("/recipes/{recipe_id}", response_model=Recipe)
-async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
+async def admin_update_recipe(recipe_id: str, body: RecipeUpdate, request: Request):
     db = get_db()
     try:
-        return recipe_service.update_recipe(db, recipe_id, body, source="admin")
+        return recipe_service.update_recipe(
+            db,
+            recipe_id,
+            body,
+            source="admin",
+            actor=getattr(request.state, "admin_email", None),
+        )
     except recipe_service.InvalidCategories as exc:
         raise HTTPException(status_code=422, detail=f"Unknown categories: {exc.invalid}")
     except recipe_service.RecipeNotFound:
@@ -59,10 +66,12 @@ async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
 
 
 @router.delete("/recipes/{recipe_id}", status_code=204)
-async def admin_delete_recipe(recipe_id: str):
+async def admin_delete_recipe(recipe_id: str, request: Request):
     db = get_db()
     try:
-        recipe_service.delete_recipe(db, recipe_id)
+        recipe_service.delete_recipe(
+            db, recipe_id, source="admin", actor=getattr(request.state, "admin_email", None)
+        )
     except recipe_service.RecipeNotFound:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
@@ -150,15 +159,20 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
 
 
 @router.delete("/recipes/{recipe_id}/receipts", status_code=204)
-async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
+async def admin_delete_recipe_receipt(
+    recipe_id: str, body: ReceiptDeleteBody, request: Request
+):
     """Unlink a single receipt URL from a recipe. The stored object is kept.
 
     Detaching a receipt is an editing action — the wrong file was attached, or
     it belongs on a different recipe. Destroying a tax record is not, so this
     only updates Firestore. The receipts bucket enforces seven-year retention
     (terraform/modules/storage/buckets.tf), which would reject the delete in
-    any case; the object remains reachable by its URL and in the Firestore
-    backups that record which expense it belonged to.
+    any case.
+
+    An association record is written first, so the object does not become an
+    anonymous scan the moment the recipe stops naming it — see
+    services/receipt_ledger.py.
     """
     url = body.url
     if not url:
@@ -171,9 +185,22 @@ async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    current_urls: list[str] = doc.to_dict().get("receipt_urls", [])
+    data = doc.to_dict()
+    current_urls: list[str] = data.get("receipt_urls", [])
     if url not in current_urls:
         raise HTTPException(status_code=404, detail="Receipt not found on this recipe")
+
+    # Before the link goes away — see services/receipt_ledger.py. If this
+    # raises, the receipt stays attached, which is the recoverable outcome.
+    receipt_ledger.record_detachment(
+        db,
+        receipt_urls=[url],
+        recipe_id=recipe_id,
+        recipe=data,
+        reason=receipt_ledger.DETACH_UNLINKED,
+        source="admin",
+        actor=getattr(request.state, "admin_email", None),
+    )
 
     doc_ref.update({"receipt_urls": [u for u in current_urls if u != url]})
 
