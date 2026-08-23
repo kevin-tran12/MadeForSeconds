@@ -72,8 +72,37 @@ resource "google_storage_bucket" "receipts" {
   force_destroy               = false
   uniform_bucket_level_access = true
 
+  # Explicit, like the staging bucket: UBLA governs how access is granted, not
+  # whether allUsers can be granted it. Nothing in here should ever be public,
+  # so close that door rather than trusting nobody opens it.
+  public_access_prevention = "enforced"
+
   versioning {
     enabled = true
+  }
+
+  # The retention this bucket's comments have always claimed, actually enforced.
+  #
+  # Versioning alone does not deliver it: it protects against overwrites and
+  # accidental deletes, but an application bug or a compromised runtime holding
+  # objectAdmin can delete every generation explicitly. A retention policy is
+  # enforced by GCS itself — no caller, however privileged, can delete or
+  # replace an object before it ages out.
+  #
+  # Deliberately NOT locked. A locked policy cannot be shortened or removed,
+  # ever, and the bucket cannot be deleted until the last object ages out — a
+  # seven-year commitment that is the owner's to make, not Terraform's to make
+  # silently. docs/DEPLOYMENT.md § Receipt & financial-record recovery documents
+  # the one-time lock command for when that call is made. Unlocked still stops
+  # every delete the application or its service account could issue; it only
+  # leaves a deliberate, manual escape hatch for whoever runs Terraform.
+  #
+  # This is why admin_delete_recipe_receipt unlinks rather than deletes (see
+  # backend/app/routes/admin.py) — with this policy a delete would fail anyway,
+  # and failing loudly on a tax record is worse than never trying.
+  retention_policy {
+    retention_period = 220924800 # 2557 days ≈ 7 years, leap days included
+    is_locked        = false
   }
 
   # Auto-transition to cheaper storage tiers (receipts rarely accessed after upload)
@@ -97,10 +126,20 @@ resource "google_storage_bucket" "receipts" {
     }
   }
 
-  # No deletion lifecycle — 7+ year retention for tax records
+  # No deletion lifecycle — the retention policy above is what holds these for
+  # seven years, and there is deliberately no rule that removes them after.
 }
 
-# Backend needs full object access (upload + generate signed URLs)
+# Backend needs object access to upload receipts and to generate signed URLs
+# (V4 signing is checked against the signer's live IAM at request time, so the
+# grant has to cover what the URL will do, not just its creation).
+#
+# Still objectAdmin rather than something narrower: the delete permission it
+# carries is now inert on this bucket — the retention policy refuses deletes
+# regardless of IAM — so tightening it would change nothing an attacker could
+# reach. Narrowing to objectCreator + a reader role is tracked with the rest of
+# the least-privilege pass rather than done here, where it would only add a
+# second, weaker copy of a control the storage layer already enforces.
 resource "google_storage_bucket_iam_member" "backend_receipts" {
   bucket = google_storage_bucket.receipts.name
   role   = "roles/storage.objectAdmin"

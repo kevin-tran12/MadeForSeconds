@@ -209,13 +209,13 @@ def run(args: argparse.Namespace) -> int:
         print("\nCleaning up...")
         if recipe_id:
             try:
-                recipe_service.delete_recipe(db, recipe_id)
+                recipe_service.delete_recipe(db, recipe_id, source="smoke-test")
                 print(f"  deleted disposable recipe {recipe_id} (and its promoted image)")
             except Exception as exc:
                 print(f"  WARNING: could not clean up recipe {recipe_id}: {exc}")
         if reject_recipe_id:
             try:
-                recipe_service.delete_recipe(db, reject_recipe_id)
+                recipe_service.delete_recipe(db, reject_recipe_id, source="smoke-test")
                 print(f"  deleted disposable reject-path recipe {reject_recipe_id}")
             except Exception as exc:
                 print(f"  WARNING: could not clean up recipe {reject_recipe_id}: {exc}")

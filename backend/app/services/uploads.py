@@ -79,12 +79,14 @@ def delete_recipe_image_blob(url: str | None) -> None:
         delete_gcs_blob(settings.gcs_bucket_name, blob)
 
 
-def delete_recipe_receipt_blob(url: str | None) -> None:
-    """Delete a recipe receipt blob given its public URL (no-op for foreign URLs)."""
-    if blob := gcs_blob_name(url or "", settings.gcs_receipts_bucket_name or ""):
-        delete_gcs_blob(settings.gcs_receipts_bucket_name, blob)
-
-
+# There is deliberately no delete_recipe_receipt_blob().
+#
+# Receipts are tax records. The receipts bucket carries a seven-year retention
+# policy (terraform/modules/storage/buckets.tf), so GCS refuses the delete no
+# matter what IAM the caller holds — a helper here could only fail. Callers
+# that used to remove a receipt now unlink it: the URL comes off the Firestore
+# document and the object stays.
+#
 def sanitize_filename(name: str) -> str:
     """Strip path components and unsafe characters; cap length."""
     base = (name or "").replace("\\", "/").rsplit("/", 1)[-1]

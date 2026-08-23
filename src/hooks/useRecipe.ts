@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { getRecipe } from '../lib/api'
+import { isConnectivityError } from '../lib/site-status'
 import type { Recipe } from '../lib/types'
 
 export function useRecipe(slug: string | undefined) {
   const [recipe, setRecipe] = useState<Recipe | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isConnectionError, setIsConnectionError] = useState(false)
 
   useEffect(() => {
     if (!slug) {
@@ -18,12 +20,16 @@ export function useRecipe(slug: string | undefined) {
     async function load() {
       setLoading(true)
       setError(null)
+      setIsConnectionError(false)
 
       try {
         const data = await getRecipe(slug!)
         if (!cancelled) setRecipe(data)
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Recipe not found')
+        if (!cancelled) {
+          setIsConnectionError(isConnectivityError(err))
+          setError(err instanceof Error ? err.message : 'Recipe not found')
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -33,5 +39,5 @@ export function useRecipe(slug: string | undefined) {
     return () => { cancelled = true }
   }, [slug])
 
-  return { recipe, loading, error }
+  return { recipe, loading, error, isConnectionError }
 }
