@@ -1,0 +1,712 @@
+<title>Cloud Infrastructure Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #eef1f6;
+    --surface: #ffffff;
+    --surface-2: #f3f5f9;
+    --ink: #182131;
+    --ink-dim: #5b6577;
+    --border: #ccd3dd;
+    --accent: #2f5fd1;
+    --accent-soft: #e3ebfb;
+    --zone-cf: #fdeee2;
+    --zone-cf-border: #e8b98c;
+    --zone-gcp: #e9f0fd;
+    --zone-gcp-border: #b9cdf2;
+    --zone-ext: #eef0f2;
+    --zone-ext-border: #c9ced6;
+    --danger: #b23a24;
+    --good: #257048;
+    --line: #3a4457;
+    --line-dim: #97a2b3;
+    --label-bg: rgba(255,255,255,0.86);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f131b;
+      --surface: #161c27;
+      --surface-2: #1c2431;
+      --ink: #e6ebf3;
+      --ink-dim: #8e99ac;
+      --border: #2b3547;
+      --accent: #86a9ff;
+      --accent-soft: #1c2b4d;
+      --zone-cf: #2a1f16;
+      --zone-cf-border: #5b4326;
+      --zone-gcp: #172236;
+      --zone-gcp-border: #2d4670;
+      --zone-ext: #1b2028;
+      --zone-ext-border: #333c49;
+      --danger: #e88468;
+      --good: #6ecb9b;
+      --line: #c3cbda;
+      --line-dim: #56606f;
+      --label-bg: rgba(22,28,39,0.86);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f131b;
+    --surface: #161c27;
+    --surface-2: #1c2431;
+    --ink: #e6ebf3;
+    --ink-dim: #8e99ac;
+    --border: #2b3547;
+    --accent: #86a9ff;
+    --accent-soft: #1c2b4d;
+    --zone-cf: #2a1f16;
+    --zone-cf-border: #5b4326;
+    --zone-gcp: #172236;
+    --zone-gcp-border: #2d4670;
+    --zone-ext: #1b2028;
+    --zone-ext-border: #333c49;
+    --danger: #e88468;
+    --good: #6ecb9b;
+    --line: #c3cbda;
+    --line-dim: #56606f;
+    --label-bg: rgba(22,28,39,0.86);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle, color-mix(in srgb, var(--ink) 7%, transparent) 1px, transparent 1.2px) 0 0/22px 22px,
+      var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 56px 28px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 52px;
+  }
+
+  header.page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 760px;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  h1 {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: clamp(28px, 4vw, 38px);
+    line-height: 1.15;
+    margin: 0;
+    text-wrap: balance;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .lede {
+    font-size: 15.5px;
+    line-height: 1.6;
+    color: var(--ink-dim);
+    margin: 0;
+  }
+
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 0.92em;
+    color: var(--ink);
+  }
+
+  section.figure-block {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .figure-kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 18px 16px;
+  }
+
+  .svg-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  svg { display: block; max-width: 100%; height: auto; }
+  .svg-scroll svg { min-width: 720px; }
+
+  figcaption {
+    margin-top: 12px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--ink-dim);
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+
+  figcaption strong { color: var(--ink); font-weight: 600; }
+
+  /* ---- shared SVG styles ---- */
+  .box-rect { fill: var(--surface); stroke: var(--border); stroke-width: 1.4; }
+  .box-title {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    fill: var(--ink);
+  }
+  .box-detail {
+    font-family: "IBM Plex Sans", ui-sans-serif, sans-serif;
+    font-size: 10.6px;
+    fill: var(--ink-dim);
+  }
+  .zone-rect { fill-opacity: 1; stroke-width: 1.2; stroke-dasharray: 3 3; rx: 12; }
+  .zone-cf { fill: var(--zone-cf); stroke: var(--zone-cf-border); }
+  .zone-gcp { fill: var(--zone-gcp); stroke: var(--zone-gcp-border); }
+  .zone-ext { fill: var(--zone-ext); stroke: var(--zone-ext-border); }
+  .zone-label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .zone-label-cf { fill: color-mix(in srgb, var(--zone-cf-border) 70%, var(--ink) 30%); }
+  .zone-label-gcp { fill: color-mix(in srgb, var(--zone-gcp-border) 55%, var(--ink) 45%); }
+  .zone-label-ext { fill: var(--ink-dim); }
+
+  .flow { fill: none; stroke: var(--line); stroke-width: 1.4; }
+  .flow-dim { fill: none; stroke: var(--line-dim); stroke-width: 1.2; }
+  .flow-danger { fill: none; stroke: var(--danger); stroke-width: 1.6; }
+  .flow-good { fill: none; stroke: var(--good); stroke-width: 1.6; }
+
+  .flow-label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 9.6px;
+    fill: var(--ink-dim);
+  }
+  .flow-label-strong { fill: var(--ink); }
+  .flow-label-danger { fill: var(--danger); font-weight: 600; }
+  .flow-label-good { fill: var(--good); font-weight: 600; }
+  .label-halo { fill: var(--label-bg); }
+
+  .actor-rect { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.3; }
+  .actor-title { fill: var(--accent); }
+
+  table.ref {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  table.ref caption {
+    text-align: left;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 10px;
+  }
+  table.ref th {
+    text-align: left;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    font-weight: 600;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  table.ref td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--ink);
+  }
+  table.ref td.svc {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  table.ref tr:last-child td { border-bottom: none; }
+  .ref-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 18px 6px;
+    overflow-x: auto;
+  }
+
+  footer.page {
+    font-size: 12.5px;
+    color: var(--ink-dim);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    figure, .ref-wrap { transition: border-color 0.15s ease; }
+  }
+</style>
+
+<main>
+
+  <header class="page">
+    <span class="eyebrow">MadeForSeconds &middot; kevin-tran12/MadeForSeconds</span>
+    <h1>Cloud Infrastructure Map</h1>
+    <p class="lede">
+      Google Cloud (<code>us-central1</code>) for compute, data, and auth; Cloudflare Pages for the static frontend.
+      Everything on the GCP side is defined in <code>terraform/</code> across five modules &mdash;
+      <strong>security</strong>, <strong>storage</strong>, <strong>backend&#8209;service</strong>, <strong>observability</strong>, <strong>cost&#8209;controls</strong>.
+      One fact drives most of the shape below: <strong>a single Cloud Run service is the hub</strong> &mdash;
+      it is the only compute that touches Firestore, all three buckets, Secret Manager, and every third&#8209;party API.
+      Cloudflare only ever serves static files.
+    </p>
+  </header>
+
+  <!-- ================= FIGURE 1 : RUNTIME ARCHITECTURE ================= -->
+  <section class="figure-block">
+    <span class="figure-kicker">Figure 1</span>
+    <figure>
+      <div class="svg-scroll">
+        <svg viewBox="0 0 1160 545" role="img" aria-label="Three clients — a visitor's browser, an admin, and an MCP client — reach the system through three different auth paths that converge on one Cloud Run service, which is the only thing that talks to Firestore, three GCS buckets, Secret Manager, and four third-party APIs.">
+          <defs>
+            <marker id="arrow1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"></path>
+            </marker>
+            <marker id="arrow1dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--line-dim)"></path>
+            </marker>
+          </defs>
+
+          <!-- zones -->
+          <rect class="zone-rect zone-cf" x="238" y="15" width="248" height="150"></rect>
+          <text class="zone-label zone-label-cf" x="250" y="32">Cloudflare</text>
+
+          <rect class="zone-rect zone-gcp" x="506" y="15" width="618" height="382"></rect>
+          <text class="zone-label zone-label-gcp" x="518" y="32">GCP &middot; made-for-seconds &middot; us-central1</text>
+
+          <rect class="zone-rect zone-ext" x="506" y="410" width="618" height="112"></rect>
+          <text class="zone-label zone-label-ext" x="518" y="427">Third-party services</text>
+
+          <text class="zone-label zone-label-ext" x="26" y="32">Clients</text>
+
+          <!-- actors -->
+          <rect class="box-rect actor-rect" x="26" y="45" width="192" height="58" rx="5"></rect>
+          <text class="box-title actor-title" x="38" y="65">VISITOR</text>
+          <text class="box-detail" x="38" y="80">browser &middot; public site</text>
+
+          <rect class="box-rect actor-rect" x="26" y="125" width="192" height="58" rx="5"></rect>
+          <text class="box-title actor-title" x="38" y="145">ADMIN</text>
+          <text class="box-detail" x="38" y="160">signs in with Google</text>
+
+          <rect class="box-rect actor-rect" x="26" y="205" width="192" height="58" rx="5"></rect>
+          <text class="box-title actor-title" x="38" y="225">MCP CLIENT</text>
+          <text class="box-detail" x="38" y="240">Claude / Claude Code</text>
+
+          <!-- cloudflare pages -->
+          <rect class="box-rect" x="253" y="48" width="217" height="100" rx="5"></rect>
+          <text class="box-title" x="265" y="68">CLOUDFLARE PAGES</text>
+          <text class="box-detail" x="265" y="84">React + Vite SPA</text>
+          <text class="box-detail" x="265" y="98">auto-deploy per branch &middot; previews</text>
+          <text class="box-detail" x="265" y="112">public/_headers &rarr; CSP, HSTS&hellip;</text>
+
+          <!-- cloud run -->
+          <rect class="box-rect" x="526" y="48" width="272" height="112" rx="5"></rect>
+          <text class="box-title" x="538" y="68">CLOUD RUN &mdash; mfs-backend</text>
+          <text class="box-detail" x="538" y="84">FastAPI &middot; scale 0&rarr;1 instance</text>
+          <text class="box-detail" x="538" y="98">512Mi / 1vCPU &middot; startup-boosted</text>
+          <text class="box-detail" x="538" y="112">REST /api/* &nbsp;+&nbsp; MCP /mcp</text>
+          <text class="box-detail" x="538" y="126">3 auth schemes, 1 service account</text>
+
+          <!-- auth -->
+          <rect class="box-rect" x="526" y="176" width="272" height="56" rx="5"></rect>
+          <text class="box-title" x="538" y="196">IDENTITY PLATFORM</text>
+          <text class="box-detail" x="538" y="211">Google sign-in &middot; admin only</text>
+
+          <rect class="box-rect" x="526" y="244" width="272" height="56" rx="5"></rect>
+          <text class="box-title" x="538" y="264">WORKOS AUTHKIT</text>
+          <text class="box-detail" x="538" y="279">OAuth 2.1 authorization server</text>
+
+          <!-- data column -->
+          <rect class="box-rect" x="830" y="48" width="272" height="74" rx="5"></rect>
+          <text class="box-title" x="842" y="68">FIRESTORE (native)</text>
+          <text class="box-detail" x="842" y="83">recipes &middot; expenses &middot; receipt_associations</text>
+          <text class="box-detail" x="842" y="96">backups: daily 7d + weekly 14w</text>
+
+          <rect class="box-rect" x="830" y="134" width="272" height="50" rx="5"></rect>
+          <text class="box-title" x="842" y="153">GCS &mdash; images</text>
+          <text class="box-detail" x="842" y="167">public read, object-level only</text>
+
+          <rect class="box-rect" x="830" y="196" width="272" height="50" rx="5"></rect>
+          <text class="box-title" x="842" y="215">GCS &mdash; receipts</text>
+          <text class="box-detail" x="842" y="229">private &middot; versioned &middot; 7-yr retention</text>
+
+          <rect class="box-rect" x="830" y="258" width="272" height="50" rx="5"></rect>
+          <text class="box-title" x="842" y="277">GCS &mdash; staging</text>
+          <text class="box-detail" x="842" y="291">private &middot; deletes after 2 days</text>
+
+          <rect class="box-rect" x="830" y="320" width="272" height="50" rx="5"></rect>
+          <text class="box-title" x="842" y="339">SECRET MANAGER</text>
+          <text class="box-detail" x="842" y="353">Stripe &middot; JWT &middot; Resend &middot; IG token</text>
+
+          <!-- external row -->
+          <rect class="box-rect" x="518" y="432" width="140" height="72" rx="5"></rect>
+          <text class="box-title" x="528" y="452">STRIPE</text>
+          <text class="box-detail" x="528" y="466">subscriptions +</text>
+          <text class="box-detail" x="528" y="478">donations</text>
+          <text class="box-detail" x="528" y="493">webhook: checkout.completed</text>
+
+          <rect class="box-rect" x="670" y="432" width="140" height="72" rx="5"></rect>
+          <text class="box-title" x="680" y="452">RESEND</text>
+          <text class="box-detail" x="680" y="466">cancellation</text>
+          <text class="box-detail" x="680" y="478">emails</text>
+
+          <rect class="box-rect" x="822" y="432" width="140" height="72" rx="5"></rect>
+          <text class="box-title" x="832" y="452">INSTAGRAM</text>
+          <text class="box-title" x="832" y="465">GRAPH API</text>
+          <text class="box-detail" x="832" y="480">publish + weekly</text>
+          <text class="box-detail" x="832" y="492">token refresh</text>
+
+          <rect class="box-rect" x="974" y="432" width="140" height="72" rx="5"></rect>
+          <text class="box-title" x="984" y="452">UPSTASH REDIS</text>
+          <text class="box-detail" x="984" y="466">response cache</text>
+          <text class="box-detail" x="984" y="480">optional &mdash; blank tfvar</text>
+          <text class="box-detail" x="984" y="492">= in-memory cache</text>
+
+          <!-- ===== flows: actors ===== -->
+          <!-- visitor -> cloudflare pages -->
+          <path class="flow" marker-end="url(#arrow1)" d="M218,72 L235,72 L235,80 L251,80"></path>
+          <rect class="label-halo" x="222" y="64" width="60" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="224" y="73">loads SPA</text>
+
+          <!-- visitor -> cloud run -->
+          <path class="flow" marker-end="url(#arrow1)" d="M120,103 L120,182 L524,182"></path>
+          <rect class="label-halo" x="200" y="175" width="118" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="204" y="184">fetch /api/* (public)</text>
+
+          <!-- admin -> identity platform -->
+          <path class="flow" marker-end="url(#arrow1)" d="M218,152 L360,152 L360,204 L524,204"></path>
+          <rect class="label-halo" x="366" y="196" width="98" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="370" y="205">Google sign-in</text>
+
+          <!-- admin -> cloud run -->
+          <path class="flow" marker-end="url(#arrow1)" d="M218,166 L300,166 L300,142 L524,142"></path>
+          <rect class="label-halo" x="326" y="134" width="150" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="330" y="143">bearer: Firebase ID token</text>
+
+          <!-- mcp client -> workos -->
+          <path class="flow" marker-end="url(#arrow1)" d="M218,246 L400,246 L400,272 L524,272"></path>
+          <rect class="label-halo" x="406" y="264" width="122" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="410" y="273">OAuth login / DCR</text>
+
+          <!-- mcp client -> cloud run -->
+          <path class="flow" marker-end="url(#arrow1)" d="M218,230 L260,230 L260,102 L524,102"></path>
+          <rect class="label-halo" x="272" y="94" width="140" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="276" y="103">/mcp &middot; bearer token</text>
+
+          <!-- ===== flows: cloud run -> data ===== -->
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M798,66 L829,66"></path>
+          <text class="flow-label" x="720" y="63">reads/writes</text>
+
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M798,90 L810,90 L810,152 L829,152"></path>
+          <text class="flow-label" x="712" y="128">sanitize &amp; serve</text>
+
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M798,104 L816,104 L816,214 L829,214"></path>
+          <text class="flow-label" x="712" y="192">signed PUT/GET</text>
+
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M798,118 L822,118 L822,276 L829,276"></path>
+          <text class="flow-label" x="700" y="254">signed PUT &rarr; promote</text>
+
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M798,132 L828,132 L828,338 L829,338"></path>
+          <text class="flow-label" x="700" y="316">reads @ startup</text>
+
+          <!-- ===== flows: cloud run -> external ===== -->
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M600,160 L600,431"></path>
+          <text class="flow-label" x="524" y="422">checkout + webhook</text>
+
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M660,160 L660,220 L740,220 L740,431"></path>
+          <text class="flow-label" x="702" y="422">cancel email</text>
+
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M720,160 L720,240 L892,240 L892,431"></path>
+          <text class="flow-label" x="838" y="422">publish / refresh</text>
+
+          <path class="flow-dim" marker-end="url(#arrow1dim)" d="M760,160 L760,260 L1044,260 L1044,431"></path>
+          <text class="flow-label" x="1000" y="422">cache (optional)</text>
+
+        </svg>
+      </div>
+      <figcaption>
+        Three clients, three separate auth schemes, one backend. <strong>Visitors</strong> read the public API with no
+        credential; <strong>admins</strong> sign in with Google via Identity Platform and call the same service with a
+        Firebase ID token; the <strong>MCP client</strong> (Claude) authenticates through WorkOS AuthKit (OAuth&nbsp;2.1)
+        against the <code>/mcp</code> endpoint. Past that point everything funnels through one Cloud Run
+        service &mdash; it is the sole caller of Firestore, all three buckets, Secret Manager, and every external API below it.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ================= FIGURE 2 : DEPLOY PIPELINE ================= -->
+  <section class="figure-block">
+    <span class="figure-kicker">Figure 2</span>
+    <figure>
+      <div class="svg-scroll">
+        <svg viewBox="0 0 1090 300" role="img" aria-label="A push to GitHub triggers two independent pipelines: any branch rebuilds and deploys the frontend on Cloudflare Pages, while a push to main alone rebuilds the backend Docker image through Cloud Build, Artifact Registry, and a Cloud Run deploy.">
+          <defs>
+            <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"></path>
+            </marker>
+          </defs>
+
+          <rect class="box-rect" x="20" y="105" width="170" height="72" rx="5"></rect>
+          <text class="box-title" x="32" y="128">GITHUB</text>
+          <text class="box-detail" x="32" y="144">kevin-tran12/</text>
+          <text class="box-detail" x="32" y="157">MadeForSeconds</text>
+
+          <rect class="box-rect" x="290" y="20" width="230" height="82" rx="5"></rect>
+          <text class="box-title" x="302" y="42">CLOUDFLARE PAGES</text>
+          <text class="box-detail" x="302" y="58">npm run build &rarr; dist/</text>
+          <text class="box-detail" x="302" y="72">preview URL per non-main branch</text>
+          <text class="box-detail" x="302" y="86">*.madeforseconds.pages.dev</text>
+
+          <rect class="box-rect" x="290" y="196" width="230" height="82" rx="5"></rect>
+          <text class="box-title" x="302" y="218">CLOUD BUILD</text>
+          <text class="box-detail" x="302" y="234">trigger: mfs-backend-deploy</text>
+          <text class="box-detail" x="302" y="248">runs as mfs-deploy SA</text>
+          <text class="box-detail" x="302" y="262">docker build --platform amd64</text>
+
+          <rect class="box-rect" x="580" y="196" width="230" height="82" rx="5"></rect>
+          <text class="box-title" x="592" y="218">ARTIFACT REGISTRY</text>
+          <text class="box-detail" x="592" y="234">repo: mfs (Docker)</text>
+          <text class="box-detail" x="592" y="248">keeps last 5 tagged images</text>
+          <text class="box-detail" x="592" y="262">untagged deleted after 1 day</text>
+
+          <rect class="box-rect" x="860" y="196" width="210" height="82" rx="5"></rect>
+          <text class="box-title" x="872" y="218">CLOUD RUN</text>
+          <text class="box-detail" x="872" y="234">gcloud run deploy</text>
+          <text class="box-detail" x="872" y="248">startup probe gates traffic</text>
+          <text class="box-detail" x="872" y="262">prior revision serves until healthy</text>
+
+          <path class="flow" marker-end="url(#arrow2)" d="M190,128 L240,128 L240,61 L289,61"></path>
+          <rect class="label-halo" x="196" y="90" width="100" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="200" y="99">push &middot; any branch</text>
+
+          <path class="flow" marker-end="url(#arrow2)" d="M190,155 L240,155 L240,237 L289,237"></path>
+          <rect class="label-halo" x="196" y="200" width="98" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="200" y="209">push &middot; main only</text>
+
+          <path class="flow" marker-end="url(#arrow2)" d="M520,237 L579,237"></path>
+          <rect class="label-halo" x="518" y="216" width="102" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="522" y="225">build + push image</text>
+
+          <path class="flow" marker-end="url(#arrow2)" d="M810,237 L859,237"></path>
+          <rect class="label-halo" x="806" y="216" width="94" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="810" y="225">deploy revision</text>
+        </svg>
+      </div>
+      <figcaption>
+        One <code>git push</code> fans out into two pipelines that don't know about each other. Cloudflare rebuilds the
+        SPA on <strong>every</strong> branch (previews included); Cloud Build only fires on <code>main</code> and owns the
+        backend's running image &mdash; Terraform deliberately never re-pins it, so an infra-only <code>terraform apply</code>
+        can't roll the service onto an unrelated build.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ================= FIGURE 3 : COST BREAKER & ALERTING ================= -->
+  <section class="figure-block">
+    <span class="figure-kicker">Figure 3</span>
+    <figure>
+      <div class="svg-scroll">
+        <svg viewBox="0 0 1300 500" role="img" aria-label="A billing budget that hits 100 percent of its cap publishes to Pub/Sub, which triggers a Cloud Function that revokes Cloud Run's public-invoker binding, taking the site offline; a monthly scheduler restores it. Uptime and error monitoring feed the same alert email through a shared notification channel.">
+          <defs>
+            <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"></path>
+            </marker>
+            <marker id="arrow3danger" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--danger)"></path>
+            </marker>
+            <marker id="arrow3good" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--good)"></path>
+            </marker>
+          </defs>
+
+          <!-- col 1 -->
+          <rect class="box-rect" x="20" y="20" width="220" height="92" rx="5"></rect>
+          <text class="box-title" x="32" y="42">BILLING BUDGET</text>
+          <text class="box-detail" x="32" y="58">$15/mo cap</text>
+          <text class="box-detail" x="32" y="72">(monthly_budget_amount)</text>
+          <text class="box-detail" x="32" y="86">50% / 80% / 100% actual</text>
+          <text class="box-detail" x="32" y="99">+ forecasted-100% early warning</text>
+
+          <rect class="box-rect" x="20" y="192" width="220" height="112" rx="5"></rect>
+          <text class="box-title" x="32" y="214">CLOUD MONITORING</text>
+          <text class="box-detail" x="32" y="230">uptime: /api/health, every 15min</text>
+          <text class="box-detail" x="32" y="244">log metric: errors &gt;5 / 15min</text>
+          <text class="box-detail" x="32" y="258">log metric: 5xx &gt;5 / 15min</text>
+
+          <rect class="box-rect" x="20" y="382" width="220" height="72" rx="5"></rect>
+          <text class="box-title" x="32" y="404">CLOUD SCHEDULER</text>
+          <text class="box-detail" x="32" y="420">budget-breaker-reset</text>
+          <text class="box-detail" x="32" y="433">1st of month, 08:00 UTC</text>
+
+          <!-- col 2 -->
+          <rect class="box-rect" x="300" y="20" width="190" height="66" rx="5"></rect>
+          <text class="box-title" x="312" y="42">PUB/SUB</text>
+          <text class="box-detail" x="312" y="57">topic: budget-alert</text>
+          <text class="box-detail" x="312" y="70">100%-actual threshold only</text>
+
+          <!-- col 3 -->
+          <rect class="box-rect" x="550" y="20" width="230" height="92" rx="5"></rect>
+          <text class="box-title" x="562" y="42">FN: budget-killer</text>
+          <text class="box-detail" x="562" y="58">revokes allUsers on</text>
+          <text class="box-detail" x="562" y="71">roles/run.invoker</text>
+          <text class="box-detail" x="562" y="88">+ publishes status.json</text>
+
+          <rect class="box-rect" x="550" y="196" width="230" height="106" rx="5"></rect>
+          <text class="box-title" x="562" y="218">ALERT POLICIES</text>
+          <text class="box-detail" x="562" y="234">backend-down</text>
+          <text class="box-detail" x="562" y="247">backend-errors &middot; backend-5xx</text>
+          <text class="box-detail" x="562" y="260">budget-breaker-tripped (CRITICAL)</text>
+
+          <rect class="box-rect" x="550" y="382" width="230" height="92" rx="5"></rect>
+          <text class="box-title" x="562" y="404">FN: budget-resetter</text>
+          <text class="box-detail" x="562" y="420">re-adds allUsers on</text>
+          <text class="box-detail" x="562" y="433">roles/run.invoker</text>
+          <text class="box-detail" x="562" y="450">+ clears status.json</text>
+
+          <!-- col 4 -->
+          <rect class="box-rect" x="880" y="212" width="200" height="76" rx="5"></rect>
+          <text class="box-title" x="892" y="234">NOTIFICATION CHANNEL</text>
+          <text class="box-detail" x="892" y="250">shared budget + uptime</text>
+          <text class="box-detail" x="892" y="263">email channel</text>
+
+          <!-- col 5 -->
+          <rect class="box-rect" x="1130" y="140" width="150" height="80" rx="5"></rect>
+          <text class="box-title" x="1140" y="162">CLOUD RUN</text>
+          <text class="box-title" x="1140" y="175">mfs-backend</text>
+          <text class="box-detail" x="1140" y="191">public invoker</text>
+          <text class="box-detail" x="1140" y="204">binding</text>
+
+          <rect class="box-rect" x="1130" y="380" width="150" height="70" rx="5"></rect>
+          <text class="box-title" x="1140" y="402">ALERT EMAIL</text>
+          <text class="box-detail" x="1140" y="418">alert_email</text>
+          <text class="box-detail" x="1140" y="431">(you)</text>
+
+          <!-- flows -->
+          <path class="flow" marker-end="url(#arrow3)" d="M240,53 L300,53"></path>
+          <rect class="label-halo" x="244" y="35" width="52" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="246" y="44">100%</text>
+
+          <path class="flow-dim" marker-end="url(#arrow3)" d="M240,88 L440,88 L440,155 L880,155 L880,225 L879,225"></path>
+          <rect class="label-halo" x="260" y="78" width="150" height="13"></rect>
+          <text class="flow-label" x="264" y="87">50% / 80% / 100% email</text>
+
+          <path class="flow" marker-end="url(#arrow3)" d="M490,53 L549,53"></path>
+          <rect class="label-halo" x="494" y="35" width="46" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="497" y="44">trigger</text>
+
+          <path class="flow-danger" marker-end="url(#arrow3danger)" d="M780,53 L1000,53 L1000,178 L1129,178"></path>
+          <rect class="label-halo" x="960" y="145" width="150" height="13"></rect>
+          <text class="flow-label flow-label-danger" x="963" y="154">revoke public access</text>
+
+          <path class="flow-dim" marker-end="url(#arrow3)" d="M665,112 L665,195"></path>
+          <rect class="label-halo" x="670" y="147" width="150" height="13"></rect>
+          <text class="flow-label" x="673" y="156">log: BUDGET_BREAKER</text>
+
+          <path class="flow-dim" marker-end="url(#arrow3)" d="M240,248 L549,248"></path>
+          <rect class="label-halo" x="330" y="240" width="120" height="13"></rect>
+          <text class="flow-label" x="334" y="249">threshold exceeded</text>
+
+          <path class="flow" marker-end="url(#arrow3)" d="M780,248 L879,248"></path>
+          <rect class="label-halo" x="792" y="230" width="40" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="795" y="239">fires</text>
+
+          <path class="flow" marker-end="url(#arrow3)" d="M1080,250 L1200,250 L1200,379"></path>
+          <rect class="label-halo" x="1140" y="300" width="46" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="1143" y="309">email</text>
+
+          <path class="flow" marker-end="url(#arrow3)" d="M240,418 L549,418"></path>
+          <rect class="label-halo" x="330" y="400" width="100" height="13"></rect>
+          <text class="flow-label flow-label-strong" x="334" y="409">1st of month</text>
+
+          <path class="flow-good" marker-end="url(#arrow3good)" d="M780,418 L1000,418 L1000,220 L1129,220"></path>
+          <rect class="label-halo" x="960" y="395" width="150" height="13"></rect>
+          <text class="flow-label flow-label-good" x="963" y="404">restore public access</text>
+
+        </svg>
+      </div>
+      <figcaption>
+        The circuit breaker and the alerting stack share one exit: <code>alert_email</code>. Hitting the actual
+        (not forecast) 100% threshold is the only path that costs money to fix &mdash; it revokes Cloud Run's
+        public-invoker binding, which returns 403 to everyone and stops billing, and fires a distinct CRITICAL alert
+        so it's never mistaken for a plain outage. It self-heals on the 1st of the month; nothing else in this
+        diagram takes the site down.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ================= REFERENCE TABLE ================= -->
+  <section class="figure-block">
+    <div class="ref-wrap">
+      <table class="ref">
+        <caption>GCP &amp; Cloudflare services in use</caption>
+        <thead>
+          <tr><th>Service</th><th>Role</th><th>Notable limit</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="svc">Cloud Run</td><td>Runs the FastAPI backend + MCP server</td><td>Free: 2M req/mo &middot; capped at 1 instance here</td></tr>
+          <tr><td class="svc">Firestore</td><td>Recipes, expenses, receipt associations</td><td>Free: 50K reads/day, 1&nbsp;GiB storage</td></tr>
+          <tr><td class="svc">Cloud Storage</td><td>3 buckets &mdash; images (public), receipts (private, 7yr), staging (ephemeral)</td><td>Free: 5&nbsp;GiB storage</td></tr>
+          <tr><td class="svc">Secret Manager</td><td>Stripe keys, JWT secret, Resend key, IG token</td><td>Free: 6 active secrets</td></tr>
+          <tr><td class="svc">Cloud Scheduler</td><td>Weekly usage report, IG token refresh, budget reset</td><td>&mdash;</td></tr>
+          <tr><td class="svc">Cloud Functions (Gen2)</td><td>budget-killer / budget-resetter</td><td>&mdash;</td></tr>
+          <tr><td class="svc">Cloud Build</td><td>Builds &amp; deploys the backend image on push to main</td><td>Free: 2,500 build-min/mo</td></tr>
+          <tr><td class="svc">Artifact Registry</td><td>Docker image storage for the backend</td><td>Free: 0.5&nbsp;GiB &middot; keeps last 5 tags</td></tr>
+          <tr><td class="svc">Identity Platform</td><td>Google sign-in for the admin panel</td><td>Free: 49,999 MAU/mo</td></tr>
+          <tr><td class="svc">Cloud Monitoring/Logging</td><td>Uptime check, error/5xx alerts, budget alerts</td><td>Free: 50&nbsp;GiB log ingestion/mo</td></tr>
+          <tr><td class="svc">Pub/Sub</td><td>Carries the 100%-budget signal to the kill function</td><td>&mdash;</td></tr>
+          <tr><td class="svc">Cloud Billing Budgets</td><td>$15/mo cap with the auto-kill circuit breaker</td><td>&mdash;</td></tr>
+          <tr><td class="svc">Cloudflare Pages</td><td>Hosts the built SPA, auto-deploy + previews</td><td>&mdash;</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="page">
+    Generated from terraform/ and docs/DEPLOYMENT.md &middot; 2026-08-23
+  </footer>
+
+</main>
