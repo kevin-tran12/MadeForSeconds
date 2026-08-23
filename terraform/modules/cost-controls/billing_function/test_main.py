@@ -222,15 +222,43 @@ def test_trip_does_not_overwrite_an_existing_status_file_when_already_tripped(bi
     storage_client.bucket.return_value.blob.return_value.upload_from_string.assert_not_called()
 
 
-def test_status_file_write_failure_does_not_raise(billing, storage_client):
-    """The IAM revoke is the real safety mechanism; a GCS hiccup must not block it."""
+def test_status_file_write_failure_raises_for_eventarc_retry(billing, storage_client):
+    """All retries exhausted — raise so Eventarc's RETRY_POLICY_RETRY (billing.tf)
+    redelivers the notification. The IAM revoke already happened and is
+    idempotent, so a retry only re-attempts the status file, not the revoke."""
     storage_client.bucket.return_value.blob.return_value.upload_from_string.side_effect = Exception("boom")
     client, _ = _client_with(public=True)
 
     with patch.object(billing.run_v2, "ServicesClient", return_value=client):
-        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))  # must not raise
+        with pytest.raises(billing.StatusFileError):
+            billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
 
     client.set_iam_policy.assert_called_once()
+
+
+def test_ensure_status_file_failure_raises_for_eventarc_retry(billing, storage_client):
+    """Already-tripped path: if the self-heal write also fails after retries,
+    raise so Eventarc redelivers again instead of reporting false success."""
+    storage_client.bucket.return_value.blob.return_value.exists.return_value = False
+    storage_client.bucket.return_value.blob.return_value.upload_from_string.side_effect = Exception("boom")
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        with pytest.raises(billing.StatusFileError):
+            billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    client.set_iam_policy.assert_not_called()  # already tripped — no IAM call to begin with
+
+
+def test_ensure_status_file_exists_check_failure_raises(billing, storage_client):
+    """A failure in the exists() check itself (not just the write) must also
+    escalate — _retry exhausts its attempts on either call."""
+    storage_client.bucket.return_value.blob.return_value.exists.side_effect = Exception("boom")
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        with pytest.raises(billing.StatusFileError):
+            billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
 
 
 def test_status_file_write_retries_a_transient_failure(billing, storage_client):
@@ -384,14 +412,30 @@ def test_reset_tolerates_status_file_already_absent(billing, storage_client):
     assert status == 200
 
 
-def test_status_file_delete_failure_does_not_raise(billing, storage_client):
+def test_status_file_delete_failure_returns_503_for_scheduler_retry(billing, storage_client):
+    """All retries exhausted — return non-2xx so Cloud Scheduler's retry_config
+    (billing.tf) retries the call. reset_cloud_run itself must still not raise —
+    only kill_cloud_run escalates via exception."""
     storage_client.bucket.return_value.blob.return_value.delete.side_effect = Exception("boom")
     client, _ = _client_with(public=False)
 
     with patch.object(billing.run_v2, "ServicesClient", return_value=client):
         _, status = billing.reset_cloud_run(MagicMock())  # must not raise
 
-    assert status == 200
+    assert status == 503
+
+
+def test_reset_early_return_delete_failure_returns_503(billing, storage_client):
+    """The "already public, nothing to reset" branch must also surface a
+    cleanup failure to Cloud Scheduler, not just the main restore branch."""
+    storage_client.bucket.return_value.blob.return_value.delete.side_effect = Exception("boom")
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        _, status = billing.reset_cloud_run(MagicMock())  # must not raise
+
+    assert status == 503
+    client.set_iam_policy.assert_not_called()
 
 
 def test_reset_logs_the_marker_only_when_it_acts(billing, capsys):

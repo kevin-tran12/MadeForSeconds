@@ -31,10 +31,18 @@ Both entry points also publish/clear a status file in the public images bucket
 cost-cap pause from a genuine outage, since the revoked invoker binding makes
 Cloud Run reject at the edge with no CORS headers, indistinguishable from the
 site being down for any other reason. That file is a secondary signal, not
-the safety mechanism: every write/delete is best-effort and never allowed to
-raise, so a GCS hiccup can never block the actual revoke/restore, and the
-frontend already treats a missing or stale status file as "cannot confirm
-why", never as proof of anything.
+the safety mechanism: the IAM revoke/restore always happens first and
+unconditionally, so a GCS hiccup can never block or reorder it. But a
+status-file operation that still fails after _retry's own attempts is not
+silently swallowed either: kill_cloud_run raises so Eventarc's
+RETRY_POLICY_RETRY redelivers the notification, and reset_cloud_run returns a
+non-2xx response so Cloud Scheduler's retry_config retries the call — the
+external retry mechanisms that already existed for the IAM call now cover the
+status file too. Both are safe to retry this way: the IAM side is idempotent
+(gated on _is_public(policy)), so a retry only re-attempts the status file,
+never a redundant setIamPolicy call. The frontend still treats a missing or
+stale status file as "cannot confirm why", never as proof of anything, since
+even these retries are finite.
 """
 
 import base64
@@ -70,18 +78,29 @@ PUBLIC_MEMBER = "allUsers"
 STATUS_OBJECT_NAME = "status.json"
 
 
-def _retry(operation, *, attempts: int = 3, delay_seconds: float = 1.0):
-    """A handful of immediate retries for a best-effort GCS call.
+class StatusFileError(RuntimeError):
+    """Raised by kill_cloud_run when status.json could not be written/confirmed
+    after _retry's attempts are exhausted, so Eventarc's RETRY_POLICY_RETRY
+    (billing.tf) redelivers the notification instead of the failure being
+    silently swallowed. reset_cloud_run never raises this — its failure path
+    is a non-2xx response instead, since Cloud Scheduler's retry_config
+    triggers on HTTP status, not on exceptions.
+    """
 
-    kill_cloud_run's own write self-heals over time regardless — Eventarc
-    redelivers the same notification every ~20-30 min for as long as the
-    budget stays over — but that is a long time to leave visitors looking at
-    an unconfirmed outage over one transient blip, and reset_cloud_run has no
-    equivalent external retry at all: it runs once a month, so a single
-    failure there would leave a stale "paused" signal live for up to a month
-    after the site is already back. NotFound is never worth retrying — a
-    missing object does not become present by asking again — so it always
-    propagates immediately regardless of how many attempts remain.
+
+def _retry(operation, *, attempts: int = 3, delay_seconds: float = 1.0):
+    """A handful of immediate in-process retries for a GCS call — a fast first
+    layer under the external retries kill_cloud_run/reset_cloud_run now
+    trigger when even these are exhausted (see StatusFileError and the 503
+    return below). Those external retries are much coarser: Eventarc
+    redelivery only comes every ~20-30 min for as long as the budget stays
+    over, and Cloud Scheduler's retry_config is 3 immediate HTTP retries
+    triggered by a non-2xx response, not something tied to the once-a-month
+    schedule itself. A status signal stuck wrong for even a few minutes is a
+    bad visitor experience regardless of what eventually cleans it up.
+    NotFound is never worth retrying — a missing object does not become
+    present by asking again — so it always propagates immediately regardless
+    of how many attempts remain.
     """
     last_exc: Exception | None = None
     for attempt in range(attempts):
@@ -112,48 +131,68 @@ def _upload_status_blob(blob) -> None:
     blob.upload_from_string(payload, content_type="application/json")
 
 
-def _write_status_file() -> None:
+def _write_status_file() -> bool:
     """Publish the confirmed budget-cap signal, with a fresh `since`.
 
     Call this only at the moment the pause actually begins — the redelivered/
     already-tripped path calls _ensure_status_file instead, so a retried
-    notification cannot keep resetting the original pause time. Best-effort —
-    see module docstring.
+    notification cannot keep resetting the original pause time.
+
+    Returns True on success, False if every _retry attempt failed. Never
+    raises itself — reports success/failure as a bool and leaves it to the
+    caller, which turns False into a StatusFileError (see module docstring).
     """
     try:
         blob = storage.Client().bucket(STATUS_BUCKET).blob(STATUS_OBJECT_NAME)
         _retry(lambda: _upload_status_blob(blob))
         print(f"Wrote {STATUS_OBJECT_NAME} to gs://{STATUS_BUCKET}/{STATUS_OBJECT_NAME}")
-    except Exception as exc:  # noqa: BLE001 - best-effort, must never block the trip
+        return True
+    except Exception as exc:  # noqa: BLE001 - reported to the caller as a bool, never raised here
         print(f"Could not write {STATUS_OBJECT_NAME}: {exc}")
+        return False
 
 
-def _ensure_status_file() -> None:
+def _ensure_status_file() -> bool:
     """Self-heal only: write status.json if and only if it is currently
     missing, so a redelivered "already tripped" notification can recover from
     a prior failed write without clobbering the `since` an earlier, genuine
-    trip already recorded. Best-effort — see module docstring.
+    trip already recorded.
+
+    Returns True if the file is confirmed present (already there, or just
+    written), False if the existence check or the write itself failed after
+    retries. Never raises — see _write_status_file.
     """
     try:
         blob = storage.Client().bucket(STATUS_BUCKET).blob(STATUS_OBJECT_NAME)
         if _retry(blob.exists):
-            return
+            return True
         _retry(lambda: _upload_status_blob(blob))
         print(f"{STATUS_OBJECT_NAME} was missing on an already-tripped check — wrote it")
-    except Exception as exc:  # noqa: BLE001 - best-effort, must never block anything
+        return True
+    except Exception as exc:  # noqa: BLE001 - reported to the caller as a bool, never raised here
         print(f"Could not ensure {STATUS_OBJECT_NAME}: {exc}")
+        return False
 
 
-def _delete_status_file() -> None:
-    """Clear the confirmed budget-cap signal. Best-effort — see module docstring."""
+def _delete_status_file() -> bool:
+    """Clear the confirmed budget-cap signal.
+
+    Returns True on success — "already absent" counts as success, not failure
+    — or False if the delete failed after retries. Never raises;
+    reset_cloud_run turns False into a non-2xx response so Cloud Scheduler's
+    retry_config gets a chance to retry the call.
+    """
     blob = storage.Client().bucket(STATUS_BUCKET).blob(STATUS_OBJECT_NAME)
     try:
         _retry(blob.delete)
         print(f"Deleted {STATUS_OBJECT_NAME}")
+        return True
     except NotFound:
         print(f"{STATUS_OBJECT_NAME} already absent, nothing to delete")
-    except Exception as exc:  # noqa: BLE001 - best-effort, must never block the reset
+        return True
+    except Exception as exc:  # noqa: BLE001 - reported to the caller as a bool, never raised here
         print(f"Could not delete {STATUS_OBJECT_NAME} after retries: {exc}")
+        return False
 
 
 def _service_path(client: run_v2.ServicesClient) -> str:
@@ -216,7 +255,12 @@ def kill_cloud_run(cloud_event):
         # up, but it must not overwrite an already-correct file and reset the
         # `since` a genuine trip already recorded.
         print(f"{SERVICE_NAME} is already private, breaker already tripped.")
-        _ensure_status_file()
+        if not _ensure_status_file():
+            # All retries exhausted. Raise (rather than return) so Eventarc's
+            # RETRY_POLICY_RETRY (billing.tf) redelivers this notification —
+            # the IAM side is already correct and idempotent, so the retry
+            # only re-attempts the status file.
+            raise StatusFileError(f"Could not confirm {STATUS_OBJECT_NAME} after retries")
         return
 
     print(
@@ -235,7 +279,14 @@ def kill_cloud_run(cloud_event):
     _set_policy(client, resource, policy)
 
     print(f"Public access to {SERVICE_NAME} revoked. The site is now returning 403.")
-    _write_status_file()
+    if not _write_status_file():
+        # All retries exhausted. Raise so Eventarc redelivers — the retry
+        # re-enters via the "already tripped" branch above (IAM is already
+        # revoked and stuck there), which calls _ensure_status_file instead of
+        # _write_status_file again. That is correct: _ensure_ finds the file
+        # missing (this write is what failed) and writes it fresh, which is
+        # exactly right since there is no genuine prior `since` to preserve.
+        raise StatusFileError(f"Could not write {STATUS_OBJECT_NAME} after retries")
 
 
 @functions_framework.http
@@ -252,7 +303,12 @@ def reset_cloud_run(request):
         # after it is already back, indefinitely.
         msg = f"{SERVICE_NAME} is already public, nothing to reset."
         print(msg)
-        _delete_status_file()
+        if not _delete_status_file():
+            # All retries exhausted. Return non-2xx so Cloud Scheduler's
+            # retry_config (billing.tf) retries the call — the IAM side is
+            # already correct and idempotent, so the retry only re-attempts
+            # the delete.
+            return f"{msg} Failed to clear {STATUS_OBJECT_NAME}.", 503
         return msg, 200
 
     print(f"{RESET_MARKER} service={SERVICE_NAME} — restoring public access.")
@@ -270,5 +326,6 @@ def reset_cloud_run(request):
 
     msg = f"Public access to {SERVICE_NAME} restored."
     print(msg)
-    _delete_status_file()
+    if not _delete_status_file():
+        return f"{msg} Failed to clear {STATUS_OBJECT_NAME}.", 503
     return msg, 200
