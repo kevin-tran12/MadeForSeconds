@@ -814,7 +814,7 @@ then required.
 | Cloud Run | 2M req/mo · 360K GB-sec · 180K vCPU-sec | Well under for personal use |
 | Firestore | 50K reads/day · 20K writes/day · 1 GiB storage | Well under |
 | Cloud Storage | 5 GiB storage · 1 GiB/mo egress (US) | Minimal for images + receipts |
-| Artifact Registry | 0.5 GiB storage | Cleanup policy keeps ≤ 5 images |
+| Artifact Registry | 0.5 GiB storage | Cleanup policy deletes untagged images after 1 day and any tagged image beyond the 5 most recent |
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
