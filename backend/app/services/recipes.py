@@ -209,8 +209,12 @@ def delete_recipe(db, recipe_id: str, *, require_draft: bool = False) -> None:
         raise RecipeServiceError("Refusing to delete a published recipe — unpublish it first")
 
     uploads.delete_recipe_image_blob(data.get("image_url"))
-    for url in data.get("receipt_urls") or []:
-        uploads.delete_recipe_receipt_blob(url)
 
+    # Receipt objects are deliberately left in place. A recipe is content and
+    # can be thrown away; the receipts attached to it are expense records that
+    # have to survive the recipe by years. The receipts bucket enforces that
+    # itself with a seven-year retention policy, so deleting them here would
+    # fail regardless — and the Firestore backups keep the association for the
+    # window in which anyone would go looking.
     doc_ref.delete()
     cache.clear()
