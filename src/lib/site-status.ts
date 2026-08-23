@@ -35,6 +35,21 @@ const API_URL = import.meta.env.VITE_API_URL as string
 /** Fail fast — this runs while a visitor is already staring at a broken page. */
 const PROBE_TIMEOUT_MS = 4000
 
+// The breaker's IAM revoke and its status.json write (terraform/modules/
+// cost-controls/billing_function/main.py) are two separate calls, in that
+// order. A request that fails right after the revoke can easily lose the
+// race against the write — landing a 404 on status.json a moment before it
+// exists — and there is no server push to correct it afterwards: nothing
+// re-runs diagnoseSiteStatus once it settles, until some other request
+// happens to fail again. A short bounded retry here catches the common case
+// instead of settling permanently on the less-confident "refused".
+const STATUS_RETRY_ATTEMPTS = 3
+const STATUS_RETRY_DELAY_MS = 1000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function withTimeout(input: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
@@ -114,7 +129,18 @@ export async function diagnoseSiteStatus(): Promise<SiteStatus> {
   const published = await readPublishedStatus()
   if (published) return { kind: 'budget-cap', since: published.since }
 
-  return (await serverIsAnswering()) ? { kind: 'refused' } : { kind: 'unreachable' }
+  if (!(await serverIsAnswering())) return { kind: 'unreachable' }
+
+  // Something answered, but nothing confirmed why yet — retry the read
+  // briefly before settling on the least-confident verdict. Bounded: this
+  // must resolve well before a visitor gives up waiting.
+  for (let attempt = 0; attempt < STATUS_RETRY_ATTEMPTS; attempt++) {
+    await sleep(STATUS_RETRY_DELAY_MS)
+    const retried = await readPublishedStatus()
+    if (retried) return { kind: 'budget-cap', since: retried.since }
+  }
+
+  return { kind: 'refused' }
 }
 
 /**

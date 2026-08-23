@@ -29,6 +29,22 @@ function jsonResponse(body: unknown, ok = true): Response {
   return { ok, json: async () => body } as Response
 }
 
+/**
+ * diagnoseSiteStatus() now retries readPublishedStatus with real setTimeout
+ * delays before settling on 'refused' — fake timers keep that bounded, so
+ * these tests don't actually wait seconds of wall-clock time.
+ */
+async function diagnoseWithFakeTimers() {
+  vi.useFakeTimers()
+  try {
+    const promise = diagnoseSiteStatus()
+    await vi.runAllTimersAsync()
+    return await promise
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 beforeEach(() => {
   vi.stubGlobal('navigator', { onLine: true })
 })
@@ -69,7 +85,43 @@ describe('diagnoseSiteStatus', () => {
     // read as confirmation of a deliberate outage.
     mockFetch({ status: () => jsonResponse({}, false), probe: () => ({}) as Response })
 
-    expect(await diagnoseSiteStatus()).toEqual({ kind: 'refused' })
+    expect(await diagnoseWithFakeTimers()).toEqual({ kind: 'refused' })
+  })
+
+  it('retries the status file briefly and catches one that lands mid-check', async () => {
+    // The breaker's IAM revoke and its status.json write are separate calls —
+    // a request right after the revoke can lose the race against the write.
+    let statusCalls = 0
+    mockFetch({
+      status: () => {
+        statusCalls += 1
+        return statusCalls < 3
+          ? jsonResponse({}, false) // not written yet
+          : jsonResponse({ status: 'budget_cap', since: '2026-08-11T06:35:54Z' })
+      },
+      probe: () => ({}) as Response,
+    })
+
+    expect(await diagnoseWithFakeTimers()).toEqual({
+      kind: 'budget-cap',
+      since: '2026-08-11T06:35:54Z',
+    })
+    expect(statusCalls).toBe(3)
+  })
+
+  it('gives up after a bounded number of retries and reports refused', async () => {
+    let statusCalls = 0
+    mockFetch({
+      status: () => {
+        statusCalls += 1
+        return jsonResponse({}, false) // never lands
+      },
+      probe: () => ({}) as Response,
+    })
+
+    expect(await diagnoseWithFakeTimers()).toEqual({ kind: 'refused' })
+    // The initial read plus a bounded number of retries, not unbounded polling.
+    expect(statusCalls).toBe(4)
   })
 
   it('reports unreachable when nothing answers at all', async () => {
@@ -81,7 +133,7 @@ describe('diagnoseSiteStatus', () => {
   it('never claims budget-cap from a malformed status file', async () => {
     mockFetch({ status: () => jsonResponse({ status: 'something-else' }), probe: () => ({}) as Response })
 
-    expect((await diagnoseSiteStatus()).kind).toBe('refused')
+    expect((await diagnoseWithFakeTimers()).kind).toBe('refused')
   })
 
   it('never claims budget-cap when the status file is unparseable', async () => {
@@ -90,13 +142,13 @@ describe('diagnoseSiteStatus', () => {
       probe: () => ({}) as Response,
     })
 
-    expect((await diagnoseSiteStatus()).kind).toBe('refused')
+    expect((await diagnoseWithFakeTimers()).kind).toBe('refused')
   })
 
   it('probes the API with no-cors so an unreadable 403 still counts as answering', async () => {
     const fetchMock = mockFetch({ status: () => jsonResponse({}, false), probe: () => ({}) as Response })
 
-    await diagnoseSiteStatus()
+    await diagnoseWithFakeTimers()
 
     const probeCall = fetchMock.mock.calls.find(([url]) => url !== STATUS_URL)
     expect(probeCall?.[1]).toMatchObject({ mode: 'no-cors' })
