@@ -27,10 +27,19 @@ resource "google_project_iam_member" "backend_logging_viewer" {
   member  = "serviceAccount:${google_service_account.backend.email}"
 }
 
-# Grant access to read the admin-emails secret — scoped to this secret only, not project-wide
+# Read access on every secret this module creates — scoped per secret, never
+# project-wide. Cloud Run requires the service identity to hold
+# roles/secretmanager.secretAccessor on each secret a revision references, or
+# the revision is rejected at creation and the service never starts.
+#
+# for_each over local.existing_secrets rather than one block per secret: see
+# secrets.tf for the drift this replaces. A secret added to that map from now
+# on gets its binding without anyone having to remember.
 resource "google_secret_manager_secret_iam_member" "backend_secret_access" {
+  for_each = local.existing_secrets
+
   project   = var.gcp_project_id
-  secret_id = google_secret_manager_secret.admin_emails.secret_id
+  secret_id = each.value
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
@@ -52,25 +61,10 @@ resource "google_service_account_iam_member" "backend_token_creator" {
   member             = "serviceAccount:${google_service_account.backend.email}"
 }
 
-# Grant access to read the Redis URL secret (only when redis_url is provided)
-resource "google_secret_manager_secret_iam_member" "backend_redis_url_access" {
-  count     = var.redis_url != "" ? 1 : 0
-  project   = var.gcp_project_id
-  secret_id = google_secret_manager_secret.redis_url[0].secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.backend.email}"
-}
-
-# Instagram token: the backend reads the latest version at runtime (accessor)
-# and writes refreshed versions during rotation (versionAdder).
-resource "google_secret_manager_secret_iam_member" "backend_instagram_token_access" {
-  count     = var.instagram_access_token != "" ? 1 : 0
-  project   = var.gcp_project_id
-  secret_id = google_secret_manager_secret.instagram_access_token[0].secret_id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.backend.email}"
-}
-
+# Instagram token: the backend reads the latest version at runtime — covered by
+# backend_secret_access above like every other secret — and writes refreshed
+# versions during rotation, which is this grant. versionAdder is genuinely
+# Instagram-only, so it stays a block of its own.
 resource "google_secret_manager_secret_iam_member" "backend_instagram_token_adder" {
   count     = var.instagram_access_token != "" ? 1 : 0
   project   = var.gcp_project_id

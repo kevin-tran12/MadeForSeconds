@@ -83,39 +83,18 @@ variable "backend_sa_id" {
   type        = string
 }
 
-variable "redis_url" {
-  description = "Not read for its value here — only its presence gates the dynamic REDIS_URL env block. The value itself is injected from var.secret_ids.redis_url."
-  type        = string
-  sensitive   = true
-}
-
-variable "stripe_secret_key" {
-  description = "Gates the dynamic STRIPE_SECRET_KEY env block — see redis_url"
-  type        = string
-  sensitive   = true
-}
-
-variable "stripe_webhook_secret" {
-  description = "Gates the dynamic STRIPE_WEBHOOK_SECRET env block — see redis_url"
-  type        = string
-  sensitive   = true
-}
+# There are deliberately no redis_url / stripe_secret_key / stripe_webhook_secret
+# / subscriber_jwt_secret / resend_api_key variables here. They used to be passed
+# in purely to gate the dynamic env blocks, which meant this module took the same
+# fact twice — once as "was the tfvar set" and once as the secret_id itself — and
+# the two could drift. secret_ids carries null for a secret that was not created,
+# which is the same condition, so cloud_run.tf gates on that instead. Passing the
+# secret values in also marked every expression that touched them sensitive, which
+# propagated all the way to the root outputs.
 
 variable "stripe_product_id" {
-  description = "Not secret; gates AND supplies the value for the dynamic STRIPE_PRODUCT_ID env block"
+  description = "Not secret and not in Secret Manager; gates AND supplies the value for the dynamic STRIPE_PRODUCT_ID env block"
   type        = string
-}
-
-variable "subscriber_jwt_secret" {
-  description = "Gates the dynamic SUBSCRIBER_JWT_SECRET env block — see redis_url"
-  type        = string
-  sensitive   = true
-}
-
-variable "resend_api_key" {
-  description = "Gates the dynamic RESEND_API_KEY env block — see redis_url"
-  type        = string
-  sensitive   = true
 }
 
 variable "secret_ids" {
