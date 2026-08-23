@@ -399,15 +399,40 @@ swallowed error.
 
 **Restoring a receipt whose link was removed:**
 
-```bash
-# The object never went anywhere — list by prefix to find it
-gcloud storage ls gs://made-for-seconds-receipts/receipts/
+Receipts live in two places, not one: recipe receipts sit at the bucket root
+(`admin_upload_recipe_receipt` in `backend/app/routes/admin.py`), expense
+receipts sit under `receipts/` (`backend/app/routes/expenses.py`,
+`backend/app/mcp_server.py`). Listing only `receipts/` misses every recipe
+receipt, so check both:
 
-# If an overwrite is the problem, list generations and restore one
+```bash
+# The object never went anywhere — it's just a question of which prefix
+gcloud storage ls gs://made-for-seconds-receipts/
+gcloud storage ls gs://made-for-seconds-receipts/receipts/
+```
+
+Re-attach the URL through the admin UI or MCP and that's the whole fix — the
+object was never touched, only the record pointing to it was.
+
+**Restoring an overwritten generation:**
+
+The retention policy blocks writing a new generation over an object's
+current name just as it blocks deleting it — from GCS's side, both are
+"replace the retained object," so `cp` onto the same name gets the same 403
+a `rm` would. Restore the generation you want to a *new* name instead, then
+repoint whichever Firestore field references it — a recipe's `receipt_urls`
+array entry, or an expense's `receipt_url` — at that new name. The
+generation you didn't want stays exactly where it is; nothing about
+retention lets you remove it either, which is the point.
+
+```bash
 gcloud storage ls -a gs://made-for-seconds-receipts/receipts/FILENAME
 gcloud storage cp gs://made-for-seconds-receipts/receipts/FILENAME#GENERATION \
-  gs://made-for-seconds-receipts/receipts/FILENAME
+  gs://made-for-seconds-receipts/receipts/restored-FILENAME
 ```
+
+(Drop the `receipts/` prefix for a recipe receipt — same command, bucket
+root instead.)
 
 **Restoring the metadata** (which expense the receipt belonged to) restores
 into a *new* database — Firestore will not restore over a live one:
