@@ -25,6 +25,12 @@ variable "backend_image" {
   type        = string
 }
 
+variable "ar_keep_count" {
+  description = "Number of most-recent tagged Artifact Registry images to retain; older tagged images are deleted"
+  type        = number
+  default     = 5
+}
+
 variable "github_owner" {
   description = "GitHub owner for the Cloud Build trigger's repository connection"
   type        = string
