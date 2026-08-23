@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Support Page', () => {
   test('renders support page', async ({ page }) => {
     await page.goto('/support');
-    await expect(page.getByRole('heading', { name: /donate madeforseconds/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /donate to madeforseconds/i })).toBeVisible();
   });
 
   test('amount selector and checkout redirect', async ({ page }) => {
