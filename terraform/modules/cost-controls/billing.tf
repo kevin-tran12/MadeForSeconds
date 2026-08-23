@@ -110,6 +110,17 @@ resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
   member   = "serviceAccount:${google_service_account.budget_killer.email}"
 }
 
+# Write/delete on the public images bucket, so kill_cloud_run/reset_cloud_run
+# can publish and clear status.json (billing_function/main.py) — the frontend's
+# only way to distinguish a deliberate cost-cap pause from a genuine outage
+# (src/lib/site-status.ts). objectUser matches the role already used for the
+# backend's own grant on this same bucket (modules/storage/buckets.tf).
+resource "google_storage_bucket_iam_member" "budget_killer_status_object" {
+  bucket = var.images_bucket_name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.budget_killer.email}"
+}
+
 # ─── Cloud Function (Gen 2) ─────────────────────────────────────────────────
 
 # Zip the function source for upload.
@@ -189,6 +200,7 @@ resource "google_cloudfunctions2_function" "budget_killer" {
       GCP_PROJECT_ID    = var.gcp_project_id
       GCP_REGION        = var.gcp_region
       CLOUD_RUN_SERVICE = var.backend_service_name
+      STATUS_BUCKET     = var.images_bucket_name
     }
   }
 
@@ -274,6 +286,7 @@ resource "google_cloudfunctions2_function" "budget_resetter" {
       GCP_PROJECT_ID    = var.gcp_project_id
       GCP_REGION        = var.gcp_region
       CLOUD_RUN_SERVICE = var.backend_service_name
+      STATUS_BUCKET     = var.images_bucket_name
     }
   }
 }

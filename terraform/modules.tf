@@ -170,6 +170,7 @@ module "cost-controls" {
   backend_service_name  = module.backend-service.service_name
   notification_channel  = google_monitoring_notification_channel.budget_email.name
   scheduler_agent_email = google_project_service_identity.cloudscheduler.email
+  images_bucket_name    = module.storage.images_bucket_name
 
   depends_on = [google_project_service.required_apis]
 }

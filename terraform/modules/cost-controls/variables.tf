@@ -37,3 +37,8 @@ variable "scheduler_agent_email" {
   description = "Cloud Scheduler's service agent email (google_project_service_identity.cloudscheduler, declared at root — module.backend-service needs the same agent for a different grant)"
   type        = string
 }
+
+variable "images_bucket_name" {
+  description = "module.storage.images_bucket_name. The breaker publishes/clears status.json here on trip/reset — reused rather than a dedicated bucket, since it already grants allUsers get on every object it holds. The accessor IAM grant lives in this module (billing.tf), not beside the bucket in modules/storage/buckets.tf like the backend's own grant: this module already depends on module.storage for the bucket name, so a grant declared the other way round — module.storage taking this module's SA email as an input — would be a module dependency cycle."
+  type        = string
+}
