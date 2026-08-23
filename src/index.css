@@ -83,6 +83,11 @@
   --color-success-surface: #f0fdf4;
   --color-success-border: #bbf7d0;
 
+  /* Planned-pause notice (SiteStatusNotice's confirmed budget-cap state) —
+     calm and informational, not an error, so blue rather than danger/success. */
+  --color-notice-surface: #eff6ff;
+  --color-notice-border: #bfdbfe;
+
   /* Typography */
   --font-family-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
   --font-family-display: 'Playfair Display', ui-serif, Georgia, serif;
@@ -128,6 +133,9 @@ body {
   --color-success: #86efac;
   --color-success-surface: #052e16;
   --color-success-border: #166534;
+
+  --color-notice-surface: #172554;
+  --color-notice-border: #1e3a8a;
 
   color-scheme: dark;
 }
