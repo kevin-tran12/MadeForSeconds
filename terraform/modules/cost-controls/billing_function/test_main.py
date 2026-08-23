@@ -34,10 +34,38 @@ def billing(monkeypatch):
     monkeypatch.setenv("GCP_PROJECT_ID", "test-project")
     monkeypatch.setenv("GCP_REGION", "us-central1")
     monkeypatch.setenv("CLOUD_RUN_SERVICE", "mfs-backend")
+    monkeypatch.setenv("STATUS_BUCKET", "test-project-images")
 
     import main
 
     return importlib.reload(main)
+
+
+@pytest.fixture(autouse=True)
+def storage_client(billing):
+    """Patches billing.storage.Client so status.json writes/deletes hit a mock
+    in every test — kill_cloud_run/reset_cloud_run now call these unconditionally,
+    and without this every existing IAM-focused test below would also attempt a
+    real (if caught) GCS client construction. autouse, but still requestable by
+    name for tests that want to assert on the upload/delete calls."""
+    client = MagicMock()
+    with patch.object(billing.storage, "Client", return_value=client):
+        yield client
+
+
+@pytest.fixture(autouse=True)
+def no_sleep(billing):
+    """_retry's backoff is real in production; sleeping through it here would
+    only slow the suite down for no benefit."""
+    with patch.object(billing.time, "sleep"):
+        yield
+
+
+def _uploaded_payload(storage_client) -> dict:
+    """The JSON body of whatever was uploaded as status.json, if anything."""
+    blob = storage_client.bucket.return_value.blob.return_value
+    (body,) = blob.upload_from_string.call_args.args
+    return json.loads(body)
 
 
 def _event(payload: dict):
@@ -146,6 +174,107 @@ def test_trip_is_idempotent_when_already_private(billing):
     client.set_iam_policy.assert_not_called()
 
 
+def test_trip_writes_the_status_file(billing, storage_client):
+    """src/lib/site-status.ts reads this to confirm a deliberate cost-cap pause."""
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    storage_client.bucket.assert_called_with("test-project-images")
+    storage_client.bucket.return_value.blob.assert_called_with("status.json")
+    assert _uploaded_payload(storage_client)["status"] == "budget_cap"
+
+
+def test_status_file_is_marked_uncacheable(billing, storage_client):
+    """No Cache-Control means GCS applies its own default of up to an hour for
+    public reads — wrong for a signal that must reflect a trip within seconds."""
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    assert storage_client.bucket.return_value.blob.return_value.cache_control == "no-store"
+
+
+def test_trip_writes_the_status_file_even_when_already_tripped_and_missing(billing, storage_client):
+    """Self-heals a prior best-effort write failure: Eventarc keeps redelivering
+    as long as the budget stays over, so this is the retry mechanism — but only
+    when the file is actually missing (see the next test)."""
+    storage_client.bucket.return_value.blob.return_value.exists.return_value = False
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    assert _uploaded_payload(storage_client)["status"] == "budget_cap"
+
+
+def test_trip_does_not_overwrite_an_existing_status_file_when_already_tripped(billing, storage_client):
+    """The redelivery self-heal must not clobber the `since` a genuine first
+    trip already recorded — only write when the file is actually missing."""
+    storage_client.bucket.return_value.blob.return_value.exists.return_value = True
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    storage_client.bucket.return_value.blob.return_value.upload_from_string.assert_not_called()
+
+
+def test_status_file_write_failure_raises_for_eventarc_retry(billing, storage_client):
+    """All retries exhausted — raise so Eventarc's RETRY_POLICY_RETRY (billing.tf)
+    redelivers the notification. The IAM revoke already happened and is
+    idempotent, so a retry only re-attempts the status file, not the revoke."""
+    storage_client.bucket.return_value.blob.return_value.upload_from_string.side_effect = Exception("boom")
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        with pytest.raises(billing.StatusFileError):
+            billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    client.set_iam_policy.assert_called_once()
+
+
+def test_ensure_status_file_failure_raises_for_eventarc_retry(billing, storage_client):
+    """Already-tripped path: if the self-heal write also fails after retries,
+    raise so Eventarc redelivers again instead of reporting false success."""
+    storage_client.bucket.return_value.blob.return_value.exists.return_value = False
+    storage_client.bucket.return_value.blob.return_value.upload_from_string.side_effect = Exception("boom")
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        with pytest.raises(billing.StatusFileError):
+            billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    client.set_iam_policy.assert_not_called()  # already tripped — no IAM call to begin with
+
+
+def test_ensure_status_file_exists_check_failure_raises(billing, storage_client):
+    """A failure in the exists() check itself (not just the write) must also
+    escalate — _retry exhausts its attempts on either call."""
+    storage_client.bucket.return_value.blob.return_value.exists.side_effect = Exception("boom")
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        with pytest.raises(billing.StatusFileError):
+            billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+
+def test_status_file_write_retries_a_transient_failure(billing, storage_client):
+    """A single blip must not read as failure — only exhausting all attempts should."""
+    storage_client.bucket.return_value.blob.return_value.upload_from_string.side_effect = [
+        Exception("transient"),
+        None,
+    ]
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    assert storage_client.bucket.return_value.blob.return_value.upload_from_string.call_count == 2
+
+
 def test_forecast_notification_does_not_trip(billing):
     """Pins the safety property behind the FORECASTED_SPEND threshold rule.
 
@@ -242,6 +371,70 @@ def test_reset_is_idempotent_when_not_tripped(billing):
         _, status = billing.reset_cloud_run(MagicMock())
 
     assert status == 200
+    client.set_iam_policy.assert_not_called()
+
+
+def test_reset_deletes_the_status_file(billing, storage_client):
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.reset_cloud_run(MagicMock())
+
+    storage_client.bucket.assert_called_with("test-project-images")
+    storage_client.bucket.return_value.blob.assert_called_with("status.json")
+    storage_client.bucket.return_value.blob.return_value.delete.assert_called_once()
+
+
+def test_reset_deletes_the_status_file_even_when_not_tripped(billing, storage_client):
+    """Self-heals a prior best-effort delete failure — otherwise a stale status
+    file could keep reporting a cost-cap pause after the site is already back."""
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.reset_cloud_run(MagicMock())
+
+    storage_client.bucket.return_value.blob.return_value.delete.assert_called_once()
+
+
+def test_reset_tolerates_status_file_already_absent(billing, storage_client):
+    """The common case: no trip happened, so there was never a file to delete.
+    NotFound is never worth retrying, so this must resolve on the first call."""
+    from google.api_core.exceptions import NotFound
+
+    storage_client.bucket.return_value.blob.return_value.delete.side_effect = NotFound("no such object")
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        _, status = billing.reset_cloud_run(MagicMock())  # must not raise
+
+    storage_client.bucket.return_value.blob.return_value.delete.assert_called_once()
+
+    assert status == 200
+
+
+def test_status_file_delete_failure_returns_503_for_scheduler_retry(billing, storage_client):
+    """All retries exhausted — return non-2xx so Cloud Scheduler's retry_config
+    (billing.tf) retries the call. reset_cloud_run itself must still not raise —
+    only kill_cloud_run escalates via exception."""
+    storage_client.bucket.return_value.blob.return_value.delete.side_effect = Exception("boom")
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        _, status = billing.reset_cloud_run(MagicMock())  # must not raise
+
+    assert status == 503
+
+
+def test_reset_early_return_delete_failure_returns_503(billing, storage_client):
+    """The "already public, nothing to reset" branch must also surface a
+    cleanup failure to Cloud Scheduler, not just the main restore branch."""
+    storage_client.bucket.return_value.blob.return_value.delete.side_effect = Exception("boom")
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        _, status = billing.reset_cloud_run(MagicMock())  # must not raise
+
+    assert status == 503
     client.set_iam_policy.assert_not_called()
 
 

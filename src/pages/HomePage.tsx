@@ -11,7 +11,7 @@ const HOME_DEFAULTS = {
 }
 
 export function HomePage() {
-  const { recipes, loading, error } = useRecipes({ forceFlat: true })
+  const { recipes, loading, error, isConnectionError } = useRecipes({ forceFlat: true })
   const { categories } = useCategories()
   const page = usePageContent('home', HOME_DEFAULTS)
   const featured = recipes.slice(0, 6)
@@ -90,7 +90,10 @@ export function HomePage() {
             </svg>
           </Link>
         </div>
-        {error && (
+        {/* A connectivity failure is already explained by the global
+            SiteStatusNotice banner — showing the raw fetch error here too
+            would just repeat it in less helpful words. */}
+        {error && !isConnectionError && (
           <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p>
         )}
         <RecipeGrid recipes={featured} loading={loading} emptyMessage="No recipes published yet." />

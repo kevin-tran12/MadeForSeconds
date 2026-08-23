@@ -110,6 +110,29 @@ resource "google_cloud_run_v2_service_iam_member" "budget_killer_admin" {
   member   = "serviceAccount:${google_service_account.budget_killer.email}"
 }
 
+# Write/delete on status.json only, so kill_cloud_run/reset_cloud_run can
+# publish and clear it (billing_function/main.py) — the frontend's only way to
+# distinguish a deliberate cost-cap pause from a genuine outage
+# (src/lib/site-status.ts). objectUser matches the role already used for the
+# backend's own grant on this bucket (modules/storage/buckets.tf), but that
+# grant is for the backend, which legitimately manages every recipe image in
+# the bucket — the breaker has no business reading, writing, or deleting any
+# of them, so the condition below scopes this grant to the one object it
+# actually touches. Bucket-level IAM has no per-object variant; a condition on
+# the bucket-level binding is the mechanism GCS provides for this
+# (https://cloud.google.com/storage/docs/access-control/iam-roles).
+resource "google_storage_bucket_iam_member" "budget_killer_status_object" {
+  bucket = var.images_bucket_name
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${google_service_account.budget_killer.email}"
+
+  condition {
+    title       = "status-json-only"
+    description = "Scope the breaker's access to status.json — not every recipe image in this bucket"
+    expression  = "resource.name == \"projects/_/buckets/${var.images_bucket_name}/objects/status.json\""
+  }
+}
+
 # ─── Cloud Function (Gen 2) ─────────────────────────────────────────────────
 
 # Zip the function source for upload.
@@ -189,6 +212,7 @@ resource "google_cloudfunctions2_function" "budget_killer" {
       GCP_PROJECT_ID    = var.gcp_project_id
       GCP_REGION        = var.gcp_region
       CLOUD_RUN_SERVICE = var.backend_service_name
+      STATUS_BUCKET     = var.images_bucket_name
     }
   }
 
@@ -274,6 +298,7 @@ resource "google_cloudfunctions2_function" "budget_resetter" {
       GCP_PROJECT_ID    = var.gcp_project_id
       GCP_REGION        = var.gcp_region
       CLOUD_RUN_SERVICE = var.backend_service_name
+      STATUS_BUCKET     = var.images_bucket_name
     }
   }
 }

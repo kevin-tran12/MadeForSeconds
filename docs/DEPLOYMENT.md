@@ -564,6 +564,16 @@ Only public request traffic is stopped. Firestore, GCS, and egress keep billing,
 but at this scale they are cents. The breaker deliberately does **not** detach
 the billing account.
 
+Revoking the invoker binding means Cloud Run rejects at the edge with no CORS
+headers — visitors' browsers see an opaque failed fetch, identical to the site
+being down for any other reason. The trip and reset also publish/clear a
+`status.json` object in the public images bucket (`STATUS_BUCKET` on both
+functions, `terraform/modules/cost-controls/billing_function/main.py`) so the
+frontend (`src/lib/site-status.ts`, wired via `VITE_STATUS_URL` above) can
+confirm a deliberate pause instead of guessing. Best-effort on both sides —
+a GCS hiccup never blocks the actual revoke/restore, and the frontend already
+treats a missing or stale file as "cannot confirm," never as proof.
+
 > **Why not scale to zero?** In Cloud Run v2, `max_instance_count = 0` is
 > proto3's default, so it serializes as *unset* and the API applies its default
 > cap instead. It does not stop the service — in this project it silently raised
@@ -698,6 +708,7 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `VITE_FIREBASE_API_KEY` | Yes | Identity Platform API key |
 | `VITE_FIREBASE_AUTH_DOMAIN` | Yes | Identity Platform auth domain |
 | `VITE_FIREBASE_PROJECT_ID` | Yes | GCP project ID |
+| `VITE_STATUS_URL` | No | `https://storage.googleapis.com/<gcp_project_id>-images/status.json` — the budget breaker's published cost-cap signal (see [Cost circuit breaker](#cost-circuit-breaker)). Omitting it just means an outage can never be *confirmed* as a deliberate pause; the banner still shows, with more cautious wording. |
 
 ### Backend (managed via Terraform → Cloud Run + Secret Manager)
 
