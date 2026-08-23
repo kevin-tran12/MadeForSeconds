@@ -403,10 +403,17 @@ swallowed error.
 Start with the association record — it says what the object was without needing
 a backup, and unlike a backup it does not expire:
 
+`gcloud` has no document-level read/list command — `firestore` only covers
+`backups`/`databases`/`export`/`import`/`indexes`; document access is the
+Firestore REST API or the console. Either works:
+
 ```bash
-gcloud firestore documents list \
-  --collection-ids=receipt_associations --project made-for-seconds
+curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  "https://firestore.googleapis.com/v1/projects/made-for-seconds/databases/(default)/documents/receipt_associations" \
+  | python3 -m json.tool
 ```
+
+Or browse it directly: [GCP console → Firestore → Data](https://console.cloud.google.com/firestore/databases) → `(default)` → `receipt_associations`.
 
 Each record carries the receipt URL, the recipe's id/title/slug/categories as
 they were, why it was detached (`unlinked`, `recipe_deleted`,
