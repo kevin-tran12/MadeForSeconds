@@ -80,8 +80,29 @@ async function serverIsAnswering(): Promise<boolean> {
 }
 
 /**
+ * Is the API actually healthy right now?
+ *
+ * Unlike serverIsAnswering()'s no-cors probe, this is a normal, CORS-readable
+ * fetch — it can tell an actual 200 apart from "something answered", which is
+ * exactly what confirming a *recovery* needs. It reads as unhealthy for a real
+ * network failure and for a still-tripped breaker (an edge 403 with no CORS
+ * headers) alike, which is correct: only a genuinely serving API should clear
+ * a standing outage banner.
+ */
+export async function isApiHealthy(): Promise<boolean> {
+  try {
+    const res = await withTimeout(`${API_URL}/api/health`, { cache: 'no-store' })
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
+/**
  * Diagnose a failed API request. Call this only after a request has actually
- * failed — it costs two network round-trips.
+ * failed — it costs two network round-trips. This never resolves to "healthy" —
+ * it exists to explain a failure, not to detect its absence. Use isApiHealthy
+ * for that.
  */
 export async function diagnoseSiteStatus(): Promise<SiteStatus> {
   // navigator.onLine is unreliable when true (it only means "a network exists"),

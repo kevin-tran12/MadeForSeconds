@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { API_REACHABLE_EVENT, API_UNREACHABLE_EVENT } from '../lib/api-client'
-import { diagnoseSiteStatus, type SiteStatus } from '../lib/site-status'
+import { diagnoseSiteStatus, isApiHealthy, type SiteStatus } from '../lib/site-status'
 
 /**
  * Watches for API connectivity failures and works out why, so the UI can
@@ -33,13 +33,23 @@ export function useSiteStatus(): SiteStatus | null {
     const onUnreachable = () => { void diagnose() }
     const onReachable = () => setStatus(null)
     const onOnline = () => {
-      // diagnoseSiteStatus is documented for use only after an actual
-      // failure — call it unconditionally here and an ordinary Wi-Fi blip
-      // with nothing wrong would probe the (healthy) API, find no confirmed
-      // budget-cap file, and report `refused`: a false outage banner for a
-      // site that was never down. Only re-check if there's a standing one
-      // to clear or re-diagnose.
-      if (statusRef.current !== null) void diagnose()
+      // Only re-check if there's a standing banner — an ordinary Wi-Fi blip
+      // with nothing wrong must not manufacture one (see the diagnose guard
+      // below for what happens if this ran unconditionally).
+      if (statusRef.current === null) return
+      void (async () => {
+        // diagnoseSiteStatus never resolves to "healthy" — it exists to
+        // explain a failure, not detect its absence, so calling it here
+        // could only ever re-diagnose a NEW reason to still be broken, never
+        // clear a banner that no longer applies. Confirm real recovery with
+        // a normal, CORS-readable health check first; only fall back to a
+        // full diagnosis if that also fails.
+        if (await isApiHealthy()) {
+          setStatus(null)
+        } else {
+          void diagnose()
+        }
+      })()
     }
 
     window.addEventListener(API_UNREACHABLE_EVENT, onUnreachable)
