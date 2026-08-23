@@ -53,6 +53,14 @@ def storage_client(billing):
         yield client
 
 
+@pytest.fixture(autouse=True)
+def no_sleep(billing):
+    """_retry's backoff is real in production; sleeping through it here would
+    only slow the suite down for no benefit."""
+    with patch.object(billing.time, "sleep"):
+        yield
+
+
 def _uploaded_payload(storage_client) -> dict:
     """The JSON body of whatever was uploaded as status.json, if anything."""
     blob = storage_client.bucket.return_value.blob.return_value
@@ -178,15 +186,40 @@ def test_trip_writes_the_status_file(billing, storage_client):
     assert _uploaded_payload(storage_client)["status"] == "budget_cap"
 
 
-def test_trip_writes_the_status_file_even_when_already_tripped(billing, storage_client):
+def test_status_file_is_marked_uncacheable(billing, storage_client):
+    """No Cache-Control means GCS applies its own default of up to an hour for
+    public reads — wrong for a signal that must reflect a trip within seconds."""
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    assert storage_client.bucket.return_value.blob.return_value.cache_control == "no-store"
+
+
+def test_trip_writes_the_status_file_even_when_already_tripped_and_missing(billing, storage_client):
     """Self-heals a prior best-effort write failure: Eventarc keeps redelivering
-    as long as the budget stays over, so this is the retry mechanism."""
+    as long as the budget stays over, so this is the retry mechanism — but only
+    when the file is actually missing (see the next test)."""
+    storage_client.bucket.return_value.blob.return_value.exists.return_value = False
     client, _ = _client_with(public=False)
 
     with patch.object(billing.run_v2, "ServicesClient", return_value=client):
         billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
 
     assert _uploaded_payload(storage_client)["status"] == "budget_cap"
+
+
+def test_trip_does_not_overwrite_an_existing_status_file_when_already_tripped(billing, storage_client):
+    """The redelivery self-heal must not clobber the `since` a genuine first
+    trip already recorded — only write when the file is actually missing."""
+    storage_client.bucket.return_value.blob.return_value.exists.return_value = True
+    client, _ = _client_with(public=False)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    storage_client.bucket.return_value.blob.return_value.upload_from_string.assert_not_called()
 
 
 def test_status_file_write_failure_does_not_raise(billing, storage_client):
@@ -198,6 +231,20 @@ def test_status_file_write_failure_does_not_raise(billing, storage_client):
         billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))  # must not raise
 
     client.set_iam_policy.assert_called_once()
+
+
+def test_status_file_write_retries_a_transient_failure(billing, storage_client):
+    """A single blip must not read as failure — only exhausting all attempts should."""
+    storage_client.bucket.return_value.blob.return_value.upload_from_string.side_effect = [
+        Exception("transient"),
+        None,
+    ]
+    client, _ = _client_with(public=True)
+
+    with patch.object(billing.run_v2, "ServicesClient", return_value=client):
+        billing.kill_cloud_run(_event({"costAmount": 99, "budgetAmount": 15}))
+
+    assert storage_client.bucket.return_value.blob.return_value.upload_from_string.call_count == 2
 
 
 def test_forecast_notification_does_not_trip(billing):
@@ -322,7 +369,8 @@ def test_reset_deletes_the_status_file_even_when_not_tripped(billing, storage_cl
 
 
 def test_reset_tolerates_status_file_already_absent(billing, storage_client):
-    """The common case: no trip happened, so there was never a file to delete."""
+    """The common case: no trip happened, so there was never a file to delete.
+    NotFound is never worth retrying, so this must resolve on the first call."""
     from google.api_core.exceptions import NotFound
 
     storage_client.bucket.return_value.blob.return_value.delete.side_effect = NotFound("no such object")
@@ -330,6 +378,8 @@ def test_reset_tolerates_status_file_already_absent(billing, storage_client):
 
     with patch.object(billing.run_v2, "ServicesClient", return_value=client):
         _, status = billing.reset_cloud_run(MagicMock())  # must not raise
+
+    storage_client.bucket.return_value.blob.return_value.delete.assert_called_once()
 
     assert status == 200
 

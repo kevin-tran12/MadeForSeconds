@@ -41,6 +41,7 @@ import base64
 import datetime
 import json
 import os
+import time
 
 import functions_framework
 from google.api_core.exceptions import NotFound
@@ -69,31 +70,90 @@ PUBLIC_MEMBER = "allUsers"
 STATUS_OBJECT_NAME = "status.json"
 
 
+def _retry(operation, *, attempts: int = 3, delay_seconds: float = 1.0):
+    """A handful of immediate retries for a best-effort GCS call.
+
+    kill_cloud_run's own write self-heals over time regardless — Eventarc
+    redelivers the same notification every ~20-30 min for as long as the
+    budget stays over — but that is a long time to leave visitors looking at
+    an unconfirmed outage over one transient blip, and reset_cloud_run has no
+    equivalent external retry at all: it runs once a month, so a single
+    failure there would leave a stale "paused" signal live for up to a month
+    after the site is already back. NotFound is never worth retrying — a
+    missing object does not become present by asking again — so it always
+    propagates immediately regardless of how many attempts remain.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return operation()
+        except NotFound:
+            raise
+        except Exception as exc:  # noqa: BLE001 - re-raised to the caller below
+            last_exc = exc
+            if attempt < attempts - 1:
+                time.sleep(delay_seconds)
+    raise last_exc
+
+
+def _upload_status_blob(blob) -> None:
+    payload = json.dumps(
+        {
+            "status": "budget_cap",
+            "since": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+    )
+    # Object metadata carries no Cache-Control by default, and GCS applies its
+    # own default of up to an hour for public reads in that case
+    # (https://cloud.google.com/storage/docs/caching) — exactly wrong for a
+    # signal that has to reflect a trip or reset within seconds, not up to an
+    # hour stale in either direction.
+    blob.cache_control = "no-store"
+    blob.upload_from_string(payload, content_type="application/json")
+
+
 def _write_status_file() -> None:
-    """Publish the confirmed budget-cap signal. Best-effort — see module docstring."""
+    """Publish the confirmed budget-cap signal, with a fresh `since`.
+
+    Call this only at the moment the pause actually begins — the redelivered/
+    already-tripped path calls _ensure_status_file instead, so a retried
+    notification cannot keep resetting the original pause time. Best-effort —
+    see module docstring.
+    """
     try:
         blob = storage.Client().bucket(STATUS_BUCKET).blob(STATUS_OBJECT_NAME)
-        payload = json.dumps(
-            {
-                "status": "budget_cap",
-                "since": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            }
-        )
-        blob.upload_from_string(payload, content_type="application/json")
+        _retry(lambda: _upload_status_blob(blob))
         print(f"Wrote {STATUS_OBJECT_NAME} to gs://{STATUS_BUCKET}/{STATUS_OBJECT_NAME}")
     except Exception as exc:  # noqa: BLE001 - best-effort, must never block the trip
         print(f"Could not write {STATUS_OBJECT_NAME}: {exc}")
 
 
+def _ensure_status_file() -> None:
+    """Self-heal only: write status.json if and only if it is currently
+    missing, so a redelivered "already tripped" notification can recover from
+    a prior failed write without clobbering the `since` an earlier, genuine
+    trip already recorded. Best-effort — see module docstring.
+    """
+    try:
+        blob = storage.Client().bucket(STATUS_BUCKET).blob(STATUS_OBJECT_NAME)
+        if _retry(blob.exists):
+            return
+        _retry(lambda: _upload_status_blob(blob))
+        print(f"{STATUS_OBJECT_NAME} was missing on an already-tripped check — wrote it")
+    except Exception as exc:  # noqa: BLE001 - best-effort, must never block anything
+        print(f"Could not ensure {STATUS_OBJECT_NAME}: {exc}")
+
+
 def _delete_status_file() -> None:
     """Clear the confirmed budget-cap signal. Best-effort — see module docstring."""
+    blob = storage.Client().bucket(STATUS_BUCKET).blob(STATUS_OBJECT_NAME)
     try:
-        storage.Client().bucket(STATUS_BUCKET).blob(STATUS_OBJECT_NAME).delete()
+        _retry(blob.delete)
         print(f"Deleted {STATUS_OBJECT_NAME}")
     except NotFound:
         print(f"{STATUS_OBJECT_NAME} already absent, nothing to delete")
     except Exception as exc:  # noqa: BLE001 - best-effort, must never block the reset
-        print(f"Could not delete {STATUS_OBJECT_NAME}: {exc}")
+        print(f"Could not delete {STATUS_OBJECT_NAME} after retries: {exc}")
 
 
 def _service_path(client: run_v2.ServicesClient) -> str:
@@ -151,11 +211,12 @@ def kill_cloud_run(cloud_event):
     if not _is_public(policy):
         # Already tripped. Eventarc redelivers the same notification for as long
         # as the budget stays over, so this is the steady state after the first
-        # trip — return without rewriting an identical policy. Still ensure the
-        # status file: if a prior invocation's (best-effort) write failed, this
-        # redelivery is exactly what lets it catch up.
+        # trip — return without rewriting an identical policy. _ensure_ (not
+        # _write_): this redelivery is what lets a prior write failure catch
+        # up, but it must not overwrite an already-correct file and reset the
+        # `since` a genuine trip already recorded.
         print(f"{SERVICE_NAME} is already private, breaker already tripped.")
-        _write_status_file()
+        _ensure_status_file()
         return
 
     print(
