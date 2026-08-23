@@ -122,7 +122,7 @@ run "no_optional_secrets_leaves_only_admin_emails" {
 # showed, so the regression stays caught without needing a real GCP project.
 #
 # override_module replaces every output of the targeted module for this run,
-# so all five of module.security's outputs are supplied here — module.storage
+# so all seven of module.security's outputs are supplied here — module.storage
 # and module.backend-service both consume some of them, and an omitted one
 # would plan as null rather than skip straight to a test failure.
 run "already_qualified_accessor_names_still_match" {
@@ -146,6 +146,8 @@ run "already_qualified_accessor_names_still_match" {
       backend_sa_email = "mfs-backend@mfs-test.iam.gserviceaccount.com"
       backend_sa_name  = "projects/mfs-test/serviceAccounts/mfs-backend@mfs-test.iam.gserviceaccount.com"
       backend_sa_id    = "projects/mfs-test/serviceAccounts/mfs-backend@mfs-test.iam.gserviceaccount.com"
+      deploy_sa_email  = "mfs-deploy@mfs-test.iam.gserviceaccount.com"
+      deploy_sa_id     = "projects/mfs-test/serviceAccounts/mfs-deploy@mfs-test.iam.gserviceaccount.com"
       secret_ids = {
         admin_emails           = "admin-emails"
         redis_url              = "redis-url"
