@@ -86,7 +86,8 @@ This provisions, across five modules (`modules/security`, `modules/storage`,
 - Firestore database + indexes
 - Artifact Registry repository (with cleanup policy — keeps ≤ 5 images)
 - Cloud Run service (scale-to-zero, 512 MB, startup CPU boost)
-- Cloud Storage buckets (images — public, receipts — private + versioned)
+- Cloud Storage buckets (images — public; receipts — private, versioned, and
+  held under a 7-year retention policy; staging — private and ephemeral)
 - Identity Platform (Firebase Auth) for admin login
 - Cloud Build CI/CD trigger
 - GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, Instagram token)
@@ -349,10 +350,14 @@ gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
 
 ### Backups & monitoring
 
-- **Firestore**: daily managed backup with 7-day retention
-  (`google_firestore_backup_schedule.daily`). List with
-  `gcloud firestore backups list`; restore with
-  `gcloud firestore databases restore`.
+- **Firestore**: two managed backup schedules — daily with 7-day retention
+  (`google_firestore_backup_schedule.daily`) for fast recovery of recent
+  mistakes, and weekly with 14-week retention
+  (`google_firestore_backup_schedule.weekly`) so a problem noticed late is
+  still recoverable. Firestore caps daily schedules at 7 days and any schedule
+  at 14 weeks, which is why depth needs the second schedule rather than a
+  longer retention on the first. List with `gcloud firestore backups list`;
+  restore with `gcloud firestore databases restore`.
 - **Uptime**: a Cloud Monitoring check hits `/api/health` every 15 minutes
   and emails the alert address after ~20 minutes of failures.
 - **App errors**: a log-based metric + alert policy
@@ -370,6 +375,179 @@ gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
   budget/uptime/error alerts above. The report is aggregate-only: no IP
   addresses or per-request rows ever appear in the email or get stored
   anywhere new — they're only counted in memory while the report is built.
+
+### Receipt & financial-record recovery
+
+Expense receipts are tax records. Two things protect them, and they cover
+different failures:
+
+| Protection | Covers | Where |
+|---|---|---|
+| Bucket retention policy, 7 years | Deletion or replacement of the object, by anyone — application bug, compromised runtime, or an admin with `objectAdmin` | `terraform/modules/storage/buckets.tf` |
+| Object versioning | Overwrites, by keeping the superseded generation | same file |
+| Firestore backups, daily 7d + weekly 14w | Loss of the *metadata* — which expense a receipt belongs to, for how much, on what date | `terraform/modules/storage/firestore.tf` |
+| `receipt_associations` records | Loss of the *association* when a recipe-attached receipt is detached or its recipe deleted — written before the link goes away, so it does not expire with a backup | `backend/app/services/receipt_ledger.py` |
+
+The retention policy is what makes the seven-year claim real. Versioning alone
+does not: a caller holding `objectAdmin` can delete every generation
+explicitly. GCS enforces retention itself, so no IAM grant defeats it.
+
+**The application never deletes a receipt.** `DELETE /api/admin/recipes/{id}/receipts`
+unlinks — it removes the URL from the recipe and leaves the object. Deleting a
+recipe likewise keeps its receipts. Both would fail against the retention
+policy anyway; unlinking makes that the intended behaviour rather than a
+swallowed error.
+
+**Restoring a receipt whose link was removed:**
+
+Start with the association record — it says what the object was without needing
+a backup, and unlike a backup it does not expire:
+
+`gcloud` has no document-level read/list command — `firestore` only covers
+`backups`/`databases`/`export`/`import`/`indexes`. A single REST `list` call
+isn't a safe substitute either: Firestore paginates past the first page via
+`nextPageToken`, so a bare `curl` silently omits anything beyond page one once
+the collection grows past it — exactly the kind of gap that shouldn't exist in
+a recovery procedure. Use the same client library the backend already depends
+on (`google-cloud-firestore` — `backend/requirements.txt`); `.stream()`
+handles pagination internally, so there's no token loop to get wrong:
+
+```bash
+pip install google-cloud-firestore  # if not already available locally
+python3 -c "
+from google.cloud import firestore
+for doc in firestore.Client(project='made-for-seconds').collection('receipt_associations').stream():
+    print(doc.id, doc.to_dict())
+"
+```
+
+Or browse it directly: [GCP console → Firestore → Data](https://console.cloud.google.com/firestore/databases) → `(default)` → `receipt_associations` — the console's viewer paginates for you.
+
+Each record carries the receipt URL, the recipe's id/title/slug/categories as
+they were, why it was detached (`unlinked`, `recipe_deleted`,
+`replaced_by_update`), when, through which interface, and which admin did it.
+Records are append-only: nothing updates or deletes them.
+
+Receipts reached through the **expenses** ledger never need this — an expense is
+voided rather than deleted, and `expense_revisions` keeps the full history.
+`receipt_associations` covers the narrower case of receipts attached straight to
+a recipe, where the recipe document was previously the only record.
+
+The association record names the object; finding it still means knowing where
+to look. Receipts live in two places, not one: recipe receipts sit at the
+bucket root (`admin_upload_recipe_receipt` in `backend/app/routes/admin.py`),
+expense receipts sit under `receipts/` (`backend/app/routes/expenses.py`,
+`backend/app/mcp_server.py`). Listing only `receipts/` misses every recipe
+receipt, so check both:
+
+```bash
+# The object never went anywhere — it's just a question of which prefix
+gcloud storage ls gs://made-for-seconds-receipts/
+gcloud storage ls gs://made-for-seconds-receipts/receipts/
+```
+
+Re-attach the URL through the admin UI or MCP and that's the whole fix — the
+object was never touched, only the record pointing to it was.
+
+**Restoring an overwritten generation:**
+
+The retention policy blocks writing a new generation over an object's
+current name just as it blocks deleting it — from GCS's side, both are
+"replace the retained object," so `cp` onto the same name gets the same 403
+a `rm` would. Restore the generation you want to a *new* name instead, then
+repoint whichever Firestore field references it — a recipe's `receipt_urls`
+array entry, or an expense's `receipt_url` — at that new name. The
+generation you didn't want stays exactly where it is; nothing about
+retention lets you remove it either, which is the point.
+
+```bash
+gcloud storage ls -a gs://made-for-seconds-receipts/receipts/FILENAME
+gcloud storage cp gs://made-for-seconds-receipts/receipts/FILENAME#GENERATION \
+  gs://made-for-seconds-receipts/receipts/restored-FILENAME
+```
+
+(Drop the `receipts/` prefix for a recipe receipt — same command, bucket
+root instead.)
+
+**Restoring the metadata** (which expense the receipt belonged to) restores
+into a *new* database — Firestore will not restore over a live one:
+
+```bash
+gcloud firestore backups list --location us-central1 --project made-for-seconds
+gcloud firestore databases restore \
+  --source-backup=projects/made-for-seconds/locations/us-central1/backups/BACKUP_ID \
+  --destination-database=restore-scratch \
+  --project made-for-seconds
+```
+
+Read the expense document out of `restore-scratch`, re-attach the receipt URL
+through the admin UI or MCP, then delete the scratch database. Restoring is
+therefore a manual, deliberate operation — which is the right shape for
+something that should happen approximately never.
+
+> **Locking the retention policy — irreversible, owner's call.**
+> The policy ships **unlocked**, so `terraform apply` can still shorten or
+> remove it. Locking it makes the seven years unconditional: it cannot be
+> shortened or removed by anyone, including you, including Google support, and
+> the bucket cannot be deleted until its last object ages out. Storage bills
+> grow monotonically for seven years as a direct consequence.
+>
+> That is a genuine trade of reliability and cost against tamper-evidence, and
+> it should be made deliberately rather than inherited from a default. When you
+> decide to make it:
+>
+> ```bash
+> gcloud storage buckets update gs://made-for-seconds-receipts \
+>   --lock-retention-period --project made-for-seconds
+> ```
+>
+> Then set `is_locked = true` in `buckets.tf` so Terraform's view matches
+> reality — the field is not reversible there either once the API call lands.
+
+#### What the backup schedules cost
+
+Firestore backup storage has **no free-tier allowance** — unlike the 1 GiB of
+live Firestore storage, every byte of backup is billed from the first one. This
+is a deliberate, approved recurring charge, not an oversight, so the arithmetic
+is written down here rather than left as "cents".
+
+Backups are **full copies, not incremental**, and each is billed for the
+fraction of the month it is retained. That works out to the same number as
+counting concurrent copies at steady state:
+
+| Schedule | Retention | Copies held | Cost per GiB of live DB |
+|---|---|---|---|
+| Daily (pre-existing) | 7 days | 7 | ≈ $0.21 /mo |
+| Weekly (added here) | 14 weeks | 14 | ≈ $0.42 /mo |
+| **Total** | | **21** | **≈ $0.63 /mo** |
+
+Rate is $0.00004 per GiB-hour (≈$0.029 per GiB-month; Google's published table
+rounds to $0.03). The **incremental** cost of this change is the 14 weekly
+copies — the 7 daily ones were already being paid for.
+
+Because that scales with database size, the useful number is the bound: live
+Firestore storage stays inside its 1 GiB free allowance at this scale, and at
+1 GiB the whole backup bill is **≈$0.63/month**. Realistic today is far less —
+a recipe/expense database of a few MiB costs low single-digit cents. Measure the
+actual size before assuming:
+
+```bash
+gcloud monitoring time-series list \
+  --project made-for-seconds \
+  --filter 'metric.type="firestore.googleapis.com/document/storage_bytes"' \
+  --format 'value(points[0].value.int64Value)'
+```
+
+Not covered by the table, and deliberately left for the aggregate cost model
+rather than guessed at here: restore operations (billed separately, per GiB
+restored, only when a restore actually happens), and the scratch database a
+restore lands in (billed as a normal database for as long as it exists — delete
+it when done).
+
+> **Approved:** the recurring weekly-backup charge is accepted at the bound
+> above. The 14-week depth is load-bearing *only* until receipts carry their own
+> durable association record; once that ships, this depth should be
+> re-evaluated rather than kept by inertia.
 
 ### Cost circuit breaker
 
@@ -427,6 +605,73 @@ All secrets are stored in GCP Secret Manager. To rotate (e.g. Stripe keys):
    ```bash
    gcloud run services update mfs-backend --region us-central1 --project made-for-seconds
    ```
+
+### Removing an optional secret
+
+This applies to `redis_url`, `stripe_secret_key`, `stripe_webhook_secret`,
+`subscriber_jwt_secret`, and `resend_api_key` — the five secrets
+`local.optional_secret_env` in `modules/backend-service/cloud_run.tf` injects
+as Cloud Run env vars. **Not** `instagram_access_token`: that one is never
+injected there (see the comment above `INSTAGRAM_USER_ID` in `cloud_run.tf`
+— the backend reads it from Secret Manager at runtime instead, specifically
+so a rotated token doesn't need a redeploy to take effect). Blanking it only
+destroys the secret, its accessor/versionAdder bindings, and the token-refresh
+scheduler job — Cloud Run's revision never referenced it, so there's no
+race: Instagram publishing just stops working until the token is set again,
+no special procedure needed.
+
+For the five that follow, blanking the tfvar and running a plain `terraform
+apply` is **not safe**. `modules.tf`'s `time_sleep.wait_for_secret_accessors`
+only protects the opposite direction — filling in a blank secret. On a
+removal, Terraform destroys the secret and its accessor binding first, then
+Cloud Run's revision is updated to stop referencing it — `-target` doesn't
+help split this into two applies either, since backend-service's plan pulls
+in module.security's pending destroy as a dependency either way. Any instance
+start that lands in that window — a scale-to-zero cold start, or Cloud Run
+replacing an existing instance for its own reasons (host maintenance, a
+crash) — resolves a secret reference that no longer exists and fails.
+
+Forcing a warm instance (`--min-instances=1`) only lowers how often that
+window gets hit; Cloud Run doesn't guarantee an existing instance is never
+replaced, so it's a reduction, not a fix. The only way to actually close the
+window is to make sure nothing references the secret *before* it's
+destroyed, which needs a temporary code change, not just a tfvar change:
+
+1. In `modules/backend-service/cloud_run.tf`, temporarily add the secret
+   you're removing to `local.optional_secret_env`'s exclusion — the
+   comprehension already ends in a single `if`, so extend that condition
+   rather than appending a second `if` (two `if` clauses on one `for` is
+   invalid HCL):
+   ```hcl
+   ] : entry if entry.secret_id != null && entry.name != "RESEND_API_KEY"
+   ```
+   Leave the tfvar as it is. Apply:
+   ```bash
+   cd terraform && terraform apply -lock-timeout=5m
+   ```
+   This produces a new Cloud Run revision that no longer references the
+   secret. `module.security` is untouched by this apply — the secret and its
+   accessor binding still exist, so nothing about this step is destructive.
+2. Confirm the new revision holds all traffic before touching Secret Manager
+   — `gcloud run revisions list` shows readiness, not traffic split or
+   instance counts, so it can't confirm this:
+   ```bash
+   gcloud run services describe mfs-backend --region us-central1 \
+     --project made-for-seconds --format="value(status.traffic)"
+   ```
+   Confirm the new revision is the only one listed at 100%. That's the
+   condition that actually matters here — Cloud Run only starts a fresh
+   instance of a revision to serve traffic routed to it, so a revision sitting
+   at 0% traffic won't be asked to cold-start regardless of how many (or how
+   few) of its instances are still idling down in the background.
+3. Revert the temporary exclusion, blank the tfvar, and apply again. The
+   revision confirmed in step 2 holds all traffic and doesn't reference this
+   secret, so its destruction — whenever Terraform gets to it, with or without
+   the 180s wait — cannot break a running or restarting instance: nothing
+   receiving traffic has anything left to reference.
+
+Steps 1–2 are the part that actually matters; skipping straight to blanking
+the tfvar is what reintroduces the race.
 
 ---
 

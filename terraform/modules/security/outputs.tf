@@ -14,14 +14,11 @@ output "backend_sa_id" {
 }
 
 output "secret_ids" {
-  description = "secret_id of each Secret Manager secret this module may create. Optional secrets are null when their source variable was blank — try() turns the count-0 index-out-of-range into null rather than an error."
-  value = {
-    admin_emails           = google_secret_manager_secret.admin_emails.secret_id
-    redis_url              = try(google_secret_manager_secret.redis_url[0].secret_id, null)
-    stripe_secret_key      = try(google_secret_manager_secret.stripe_secret_key[0].secret_id, null)
-    stripe_webhook_secret  = try(google_secret_manager_secret.stripe_webhook_secret[0].secret_id, null)
-    subscriber_jwt_secret  = try(google_secret_manager_secret.subscriber_jwt_secret[0].secret_id, null)
-    resend_api_key         = try(google_secret_manager_secret.resend_api_key[0].secret_id, null)
-    instagram_access_token = try(google_secret_manager_secret.instagram_access_token[0].secret_id, null)
-  }
+  description = "secret_id of each Secret Manager secret this module may create. Optional secrets are null when their source variable was blank — see local.created_secrets in secrets.tf."
+  value       = local.created_secrets
+}
+
+output "granted_secret_accessors" {
+  description = "secret_id of every secret the backend runtime SA can read. Checked against module.backend-service.referenced_secret_ids by terraform/tests/secret_access.tftest.hcl — a secret Cloud Run injects but that is missing here fails revision creation. Read off the IAM resources themselves, not off the map that builds them, so the assertion tests what Terraform will actually create."
+  value       = toset([for binding in google_secret_manager_secret_iam_member.backend_secret_access : binding.secret_id])
 }
