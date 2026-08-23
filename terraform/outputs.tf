@@ -13,6 +13,11 @@ output "service_account_email" {
   value       = module.security.backend_sa_email
 }
 
+output "deploy_service_account_email" {
+  description = "Cloud Build deploy service account email — what the mfs-backend-deploy trigger runs as"
+  value       = module.security.deploy_sa_email
+}
+
 # ─── Secret wiring ────────────────────────────────────────────────────────────
 # Cloud Run rejects a revision that references a secret its service identity
 # cannot read, so these two are worth being able to read straight off the state

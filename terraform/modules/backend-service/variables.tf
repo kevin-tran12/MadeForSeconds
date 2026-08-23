@@ -79,7 +79,12 @@ variable "backend_sa_name" {
 }
 
 variable "backend_sa_id" {
-  description = "Backend SA's resource id — what the Cloud Build trigger's service_account field expects"
+  description = "Backend SA's resource id. No longer consumed here — the Cloud Build trigger's service_account field reads deploy_sa_id instead — but still threaded through pending the follow-up PR that finishes the identity cutover; see cloudbuild.tf."
+  type        = string
+}
+
+variable "deploy_sa_id" {
+  description = "Deploy SA's resource id — cloudbuild.tf's Cloud Build trigger runs as this identity, not backend_sa_id, so a compromised build inherits deploy-only permissions rather than the runtime service's Firestore/Secret Manager/receipt-bucket access"
   type        = string
 }
 

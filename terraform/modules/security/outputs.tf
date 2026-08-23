@@ -9,7 +9,7 @@ output "backend_sa_name" {
 }
 
 output "backend_sa_id" {
-  description = "Backend SA's resource id — what a Cloud Build trigger's service_account field expects"
+  description = "Backend SA's resource id"
   value       = google_service_account.backend.id
 }
 
@@ -21,4 +21,14 @@ output "secret_ids" {
 output "granted_secret_accessors" {
   description = "secret_id of every secret the backend runtime SA can read. Checked against module.backend-service.referenced_secret_ids by terraform/tests/secret_access.tftest.hcl — a secret Cloud Run injects but that is missing here fails revision creation. Read off the IAM resources themselves, not off the map that builds them, so the assertion tests what Terraform will actually create."
   value       = toset([for binding in google_secret_manager_secret_iam_member.backend_secret_access : binding.secret_id])
+}
+
+output "deploy_sa_email" {
+  description = "Cloud Build deploy service account email"
+  value       = google_service_account.deploy.email
+}
+
+output "deploy_sa_id" {
+  description = "Deploy SA's resource id — what a Cloud Build trigger's service_account field expects"
+  value       = google_service_account.deploy.id
 }
