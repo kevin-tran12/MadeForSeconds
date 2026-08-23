@@ -123,11 +123,17 @@ jobs:
       - name: Install Playwright chromium
         run: npx playwright install --with-deps chromium
 
-      # Frontend is deliberately not started here — Playwright's own webServer
-      # (playwright.config.ts) launches `npm run dev` against VITE_API_URL below,
-      # so the compose-only "app" service (which needs a .env.local CI doesn't
-      # have) is skipped entirely. redis comes up automatically as backend's
-      # dependency.
+      # docker-compose.yml's "app" service declares env_file: .env.local, and
+      # Compose resolves every service's env_file up front regardless of which
+      # services a given command targets — so `up`/`exec`/`down` all fail on a
+      # fresh checkout without this file, even though "app" is never started
+      # here. Frontend is deliberately not started via compose at all —
+      # Playwright's own webServer (playwright.config.ts) launches `npm run
+      # dev` against VITE_API_URL below. redis comes up automatically as
+      # backend's dependency.
+      - name: Create .env.local placeholder for docker compose
+        run: cp .env.local.example .env.local
+
       - name: Start Firestore emulator + backend
         run: docker compose up -d --build firestore-emulator backend
 
