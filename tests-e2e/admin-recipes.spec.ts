@@ -35,8 +35,8 @@ test.describe('Admin Recipes', () => {
     const createBtn = page.getByRole('button', { name: /create recipe/i });
     await createBtn.click();
     
-    // Should redirect back to admin home
-    await expect(page).toHaveURL(/\/admin$/);
+    // Should redirect back to admin home (router normalizes to a trailing slash)
+    await expect(page).toHaveURL(/\/admin\/?$/);
     // Use .first() because multiple E2E test runs might have created multiple recipes
     await expect(page.getByText('E2E Test Recipe').first()).toBeVisible({ timeout: 15000 });
   });
