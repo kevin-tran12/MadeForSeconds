@@ -26,9 +26,16 @@
 #    a VITE_API_URL of http://localhost:8000 gets blocked and the page loads
 #    with no data. That is correct behaviour — use `npm run dev` (Vite, no
 #    _headers) for local work against the local backend.
+#
+#  * connect-src also allows storage.googleapis.com for src/lib/site-status.ts's
+#    VITE_STATUS_URL probe (the budget-breaker's published status.json, a
+#    public GCS object). img-src already allowed this host for recipe images;
+#    without it here too, the fetch is blocked identically to a real network
+#    failure, and the one signal that can confirm a deliberate cost-cap pause
+#    never gets read.
 
 /*
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-jHEAM3JmPQpU2ceeQsqbo7cQqLnVKSg3+E+RR6vzcGk=' https://apis.google.com https://*.firebaseapp.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://storage.googleapis.com https://placehold.co; connect-src 'self' https://*.run.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com; frame-src https://*.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'sha256-jHEAM3JmPQpU2ceeQsqbo7cQqLnVKSg3+E+RR6vzcGk=' https://apis.google.com https://*.firebaseapp.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://storage.googleapis.com https://placehold.co; connect-src 'self' https://*.run.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://storage.googleapis.com; frame-src https://*.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'; upgrade-insecure-requests
   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
