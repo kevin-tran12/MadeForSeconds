@@ -87,12 +87,12 @@ def validate_production_settings(s: "Settings") -> None:
     # mcp_server.py's request_image_upload/upload_image_from_url, which used
     # to fall back to a placeholder response whenever a bucket was unset,
     # in production as much as in dev. Crashing at import time is also the
-    # SAFE failure mode: `gcloud run deploy` in cloudbuild.yaml has no
-    # --no-traffic flag, so it waits for the new revision to pass its startup
-    # probe before shifting any traffic to it. A revision that crash-loops
-    # here never receives traffic — the previous, working revision keeps
-    # serving, and no manual rollback step is needed. See docs/DEPLOYMENT.md
-    # § "Terraform must be applied before deploying a revision that needs it".
+    # SAFE failure mode: cloudbuild.yaml deploys with --no-traffic, smoke-tests
+    # the tagged candidate revision, and only then promotes that exact tag. A
+    # revision that crash-loops here never receives normal traffic — the
+    # previous, working revision keeps serving, and no manual rollback step is
+    # needed. See docs/DEPLOYMENT.md § "Terraform must be applied before
+    # deploying a revision that needs it".
     if not s.gcs_bucket_name:
         raise RuntimeError(
             "GCS_BUCKET_NAME must be set in production — recipe images cannot be "
