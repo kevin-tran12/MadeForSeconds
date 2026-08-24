@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSearchSuggestions } from '../../hooks/useSearchSuggestions'
 import type { Recipe } from '../../lib/types'
+import { safeImageUrl } from '../../lib/safe-url'
 
 const PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23faedcd'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23e85d04'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E"
@@ -200,7 +201,7 @@ export function SearchWithSuggestions({
               }`}
             >
               <img
-                src={recipe.image_url ?? PLACEHOLDER}
+                src={safeImageUrl(recipe.image_url) ?? PLACEHOLDER}
                 alt={recipe.title}
                 onError={(e) => { e.currentTarget.src = PLACEHOLDER }}
                 className="h-9 w-9 shrink-0 rounded-md object-cover"

@@ -575,9 +575,10 @@ class TestPublishRecipeToInstagram:
             mock_pub.return_value = {"id": "ig-123", "permalink": ""}
             mcp_server.publish_recipe_to_instagram(slug="test-recipe")
         caption = mock_pub.call_args[0][1]
-        assert "Test Recipe" in caption
-        assert "madeforseconds.com" in caption
-        assert "#madeforseconds" in caption
+        sections = caption.split("\n\n")
+        assert sections[0] == "Test Recipe"
+        assert sections[2] == "Full recipe: https://madeforseconds.com/recipes/test-recipe/"
+        assert sections[3] == "#madeforseconds #mains"
 
     def test_explicit_caption_overrides_auto_caption(self, db):
         db.stream.return_value = iter([_doc()])

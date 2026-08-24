@@ -376,7 +376,7 @@ def update_recipe(
 
     body = RecipeUpdate.model_validate(updates)
     recipe = recipe_service.update_recipe(get_db(), recipe_id, body, source="mcp")
-    logger.info("MCP update_recipe: %s (%s) fields=%s", recipe.title, recipe.id, sorted(updates))
+    logger.info("MCP update_recipe: %s (%s) field_count=%d", recipe.title, recipe.id, len(updates))
     return {
         "id": recipe.id,
         "slug": recipe.slug,

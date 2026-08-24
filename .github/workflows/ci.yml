@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Every job only reads repository contents. Keep the default token read-only so
+# a compromised build step cannot modify the repository or its pull requests.
+permissions:
+  contents: read
+
 jobs:
   security-scan:
     name: Security Scan

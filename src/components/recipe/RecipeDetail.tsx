@@ -6,6 +6,7 @@ import { Badge } from '../ui/Badge'
 import { CookingMode } from './CookingMode'
 import { NutritionCard } from './NutritionCard'
 import { formatIngredient, type UnitSystem } from '../../lib/units'
+import { safeImageUrl } from '../../lib/safe-url'
 
 const PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400' viewBox='0 0 800 400'%3E%3Crect width='800' height='400' fill='%23faedcd'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='80' fill='%23e85d04'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E"
@@ -317,7 +318,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         {/* Hero image */}
         <div className="group relative mb-8 overflow-hidden rounded-3xl shadow-2xl">
           <img
-            src={recipe.image_url ?? PLACEHOLDER}
+            src={safeImageUrl(recipe.image_url) ?? PLACEHOLDER}
             alt={recipe.title}
             fetchPriority="high"
             decoding="async"
