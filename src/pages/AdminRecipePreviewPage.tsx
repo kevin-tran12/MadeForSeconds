@@ -4,8 +4,7 @@ import { adminApi } from '../lib/api'
 import type { Recipe } from '../lib/types'
 import { RecipeDetail } from '../components/recipe/RecipeDetail'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner'
-
-const STORAGE_KEY = 'recipe-preview-draft'
+import { waitForRecipeDraftPreview } from '../lib/recipe-preview'
 
 export function AdminRecipePreviewPage() {
   const { id } = useParams<{ id: string }>()
@@ -17,22 +16,25 @@ export function AdminRecipePreviewPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (isDraft) {
+      return waitForRecipeDraftPreview(
+        (draft) => {
+          setRecipe(draft)
+          setLoading(false)
+        },
+        (message) => {
+          setError(message)
+          setLoading(false)
+        },
+      )
+    }
+
     async function load() {
       try {
-        if (isDraft) {
-          const raw = localStorage.getItem(STORAGE_KEY)
-          if (!raw) {
-            setError('Preview data not found. Go back and click Preview again.')
-            return
-          }
-          localStorage.removeItem(STORAGE_KEY)
-          setRecipe(JSON.parse(raw) as Recipe)
-        } else {
-          const all = await adminApi.listRecipes()
-          const found = all.find((r) => r.id === id)
-          if (!found) setError('Recipe not found.')
-          else setRecipe(found)
-        }
+        const all = await adminApi.listRecipes()
+        const found = all.find((r) => r.id === id)
+        if (!found) setError('Recipe not found.')
+        else setRecipe(found)
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load recipe')
       } finally {

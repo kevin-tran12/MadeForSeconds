@@ -9,9 +9,10 @@ import { InstructionEditor } from './InstructionEditor'
 import { NutritionEditor } from './NutritionEditor'
 import { ComponentEditor } from './ComponentEditor'
 import { RecipePreviewPanel } from './RecipePreviewPanel'
+import { openRecipeDraftPreview } from '../../lib/recipe-preview'
+import { safeImageUrl } from '../../lib/safe-url'
 
 const PREVIEW_MODE_KEY = 'recipe-preview-mode'
-const PREVIEW_DRAFT_KEY = 'recipe-preview-draft'
 
 interface RecipeFormProps {
   recipe?: Recipe
@@ -164,9 +165,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         // Saved recipe — just open the page, it fetches from the admin API
         window.open(`/admin/preview/${recipe.id}/`, '_blank')?.focus()
       } else {
-        // Unsaved draft — localStorage is shared across same-origin tabs
-        localStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(current))
-        window.open('/admin/preview/draft/', '_blank')?.focus()
+        openRecipeDraftPreview(current)
       }
     } else {
       setPanelRecipe(current)
@@ -273,6 +272,8 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
     }
   }
 
+  const previewImageUrl = safeImageUrl(imageUrl)
+
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-5">
       {error && (
@@ -313,8 +314,8 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
             <span className="text-sm font-medium text-gray-700">Recipe Image</span>
             <div className="flex items-start gap-4">
               <div className="group relative h-32 w-48 overflow-hidden rounded-lg border border-gray-300 bg-gray-50">
-                {imageUrl ? (
-                  <img src={imageUrl} alt="Preview" className="h-full w-full object-cover" />
+                {previewImageUrl ? (
+                  <img src={previewImageUrl} alt="Preview" className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-gray-400">
                     No image
@@ -646,8 +647,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
             if (recipe?.id) {
               window.open(`/admin/preview/${recipe.id}/`, '_blank')?.focus()
             } else {
-              localStorage.setItem(PREVIEW_DRAFT_KEY, JSON.stringify(panelRecipe))
-              window.open('/admin/preview/draft/', '_blank')?.focus()
+              openRecipeDraftPreview(panelRecipe)
             }
           }}
         />
