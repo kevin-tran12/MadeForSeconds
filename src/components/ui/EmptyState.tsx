@@ -13,8 +13,8 @@ export function EmptyState({ title, message, action }: EmptyStateProps) {
         🍽️
       </div>
       <div>
-        <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
-        {message && <p className="mt-1 text-sm text-gray-500">{message}</p>}
+        <h3 className="text-lg font-semibold text-content">{title}</h3>
+        {message && <p className="mt-1 text-sm text-content-muted">{message}</p>}
       </div>
       {action && <div>{action}</div>}
     </div>

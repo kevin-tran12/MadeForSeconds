@@ -57,7 +57,7 @@ export function RecipesPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
-      <h1 className="mb-6 font-display text-3xl font-bold text-gray-900">All Recipes</h1>
+      <h1 className="mb-6 font-display text-3xl font-bold text-content">All Recipes</h1>
 
       {/* Filters */}
       <div className="mb-6 flex flex-col gap-3">
@@ -77,14 +77,14 @@ export function RecipesPage() {
       {/* A connectivity failure is already explained by the global
           SiteStatusNotice banner — don't repeat it in a raw fetch error. */}
       {error && !isConnectionError && (
-        <p className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{error}</p>
+        <p className="mb-4 rounded-xl border border-danger-border bg-danger-surface px-4 py-3 text-sm text-danger">{error}</p>
       )}
 
       {/* Content — grouped browse or flat filtered grid */}
       {isFlat ? (
         <>
           {/* Count row — only shown when actively filtering; keeps height reserved to avoid layout shifts */}
-          <p className="mb-4 text-sm text-gray-500 transition-opacity" style={{ opacity: loading ? 0.4 : 1 }}>
+          <p className="mb-4 text-sm text-content-muted transition-opacity" style={{ opacity: loading ? 0.65 : 1 }}>
             {isFiltering ? <>{recipes.length}{hasMore ? '+' : ''} recipe{recipes.length !== 1 ? 's' : ''} found</> : <>&nbsp;</>}
           </p>
           <RecipeGrid

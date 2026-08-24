@@ -31,8 +31,8 @@ export function RecipeDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
         <div className="text-5xl">🍳</div>
-        <h1 className="font-display text-2xl font-bold text-gray-900">Couldn't load this recipe</h1>
-        <p className="text-gray-500">Try again in a moment.</p>
+        <h1 className="font-display text-2xl font-bold text-content">Couldn't load this recipe</h1>
+        <p className="text-content-muted">Try again in a moment.</p>
       </div>
     )
   }
@@ -41,11 +41,11 @@ export function RecipeDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
         <div className="text-5xl">🍳</div>
-        <h1 className="font-display text-2xl font-bold text-gray-900">Recipe not found</h1>
-        <p className="text-gray-500">This recipe might be private or no longer exists.</p>
+        <h1 className="font-display text-2xl font-bold text-content">Recipe not found</h1>
+        <p className="text-content-muted">This recipe might be private or no longer exists.</p>
         <Link
           to="/recipes/"
-          className="mt-2 rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-700"
+          className="mt-2 rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-primary-500"
         >
           Browse all recipes
         </Link>

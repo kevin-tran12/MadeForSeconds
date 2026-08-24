@@ -45,7 +45,7 @@ function IngredientList({
       {groups.map((group, gi) => (
         <div key={gi}>
           {group.label && (
-            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-stone-500">
+            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-content-muted">
               {group.label}
             </p>
           )}
@@ -62,13 +62,13 @@ function IngredientList({
                 <li
                   key={key}
                   onClick={() => onToggle(key)}
-                  className="flex cursor-pointer items-start gap-3 rounded-xl px-2 py-3 transition-colors hover:bg-white/60 dark:hover:bg-stone-700/60 border-b border-white/40 dark:border-stone-600/40 last:border-0"
+                  className="flex cursor-pointer items-start gap-3 rounded-xl border-b border-card-border px-2 py-3 transition-colors last:border-0 hover:bg-control-hover"
                 >
                   <div
                     className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-all ${
                       isChecked
-                        ? 'border-primary-500 bg-primary-500 text-white'
-                        : 'border-gray-300 dark:border-stone-600 bg-white dark:bg-stone-700'
+                        ? 'border-primary-500 bg-primary-500 text-on-brand'
+                        : 'border-control-border bg-control'
                     }`}
                   >
                     {isChecked && (
@@ -80,13 +80,13 @@ function IngredientList({
                   <span
                     className={`leading-tight transition-all ${
                       isChecked
-                        ? 'line-through text-gray-400 dark:text-stone-600'
-                        : 'text-gray-700 dark:text-stone-300'
+                        ? 'line-through text-content-muted opacity-70'
+                        : 'text-content-body'
                     }`}
                   >
                     {displayAmt && (
                       <strong
-                        className={`font-bold ${isChecked ? 'text-gray-400 dark:text-stone-600' : 'text-gray-900 dark:text-stone-100'}`}
+                        className={`font-bold ${isChecked ? 'text-content-muted' : 'text-content'}`}
                       >
                         {displayAmt}{' '}
                       </strong>
@@ -116,10 +116,10 @@ function ComponentTimingBar({ comp }: { comp: RecipeComponent }) {
     <div className="mb-6 flex flex-wrap gap-4">
       {items.map((item) => (
         <div key={item.label} className="flex items-center gap-1.5 rounded-xl bg-surface-dark px-4 py-2">
-          <span className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-stone-500">
+          <span className="text-xs font-bold uppercase tracking-widest text-content-muted">
             {item.label}
           </span>
-          <span className="text-sm font-bold text-gray-900 dark:text-stone-100">{item.value}</span>
+          <span className="text-sm font-bold text-content">{item.value}</span>
         </div>
       ))}
     </div>
@@ -144,15 +144,15 @@ function ComponentSection({
   return (
     <section id={`comp-${index}`} className="scroll-mt-20">
       <div className="mb-6 flex items-center gap-4">
-        <div className="h-px flex-1 bg-gray-200 dark:bg-stone-700" />
-        <h2 className="font-display text-xl font-bold text-gray-800 dark:text-stone-200 whitespace-nowrap">
+        <div className="h-px flex-1 bg-card-border" />
+        <h2 className="font-display text-xl font-bold text-content whitespace-nowrap">
           {comp.title}
         </h2>
-        <div className="h-px flex-1 bg-gray-200 dark:bg-stone-700" />
+        <div className="h-px flex-1 bg-card-border" />
       </div>
 
       {comp.description && (
-        <p className="mb-6 italic leading-relaxed text-gray-600 dark:text-stone-400 border-l-4 border-primary-100 pl-4">
+        <p className="mb-6 border-l-4 border-brand-border pl-4 italic leading-relaxed text-content-muted">
           {comp.description}
         </p>
       )}
@@ -162,7 +162,7 @@ function ComponentSection({
       <div className="grid gap-8 lg:grid-cols-3">
         {comp.ingredients.length > 0 && (
           <div className="rounded-3xl bg-surface-dark p-6">
-            <h3 className="mb-4 font-display text-lg font-bold text-gray-900 dark:text-stone-100 underline decoration-primary-200 decoration-4 underline-offset-8">
+            <h3 className="mb-4 font-display text-lg font-bold text-content underline decoration-brand-border decoration-4 underline-offset-8">
               Ingredients
             </h3>
             <IngredientList
@@ -178,48 +178,48 @@ function ComponentSection({
 
         {(comp.prep_steps?.length ?? 0) > 0 && (
           <section className="lg:col-span-3">
-            <h3 className="mb-4 font-display text-lg font-bold text-gray-900 dark:text-stone-100 underline decoration-primary-200 decoration-4 underline-offset-8">
+            <h3 className="mb-4 font-display text-lg font-bold text-content underline decoration-brand-border decoration-4 underline-offset-8">
               Ingredient Preparation
             </h3>
             <ol className="mb-6 space-y-4">
               {comp.prep_steps!.map((inst) => (
                 <li key={inst.step} className="group flex gap-4">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-gray-100 dark:border-stone-700 bg-white dark:bg-stone-800 font-display text-sm font-bold text-gray-500 dark:text-stone-400 shadow-sm">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-card-border bg-card font-display text-sm font-bold text-content-muted shadow-sm">
                     {inst.step}
                   </span>
                   <div className="flex flex-col gap-2 pt-1">
-                    <p className="leading-relaxed text-gray-700 dark:text-stone-300">{inst.text}</p>
+                    <p className="leading-relaxed text-content-body">{inst.text}</p>
                     {inst.tip && (
-                      <div className="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/50 px-3 py-2">
+                      <div className="flex items-start gap-2 rounded-xl border border-warning-border bg-warning-surface px-3 py-2">
                         <span className="mt-0.5 text-sm leading-none">💡</span>
-                        <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-300">{inst.tip}</p>
+                        <p className="text-xs leading-relaxed text-warning">{inst.tip}</p>
                       </div>
                     )}
                   </div>
                 </li>
               ))}
             </ol>
-            <div className="mb-6 h-px bg-gray-200 dark:bg-stone-700" />
+            <div className="mb-6 h-px bg-card-border" />
           </section>
         )}
 
         {comp.instructions.length > 0 && (
           <section className={comp.ingredients.length > 0 ? 'lg:col-span-2' : 'lg:col-span-3'}>
-            <h3 className="mb-6 font-display text-lg font-bold text-gray-900 dark:text-stone-100 underline decoration-primary-200 decoration-4 underline-offset-8">
+            <h3 className="mb-6 font-display text-lg font-bold text-content underline decoration-brand-border decoration-4 underline-offset-8">
               Instructions
             </h3>
             <ol className="space-y-6">
               {comp.instructions.map((inst) => (
                 <li key={inst.step} className="group flex gap-6">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-gray-100 dark:border-stone-700 bg-white dark:bg-stone-800 font-display text-lg font-bold text-primary-600 shadow-sm transition-all group-hover:bg-primary-600 group-hover:text-white">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-card-border bg-card font-display text-lg font-bold text-brand shadow-sm transition-all group-hover:border-primary-600 group-hover:bg-primary-600 group-hover:text-on-brand">
                     {inst.step}
                   </span>
                   <div className="flex flex-col gap-3 pt-1.5">
-                    <p className="text-lg leading-relaxed text-gray-700 dark:text-stone-300">{inst.text}</p>
+                    <p className="text-lg leading-relaxed text-content-body">{inst.text}</p>
                     {inst.tip && (
-                      <div className="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/50 px-4 py-3">
+                      <div className="flex items-start gap-2 rounded-xl border border-warning-border bg-warning-surface px-4 py-3">
                         <span className="mt-0.5 text-base leading-none">💡</span>
-                        <p className="text-sm leading-relaxed text-amber-800 dark:text-amber-300">{inst.tip}</p>
+                        <p className="text-sm leading-relaxed text-warning">{inst.tip}</p>
                       </div>
                     )}
                   </div>
@@ -338,7 +338,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                   <Link key={cat} to={`/recipes/?category=${encodeURIComponent(cat)}`}>
                     <Badge
                       variant="primary"
-                      className="capitalize cursor-pointer hover:bg-primary-600 hover:text-white transition-colors"
+                      className="capitalize cursor-pointer hover:bg-primary-600 hover:text-on-brand transition-colors"
                     >
                       {cat}
                     </Badge>
@@ -353,7 +353,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                 {recipe.labels!.map((lbl) => (
                   <span
                     key={lbl}
-                    className="rounded-full bg-gray-100 dark:bg-stone-700 px-2.5 py-0.5 text-xs font-medium capitalize text-gray-500 dark:text-stone-400"
+                    className="rounded-full bg-badge-surface px-2.5 py-0.5 text-xs font-medium capitalize text-badge"
                   >
                     {lbl}
                   </span>
@@ -362,7 +362,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
             )}
 
             {/* Title & description */}
-            <h1 className="font-display text-4xl font-bold tracking-tight text-gray-900 dark:text-stone-100 md:text-5xl lg:text-6xl">
+            <h1 className="font-display text-4xl font-bold tracking-tight text-content md:text-5xl lg:text-6xl">
               {recipe.title}
             </h1>
             <div className="relative mt-6">
@@ -376,7 +376,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                   transform="scale(3) translate(-4, -4)"
                 />
               </svg>
-              <p className="italic leading-relaxed text-gray-600 dark:text-stone-400 md:text-xl pl-6 border-l-4 border-primary-100">
+              <p className="border-l-4 border-brand-border pl-6 italic leading-relaxed text-content-muted md:text-xl">
                 {recipe.description}
               </p>
             </div>
@@ -384,7 +384,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
 
           {/* Share buttons */}
           <div className="no-print flex shrink-0 flex-col items-end gap-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-stone-500">
+            <span className="text-xs font-bold uppercase tracking-widest text-content-muted">
               Share
             </span>
             <div className="flex flex-wrap justify-end gap-1.5">
@@ -392,7 +392,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               <button
                 onClick={handleFacebookShare}
                 title="Share on Facebook"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1877f2] text-white transition-all hover:opacity-85 active:scale-90"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-social-facebook text-social-facebook-content transition-all hover:opacity-85 active:scale-90"
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
@@ -403,7 +403,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               <button
                 onClick={handleTwitterShare}
                 title="Post on X"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-black text-white transition-all hover:opacity-75 active:scale-90"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-social-x text-social-x-content transition-all hover:opacity-75 active:scale-90"
               >
                 <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
@@ -414,7 +414,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               <button
                 onClick={handleWhatsAppShare}
                 title="Send on WhatsApp"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#25d366] text-white transition-all hover:opacity-85 active:scale-90"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-social-whatsapp text-social-whatsapp-content transition-all hover:opacity-85 active:scale-90"
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z" />
@@ -425,7 +425,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               <button
                 onClick={handlePinterestShare}
                 title="Pin on Pinterest"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e60023] text-white transition-all hover:opacity-85 active:scale-90"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-social-pinterest text-social-pinterest-content transition-all hover:opacity-85 active:scale-90"
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 0C5.373 0 0 5.373 0 12c0 5.084 3.163 9.426 7.627 11.174-.105-.949-.2-2.405.042-3.441.218-.937 1.407-5.965 1.407-5.965s-.359-.719-.359-1.782c0-1.668.967-2.914 2.171-2.914 1.023 0 1.518.769 1.518 1.69 0 1.029-.655 2.568-.994 3.995-.283 1.194.599 2.169 1.777 2.169 2.133 0 3.772-2.249 3.772-5.495 0-2.873-2.064-4.882-5.012-4.882-3.414 0-5.418 2.561-5.418 5.207 0 1.031.397 2.138.893 2.738a.36.36 0 01.083.345l-.333 1.36c-.053.22-.174.267-.402.161-1.499-.698-2.436-2.889-2.436-4.649 0-3.785 2.75-7.262 7.929-7.262 4.163 0 7.398 2.967 7.398 6.931 0 4.136-2.607 7.464-6.227 7.464-1.216 0-2.359-.632-2.75-1.378l-.748 2.853c-.271 1.043-1.002 2.35-1.492 3.146C9.57 23.812 10.763 24 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0z" />
@@ -436,7 +436,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               <button
                 onClick={handleRedditShare}
                 title="Share on Reddit"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#ff4500] text-white transition-all hover:opacity-85 active:scale-90"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-social-reddit text-social-reddit-content transition-all hover:opacity-85 active:scale-90"
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M12 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z" />
@@ -447,7 +447,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               <button
                 onClick={handleTelegramShare}
                 title="Share on Telegram"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#26a5e4] text-white transition-all hover:opacity-85 active:scale-90"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-social-telegram text-social-telegram-content transition-all hover:opacity-85 active:scale-90"
               >
                 <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
@@ -460,8 +460,8 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                 title="Copy link"
                 className={`flex h-8 w-8 items-center justify-center rounded-full transition-all active:scale-90 ${
                   copied
-                    ? 'bg-green-500 text-white'
-                    : 'bg-gray-200 dark:bg-stone-700 text-gray-600 dark:text-stone-300 hover:bg-gray-300 dark:hover:bg-stone-600'
+                    ? 'bg-success-fill text-success-content'
+                    : 'bg-control-hover text-content-body hover:bg-card-border'
                 }`}
               >
                 {copied ? (
@@ -496,7 +496,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                 <button
                   onClick={handleNativeShare}
                   title="More ways to share"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 dark:bg-stone-700 text-gray-600 dark:text-stone-300 transition-all hover:bg-gray-300 dark:hover:bg-stone-600 active:scale-90"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-control-hover text-content-body transition-all hover:bg-card-border active:scale-90"
                 >
                   <svg
                     className="h-3.5 w-3.5"
@@ -519,11 +519,11 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
 
         {/* About this dish */}
         {recipe.about && (
-          <div className="mt-8 rounded-3xl border-l-4 border-primary-300 dark:border-primary-800 bg-primary-50/40 dark:bg-primary-950/20 px-6 py-5">
-            <h2 className="mb-2 text-xs font-bold uppercase tracking-widest text-primary-500">
+          <div className="mt-8 rounded-3xl border border-brand-border border-l-4 bg-brand-surface px-6 py-5">
+            <h2 className="mb-2 text-xs font-bold uppercase tracking-widest text-brand">
               About this dish
             </h2>
-            <p className="italic leading-relaxed text-base text-gray-700 dark:text-stone-300">
+            <p className="text-base italic leading-relaxed text-content-body">
               {recipe.about}
             </p>
           </div>
@@ -565,14 +565,14 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setServings(Math.max(1, servings - 1))}
-                  className="no-print flex h-6 w-6 items-center justify-center rounded-full bg-white dark:bg-stone-800 text-gray-500 dark:text-stone-400 shadow-sm transition-colors hover:bg-primary-600 hover:text-white"
+                  className="no-print flex h-6 w-6 items-center justify-center rounded-full border border-card-border bg-card text-content-muted shadow-sm transition-colors hover:border-primary-600 hover:bg-primary-600 hover:text-on-brand"
                 >
                   -
                 </button>
                 <span className="min-w-[1.5rem] text-center">{servings}</span>
                 <button
                   onClick={() => setServings(servings + 1)}
-                  className="no-print flex h-6 w-6 items-center justify-center rounded-full bg-white dark:bg-stone-800 text-gray-500 dark:text-stone-400 shadow-sm transition-colors hover:bg-primary-600 hover:text-white"
+                  className="no-print flex h-6 w-6 items-center justify-center rounded-full border border-card-border bg-card text-content-muted shadow-sm transition-colors hover:border-primary-600 hover:bg-primary-600 hover:text-on-brand"
                 >
                   +
                 </button>
@@ -590,8 +590,8 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
             }
           />
           <div className="flex flex-col gap-2">
-            <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-stone-500">
-              <span className="text-primary-500/60">
+            <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-content-muted">
+              <span className="text-brand">
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
@@ -611,7 +611,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         <div className="no-print mt-6 flex flex-wrap items-center justify-center gap-3 md:justify-start">
           <button
             onClick={() => setCookingMode(true)}
-            className="inline-flex items-center gap-2 rounded-2xl bg-primary-600 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-primary-200 dark:shadow-primary-950/50 transition-all hover:bg-primary-700 hover:shadow-xl active:scale-95"
+            className="inline-flex items-center gap-2 rounded-2xl bg-primary-600 px-8 py-4 text-base font-semibold text-on-brand shadow-lg transition-all hover:bg-primary-500 hover:shadow-xl active:scale-95"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -631,7 +631,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
           </button>
           <button
             onClick={() => window.print()}
-            className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-stone-700 bg-white dark:bg-stone-800 px-6 py-4 text-base font-medium text-gray-700 dark:text-stone-300 transition-all hover:border-gray-300 dark:hover:border-stone-600 hover:shadow-md active:scale-95"
+            className="inline-flex items-center gap-2 rounded-2xl border border-control-border bg-control px-6 py-4 text-base font-medium text-content-body transition-all hover:border-brand-border hover:text-brand hover:shadow-md active:scale-95"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
@@ -647,12 +647,12 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
 
         {/* Multi-component jump nav */}
         {isMultiComponent && (
-          <nav className="no-print sticky top-16 z-30 mt-8 -mx-4 flex gap-1 overflow-x-auto border-y border-gray-100 dark:border-stone-700 bg-white/90 dark:bg-stone-800/90 backdrop-blur-sm px-4 py-2">
+          <nav className="no-print sticky top-16 z-30 mt-8 -mx-4 flex gap-1 overflow-x-auto border-y border-card-border bg-card/95 backdrop-blur-sm px-4 py-2">
             {recipe.components!.map((comp, i) => (
               <a
                 key={i}
                 href={`#comp-${i}`}
-                className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 dark:text-stone-400 transition-colors hover:bg-primary-50 dark:hover:bg-stone-700 hover:text-primary-700 dark:hover:text-primary-400"
+                className="shrink-0 rounded-lg px-3 py-1.5 text-sm font-medium text-content-muted transition-colors hover:bg-brand-surface hover:text-brand"
               >
                 {comp.title}
               </a>
@@ -664,18 +664,18 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         <div className="mt-12 grid gap-12 lg:grid-cols-3">
           <section className="rounded-3xl bg-surface-dark p-8">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="font-display text-2xl font-bold text-gray-900 dark:text-stone-100 underline decoration-primary-200 decoration-4 underline-offset-8">
+              <h2 className="font-display text-2xl font-bold text-content underline decoration-brand-border decoration-4 underline-offset-8">
                 Grocery List
               </h2>
               <div className="no-print flex items-center gap-2">
                 {/* Unit system toggle */}
-                <div className="flex overflow-hidden rounded-lg border border-gray-200 dark:border-stone-700 text-xs">
+                <div className="flex overflow-hidden rounded-lg border border-card-border text-xs">
                   <button
                     onClick={() => handleSetUnitSystem('imperial')}
                     className={`px-2 py-1 transition-colors ${
                       unitSystem === 'imperial'
-                        ? 'bg-primary-100 dark:bg-primary-900/50 font-medium text-primary-700 dark:text-primary-300'
-                        : 'text-gray-400 dark:text-stone-500 hover:text-gray-600 dark:hover:text-stone-400'
+                        ? 'bg-brand-surface font-medium text-brand'
+                        : 'text-content-muted hover:bg-control-hover hover:text-content-body'
                     }`}
                     title="Imperial (oz, cups, lb)"
                     aria-pressed={unitSystem === 'imperial'}
@@ -686,8 +686,8 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                     onClick={() => handleSetUnitSystem('metric')}
                     className={`px-2 py-1 transition-colors ${
                       unitSystem === 'metric'
-                        ? 'bg-primary-100 dark:bg-primary-900/50 font-medium text-primary-700 dark:text-primary-300'
-                        : 'text-gray-400 dark:text-stone-500 hover:text-gray-600 dark:hover:text-stone-400'
+                        ? 'bg-brand-surface font-medium text-brand'
+                        : 'text-content-muted hover:bg-control-hover hover:text-content-body'
                     }`}
                     title="Metric (g, ml)"
                     aria-pressed={unitSystem === 'metric'}
@@ -698,7 +698,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                 {checked.size > 0 && (
                   <button
                     onClick={clearGroceryList}
-                    className="text-xs font-medium text-gray-400 dark:text-stone-500 transition-colors hover:text-red-500"
+                    className="text-xs font-medium text-content-muted transition-colors hover:text-danger"
                   >
                     Clear
                   </button>
@@ -708,14 +708,14 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
 
             {/* Progress bar */}
             <div className="no-print mt-4">
-              <div className="mb-1.5 flex items-center justify-between text-xs text-gray-400 dark:text-stone-500">
+              <div className="mb-1.5 flex items-center justify-between text-xs text-content-muted">
                 <span>
                   {checked.size === totalIngredients
                     ? 'All ready to cook!'
                     : `${checked.size} of ${totalIngredients} checked`}
                 </span>
               </div>
-              <div className="h-1.5 w-full rounded-full bg-white/60 dark:bg-stone-700">
+              <div className="h-1.5 w-full rounded-full bg-card-border">
                 <div
                   className="h-full rounded-full bg-primary-500 transition-all duration-300"
                   style={{
@@ -740,23 +740,23 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
             <section className="lg:col-span-2">
               {(recipe.prep_steps?.length ?? 0) > 0 && (
                 <>
-                  <h2 className="font-display text-2xl font-bold text-gray-900 dark:text-stone-100 underline decoration-primary-200 decoration-4 underline-offset-8">
+                  <h2 className="font-display text-2xl font-bold text-content underline decoration-brand-border decoration-4 underline-offset-8">
                     Ingredient Preparation
                   </h2>
                   <ol className="mb-12 mt-8 space-y-8">
                     {recipe.prep_steps!.map((inst) => (
                       <li key={inst.step} className="group flex gap-6">
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-gray-100 dark:border-stone-700 bg-white dark:bg-stone-800 font-display text-lg font-bold text-gray-500 dark:text-stone-400 shadow-sm transition-all group-hover:bg-gray-600 group-hover:text-white">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-card-border bg-card font-display text-lg font-bold text-content-muted shadow-sm transition-all group-hover:bg-neutral group-hover:text-neutral-content">
                           {inst.step}
                         </span>
                         <div className="flex flex-col gap-3 pt-1.5">
-                          <p className="text-lg leading-relaxed text-gray-700 dark:text-stone-300">
+                          <p className="text-lg leading-relaxed text-content-body">
                             {inst.text}
                           </p>
                           {inst.tip && (
-                            <div className="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/50 px-4 py-3">
+                            <div className="flex items-start gap-2 rounded-xl border border-warning-border bg-warning-surface px-4 py-3">
                               <span className="mt-0.5 text-base leading-none">💡</span>
-                              <p className="text-sm leading-relaxed text-amber-800 dark:text-amber-300">
+                              <p className="text-sm leading-relaxed text-warning">
                                 {inst.tip}
                               </p>
                             </div>
@@ -765,27 +765,27 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
                       </li>
                     ))}
                   </ol>
-                  <div className="mb-8 h-px bg-gray-200 dark:bg-stone-700" />
+                  <div className="mb-8 h-px bg-card-border" />
                 </>
               )}
 
-              <h2 className="font-display text-2xl font-bold text-gray-900 dark:text-stone-100 underline decoration-primary-200 decoration-4 underline-offset-8">
+              <h2 className="font-display text-2xl font-bold text-content underline decoration-brand-border decoration-4 underline-offset-8">
                 Instructions
               </h2>
               <ol className="mt-8 space-y-8">
                 {recipe.instructions.map((inst) => (
                   <li key={inst.step} className="group flex gap-6">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-gray-100 dark:border-stone-700 bg-white dark:bg-stone-800 font-display text-lg font-bold text-primary-600 shadow-sm transition-all group-hover:bg-primary-600 group-hover:text-white">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-card-border bg-card font-display text-lg font-bold text-brand shadow-sm transition-all group-hover:border-primary-600 group-hover:bg-primary-600 group-hover:text-on-brand">
                       {inst.step}
                     </span>
                     <div className="flex flex-col gap-3 pt-1.5">
-                      <p className="text-lg leading-relaxed text-gray-700 dark:text-stone-300">
+                      <p className="text-lg leading-relaxed text-content-body">
                         {inst.text}
                       </p>
                       {inst.tip && (
-                        <div className="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/50 px-4 py-3">
+                        <div className="flex items-start gap-2 rounded-xl border border-warning-border bg-warning-surface px-4 py-3">
                           <span className="mt-0.5 text-base leading-none">💡</span>
-                          <p className="text-sm leading-relaxed text-amber-800 dark:text-amber-300">
+                          <p className="text-sm leading-relaxed text-warning">
                             {inst.tip}
                           </p>
                         </div>
@@ -818,19 +818,19 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
         {/* Chef's secrets */}
         {(recipe.secrets?.length ?? 0) > 0 && (
           <div className="mt-12">
-            <h2 className="mb-6 font-display text-2xl font-bold text-gray-900 dark:text-stone-100 underline decoration-primary-200 decoration-4 underline-offset-8">
+            <h2 className="mb-6 font-display text-2xl font-bold text-content underline decoration-brand-border decoration-4 underline-offset-8">
               Chef's Secrets
             </h2>
             <div className="grid gap-4 sm:grid-cols-2">
               {recipe.secrets!.map((secret, i) => (
                 <div
                   key={i}
-                  className="rounded-3xl border border-primary-100 dark:border-primary-900 bg-primary-50/40 dark:bg-primary-950/20 p-6"
+                  className="rounded-3xl border border-brand-border bg-brand-surface p-6"
                 >
-                  <h3 className="mb-2 font-display text-lg font-bold text-gray-900 dark:text-stone-100">
+                  <h3 className="mb-2 font-display text-lg font-bold text-content">
                     {secret.title}
                   </h3>
-                  <p className="text-sm leading-relaxed text-gray-600 dark:text-stone-400">
+                  <p className="text-sm leading-relaxed text-content-muted">
                     {secret.body}
                   </p>
                 </div>
@@ -885,11 +885,11 @@ function MetaItem({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-gray-400 dark:text-stone-500">
-        <span className="text-primary-500/60">{icon}</span>
+      <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-content-muted">
+        <span className="text-brand">{icon}</span>
         {label}
       </span>
-      <div className="text-lg font-bold text-gray-900 dark:text-stone-100">{value}</div>
+      <div className="text-lg font-bold text-content">{value}</div>
     </div>
   )
 }

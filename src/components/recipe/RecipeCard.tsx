@@ -16,7 +16,7 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
   return (
     <Link
       to={`/recipes/${recipe.slug}/`}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-surface-darker bg-white dark:bg-stone-800 shadow-sm transition-all hover:-translate-y-2 hover:shadow-xl hover:shadow-primary-100/50 dark:hover:shadow-primary-950/50"
+      className="group flex flex-col overflow-hidden rounded-2xl border border-card-border bg-card shadow-sm transition-all hover:-translate-y-2 hover:border-brand-border hover:shadow-xl"
     >
       {/* Image */}
       <div className="aspect-[4/3] overflow-hidden bg-surface-dark">
@@ -32,21 +32,21 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
 
       {/* Content */}
       <div className="flex flex-1 flex-col gap-3 p-5">
-        <h3 className="font-display text-xl font-bold text-gray-900 dark:text-stone-100 line-clamp-2 leading-tight transition-colors group-hover:text-primary-600">
+        <h3 className="font-display text-xl font-bold text-content line-clamp-2 leading-tight transition-colors group-hover:text-brand">
           {recipe.title}
         </h3>
-        <p className="text-sm leading-relaxed text-gray-500 dark:text-stone-400 line-clamp-2 flex-1">{recipe.description}</p>
+        <p className="text-sm leading-relaxed text-content-muted line-clamp-2 flex-1">{recipe.description}</p>
 
         {/* Meta row */}
-        <div className="mt-2 flex items-center gap-4 text-xs font-bold uppercase tracking-wider text-gray-400 dark:text-stone-500">
+        <div className="mt-2 flex items-center gap-4 text-xs font-bold uppercase tracking-wider text-content-muted">
           <span className="flex items-center gap-1.5">
-            <svg className="h-4 w-4 text-primary-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             {totalMins} min
           </span>
           <span className="flex items-center gap-1.5">
-            <svg className="h-4 w-4 text-primary-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0" />
             </svg>
             {recipe.servings}
@@ -65,12 +65,12 @@ export function RecipeCard({ recipe }: RecipeCardProps) {
         {(recipe.labels?.length ?? 0) > 0 && (
           <div className="flex flex-wrap gap-1.5 pt-1">
             {recipe.labels!.slice(0, 3).map((label) => (
-              <span key={label} className="rounded-full bg-gray-100 dark:bg-stone-700 px-2 py-0.5 text-[10px] text-gray-500 dark:text-stone-400 capitalize">
+              <span key={label} className="rounded-full bg-badge-surface px-2 py-0.5 text-[10px] text-badge capitalize">
                 {label}
               </span>
             ))}
             {recipe.labels!.length > 3 && (
-              <span className="rounded-full bg-gray-100 dark:bg-stone-700 px-2 py-0.5 text-[10px] text-gray-400 dark:text-stone-500">
+              <span className="rounded-full bg-badge-surface px-2 py-0.5 text-[10px] text-badge">
                 +{recipe.labels!.length - 3}
               </span>
             )}
