@@ -246,16 +246,14 @@ Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild
 > (`backend/app/config.py`) — currently the three GCS bucket names, the
 > WorkOS domain, the MCP resource URL, and a few others — crashes at import
 > time before it ever binds a port. This is the safe failure mode, not a
-> dangerous one: `cloudbuild.yaml` deploys the new revision with
-> `--no-traffic --tag=candidate-$SHORT_SHA` first, so Cloud Run waits for it
-> to pass its startup probe before that tagged URL responds at all, and
-> `backend/scripts/smoke_test_deploy.py` then has to pass against that URL
-> before `update-traffic` ever runs. A revision that crash-loops here never
-> goes live — the previous, working revision keeps serving 100% of traffic
-> throughout, and **no manual rollback step is needed.** Check Cloud Run's
-> revision list and the crash-looping revision's logs for the `RuntimeError`
-> message, fix the ordering (apply Terraform, then re-push or re-deploy the
-> same image), and the next revision will start and promote normally.
+> dangerous one: `cloudbuild.yaml` runs plain `gcloud run deploy` with no
+> `--no-traffic` flag, so Cloud Run waits for the new revision to pass its
+> startup probe before routing any traffic to it. A revision that crash-loops
+> here never goes live — the previous, working revision keeps serving, and
+> **no manual rollback step is needed.** Check Cloud Run's revision list and
+> the crash-looping revision's logs for the `RuntimeError` message, fix the
+> ordering (apply Terraform, then re-push or re-deploy the same image), and
+> the next revision will start normally.
 >
 > This check exists because earlier code silently fell back to a fake
 > "upload succeeded" placeholder response whenever a bucket was unconfigured
