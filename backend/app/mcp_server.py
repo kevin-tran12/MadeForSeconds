@@ -25,6 +25,7 @@ from uuid import uuid4
 from google.cloud.firestore_v1.base_query import FieldFilter
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings as FastMCPSettings
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import ValidationError
 
@@ -42,6 +43,12 @@ from .services import recipes as recipe_service
 from .services import uploads
 
 logger = logging.getLogger(__name__)
+
+# pydantic-settings 2.15 detects FastMCP's generic lifespan annotation as an
+# unresolved forward reference. Rebuild it before FastMCP constructs Settings
+# so environment-backed settings remain fully resolved and warning-free. MCP
+# 2.x removes this API entirely, so this can go with the planned 2.x migration.
+FastMCPSettings.model_rebuild()
 
 _INSTRUCTIONS = """Manage MadeForSeconds recipes and expenses.
 
