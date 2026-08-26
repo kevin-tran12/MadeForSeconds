@@ -2,7 +2,7 @@
 # release must never be able to turn the build red on its own. Raise a bound
 # only alongside a run of the test suite against the new major.
 fastapi>=0.116.0,<1.0.0
-uvicorn[standard]==0.52.3
+uvicorn[standard]==0.52.4
 google-cloud-firestore==2.28.1
 google-cloud-storage==3.13.1
 google-cloud-logging==3.16.2
