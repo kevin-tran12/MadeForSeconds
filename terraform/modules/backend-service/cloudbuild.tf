@@ -3,12 +3,15 @@
 #
 # The trigger below runs as mfs-deploy (modules/security/service_accounts.tf),
 # not mfs-backend — mfs-backend is the Cloud Run runtime identity, and it holds
-# Firestore read/write, the receipts bucket's objectAdmin, every
-# secretAccessor grant, and signBlob. A compromised dependency or a merged
-# build-script change had no business inheriting any of that just to push an
-# image and deploy it, which mfs-deploy's narrower grants (artifactregistry.
-# writer, run.developer, its own logWriter, and actAs on mfs-backend) are
-# scoped to.
+# Firestore read/write, a get+create-only role on the receipts bucket
+# (mfsReceiptsUploader — narrowed from objectAdmin in Epic 2, story 2.2),
+# every secretAccessor grant, and signBlob. A compromised dependency or a
+# merged build-script change had no business inheriting any of that just to
+# push an image and deploy it, which mfs-deploy's narrower grants are scoped
+# to: artifactregistry.writer on the mfs repository specifically, a
+# resource-scoped custom role (mfsCloudRunDeployer, see deploy_iam.tf) on
+# mfs-backend's own Cloud Run service, its own logWriter, and actAs on
+# mfs-backend.
 #
 # mfs-backend's own cloudbuild_artifact_registry / cloudbuild_run_developer
 # grants used to live here too, kept deliberately in place until a real push

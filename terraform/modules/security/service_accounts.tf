@@ -82,10 +82,13 @@ resource "google_secret_manager_secret_iam_member" "backend_instagram_token_adde
 # The Cloud Build trigger (modules/backend-service/cloudbuild.tf) now runs as
 # this identity instead of mfs-backend. mfs-backend carried build permissions
 # it had no business holding outside a build: a compromised dependency or a
-# merged build-script change inherited Firestore read/write, the receipts
-# bucket's objectAdmin, every secretAccessor grant above, and signBlob — none
-# of which a build step that only needs to push an image and deploy it should
-# be able to touch.
+# merged build-script change inherited Firestore read/write, a role on the
+# receipts bucket, every secretAccessor grant above, and signBlob — none of
+# which a build step that only needs to push an image and deploy it should be
+# able to touch. (The receipts-bucket role itself was later narrowed from
+# objectAdmin to get+create-only, mfsReceiptsUploader — Epic 2, story 2.2,
+# see modules/storage/buckets.tf — but the isolation argument here doesn't
+# depend on which role it is, only on mfs-deploy needing none of it.)
 #
 # mfs-backend's matching build-time grants and its actAs-on-self binding are
 # gone as of Epic 2 (2.1) — `gcloud builds list` showed 8 consecutive SUCCESS
