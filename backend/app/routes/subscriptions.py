@@ -24,8 +24,14 @@ stripe.api_key = settings.stripe_secret_key
 _STALE_RESERVATION_SECONDS = 120
 
 # Retention for processed_events docs, stamped as the `ttl` field on write.
-# Must stay comfortably past Stripe's 24h idempotency-key minimum. The actual
-# deletion is done by the Firestore TTL policy in
+# Must outlive any window in which Stripe could redeliver or replay this
+# event, or a replay after this doc expires would look like a brand-new
+# event and get double-processed. Automatic retries stop after 3 days, but
+# manual replay (dashboard/CLI, via the List Events API) is possible for any
+# event Stripe still has on file — and "Stripe only returns events created
+# in the last 30 days" (https://docs.stripe.com/webhooks/process-undelivered-events),
+# which is the real ceiling this needs to match, not the 24h idempotency-key
+# minimum. The actual deletion is done by the Firestore TTL policy in
 # terraform/modules/storage/firestore.tf (google_firestore_field.processed_events_ttl) —
 # keep the two in sync.
 _PROCESSED_EVENTS_TTL_DAYS = 30

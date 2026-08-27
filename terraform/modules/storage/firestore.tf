@@ -114,11 +114,13 @@ resource "google_firestore_index" "recipes_slug_published" {
 # ─── Firestore TTL Policies ───────────────────────────────────────────────────
 
 # Stripe webhook idempotency records (backend/app/routes/subscriptions.py) — one
-# doc per event ID, kept only long enough to dedupe retries. Stripe's own
-# guidance is a 24h minimum idempotency-key window; the backend stamps a `ttl`
-# timestamp 30 days out on write, comfortably past that, and this policy tells
-# Firestore to delete the doc once its `ttl` has passed. Without this the
-# collection grows unbounded against the 1 GiB free-tier ceiling.
+# doc per event ID, kept only long enough to dedupe a replay. The `ttl` field
+# (stamped by the backend, 30 days out) must outlive any window Stripe could
+# redeliver or replay the event — see the constant's own comment in
+# subscriptions.py for why 30 days is the real ceiling, not the 24h
+# idempotency-key minimum. This policy tells Firestore to delete the doc once
+# its `ttl` has passed. Without this the collection grows unbounded against
+# the 1 GiB free-tier ceiling.
 #
 # COST: unlike ordinary deletes (20K/day free), every TTL-triggered delete is
 # billed at $0.01 per 100K documents with no free quota at all — see
@@ -126,6 +128,10 @@ resource "google_firestore_index" "recipes_slug_published" {
 # volume that's a fraction of a cent per year; accepted on that basis, same
 # as the weekly backup schedule above. Billing is already enabled on this
 # project (see modules/cost-controls/billing.tf), so nothing new to provision.
+#
+# index_config {} (empty) disables Firestore's automatic single-field index
+# on `ttl` — nothing ever queries by it, so the index would just be dead
+# storage/write overhead.
 resource "google_firestore_field" "processed_events_ttl" {
   project    = var.gcp_project_id
   database   = google_firestore_database.default.name
@@ -133,6 +139,7 @@ resource "google_firestore_field" "processed_events_ttl" {
   field      = "ttl"
 
   ttl_config {}
+  index_config {}
 
   depends_on = [google_firestore_database.default]
 }
