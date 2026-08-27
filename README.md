@@ -245,8 +245,14 @@ Optional (needed for full local feature testing):
 
 **3. Start all services**
 ```bash
-docker compose up
+docker compose --env-file .env.local up
 ```
+`--env-file .env.local` is required, not optional — Compose's own variable interpolation (the
+`${STRIPE_SECRET_KEY}`-style references in `docker-compose.yml`'s `backend` service) only reads a
+file literally named `.env` by default. Without the flag, `STRIPE_SECRET_KEY`,
+`STRIPE_WEBHOOK_SECRET`, and `SUBSCRIBER_JWT_SECRET` silently resolve to their empty/default
+fallbacks in the backend container even when they're set in `.env.local` — the frontend container
+picks them up fine either way via its own `env_file:` directive, which masked this for a while.
 
 | Service | URL | Purpose |
 |---------|-----|---------|
@@ -283,10 +289,13 @@ npm run test:e2e:ui                     # Playwright with interactive UI
 ### Local Stripe testing
 
 ```bash
-brew install stripe/stripe-cli/stripe
+brew install stripe/stripe-cli/stripe   # macOS
+winget install --id Stripe.StripeCli -e # Windows
 stripe login
 stripe listen --forward-to localhost:8000/api/subscribe/webhook
-# Copy the webhook signing secret it prints → set as STRIPE_WEBHOOK_SECRET in .env.local
+# Copy the webhook signing secret it prints → set as STRIPE_WEBHOOK_SECRET in .env.local,
+# and set STRIPE_SECRET_KEY there too (a real sk_test_... key from the Stripe dashboard).
+# Restart the backend afterward: docker compose restart backend
 ```
 
 ---

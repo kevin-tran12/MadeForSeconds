@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { subscriberApi } from '../lib/api'
 
@@ -13,11 +13,40 @@ export function SupportPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Checked/set synchronously so two rapid clicks can't both start a
+  // checkout before React re-renders with loading=true and disables the
+  // button — setLoading alone can't close that race.
+  const submittingRef = useRef(false)
+
   const amount = isCustom ? parseInt(custom) || 0 : selected
   const valid = amount >= 1 && amount <= 500
 
+  // Tied to the actual checkout parameters, not to request completion — a
+  // retry after an ambiguous failure (e.g. a network error where we don't
+  // know if Stripe already created the session) must reuse the same key so
+  // Stripe dedupes it, not mint a new one. It only changes when the user
+  // changes what they're buying.
+  //
+  // Computed during render into a ref rather than useMemo: React documents
+  // useMemo as a performance optimization it may discard the cache for, not
+  // a durability guarantee — this value needs to actually persist across
+  // renders. This is the React-docs pattern for "reset a value when a
+  // dependency changes" without an effect.
+  const idempotencyKeyRef = useRef<string>('')
+  const prevDepsRef = useRef<{ amount: number; oneTime: boolean } | undefined>(undefined)
+  if (
+    !idempotencyKeyRef.current ||
+    prevDepsRef.current?.amount !== amount ||
+    prevDepsRef.current?.oneTime !== oneTime
+  ) {
+    idempotencyKeyRef.current = crypto.randomUUID()
+    prevDepsRef.current = { amount, oneTime }
+  }
+
   async function doCheckout() {
     if (!valid) return
+    if (submittingRef.current) return
+    submittingRef.current = true
     setLoading(true)
     setError(null)
     try {
@@ -25,12 +54,14 @@ export function SupportPage() {
         amount * 100,
         `${window.location.origin}/support/success?session_id={CHECKOUT_SESSION_ID}`,
         window.location.href,
-        oneTime
+        oneTime,
+        idempotencyKeyRef.current
       )
       window.location.href = checkout_url
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
+      submittingRef.current = false
       setLoading(false)
       setShowConfirm(false)
     }

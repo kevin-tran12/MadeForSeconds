@@ -19,6 +19,8 @@ def _settings(**over):
         mcp_resource_url="https://mfs-backend.example.com/mcp",
         usage_report_audience="https://mfs-backend.example.com/api/internal/usage/weekly-report",
         alert_email="owner@example.com",
+        stripe_secret_key="sk_live_" + "s" * 24,
+        stripe_webhook_secret="whsec_" + "s" * 24,
     )
     base.update(over)
     return Settings(**base)
@@ -69,6 +71,14 @@ class TestValidateProductionSettings:
     def test_rejects_missing_resource_url(self):
         with pytest.raises(RuntimeError, match="MCP_RESOURCE_URL"):
             validate_production_settings(_settings(mcp_resource_url=""))
+
+    def test_rejects_missing_stripe_secret_key(self):
+        with pytest.raises(RuntimeError, match="STRIPE_SECRET_KEY"):
+            validate_production_settings(_settings(stripe_secret_key=""))
+
+    def test_rejects_missing_stripe_webhook_secret(self):
+        with pytest.raises(RuntimeError, match="STRIPE_WEBHOOK_SECRET"):
+            validate_production_settings(_settings(stripe_webhook_secret=""))
 
 
 # ── workos_issuer_url normalization ───────────────────────────────────────────
