@@ -395,6 +395,12 @@ gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
   budget/uptime/error alerts above. The report is aggregate-only: no IP
   addresses or per-request rows ever appear in the email or get stored
   anywhere new — they're only counted in memory while the report is built.
+- **Stripe webhook idempotency**: `processed_events` documents carry a `ttl`
+  timestamp (30 days from creation) and a matching Firestore TTL policy
+  (`google_firestore_field.processed_events_ttl`) deletes them automatically —
+  comfortably past Stripe's 24h minimum idempotency-key window, so retries
+  stay covered while the collection doesn't grow unbounded against the 1 GiB
+  free-tier ceiling.
 
 ### Receipt & financial-record recovery
 

@@ -110,3 +110,22 @@ resource "google_firestore_index" "recipes_slug_published" {
   query_scope = "COLLECTION"
   depends_on  = [google_firestore_database.default]
 }
+
+# ─── Firestore TTL Policies ───────────────────────────────────────────────────
+
+# Stripe webhook idempotency records (backend/app/routes/subscriptions.py) — one
+# doc per event ID, kept only long enough to dedupe retries. Stripe's own
+# guidance is a 24h minimum idempotency-key window; the backend stamps a `ttl`
+# timestamp 30 days out on write, comfortably past that, and this policy tells
+# Firestore to delete the doc once its `ttl` has passed. Without this the
+# collection grows unbounded against the 1 GiB free-tier ceiling.
+resource "google_firestore_field" "processed_events_ttl" {
+  project    = var.gcp_project_id
+  database   = google_firestore_database.default.name
+  collection = "processed_events"
+  field      = "ttl"
+
+  ttl_config {}
+
+  depends_on = [google_firestore_database.default]
+}

@@ -494,6 +494,20 @@ def test_process_event_logic_absent_reservation_processes_and_completes():
     assert txn.update_calls[0][1]["status"] == "completed"
 
 
+def test_process_event_logic_stamps_ttl_on_reservation():
+    from app.routes.subscriptions import _process_event_logic, _PROCESSED_EVENTS_TTL_DAYS
+    txn = FakeTransaction()
+    ref = FakeRef(FakeSnapshot(exists=False))
+    db = FakeDb(subscribers=FakeCollection())
+    data = {
+        "mode": "subscription", "customer": "cus_1", "subscription": "sub_1",
+        "customer_details": {"email": "a@b.com"}, "amount_total": 1000,
+    }
+    _process_event_logic(txn, ref, db, "checkout.session.completed", data, _NOW)
+    reservation_payload = txn.set_calls[0][1]
+    assert reservation_payload["ttl"] == _NOW + timedelta(days=_PROCESSED_EVENTS_TTL_DAYS)
+
+
 def test_process_event_logic_completed_reservation_skips_without_mutation():
     from app.routes.subscriptions import _process_event_logic
     txn = FakeTransaction()
