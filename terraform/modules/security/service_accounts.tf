@@ -97,19 +97,13 @@ resource "google_service_account" "deploy" {
   display_name = "MadeForSeconds Cloud Build Deploy"
 }
 
-# Push the image Cloud Build builds.
-resource "google_project_iam_member" "deploy_artifact_registry" {
-  project = var.gcp_project_id
-  role    = "roles/artifactregistry.writer"
-  member  = "serviceAccount:${google_service_account.deploy.email}"
-}
-
-# Deploy the pushed image to Cloud Run.
-resource "google_project_iam_member" "deploy_run_developer" {
-  project = var.gcp_project_id
-  role    = "roles/run.developer"
-  member  = "serviceAccount:${google_service_account.deploy.email}"
-}
+# Artifact Registry push access and Cloud Run deploy access both live in
+# modules/backend-service/deploy_iam.tf instead of here (Epic 2, story 2.2) —
+# resource-scoped to the mfs repo and mfs-backend's own Cloud Run service via
+# a custom role, not project-wide roles/artifactregistry.writer /
+# roles/run.developer as before. That module owns both resources, so the
+# bindings live with what they grant on, per this repo's IAM convention;
+# security stays responsible for creating the identity and exposing it.
 
 # A build-provided service account must write its own build logs — cloudbuild.yaml
 # sets options.logging = CLOUD_LOGGING_ONLY, which requires this on any

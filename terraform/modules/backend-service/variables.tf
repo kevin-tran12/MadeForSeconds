@@ -89,6 +89,11 @@ variable "deploy_sa_id" {
   type        = string
 }
 
+variable "deploy_sa_email" {
+  description = "Deploy SA's email — the member for deploy_iam.tf's resource-scoped Cloud Run and Artifact Registry bindings"
+  type        = string
+}
+
 # There are deliberately no redis_url / stripe_secret_key / stripe_webhook_secret
 # / subscriber_jwt_secret / resend_api_key variables here. They used to be passed
 # in purely to gate the dynamic env blocks, which meant this module took the same
