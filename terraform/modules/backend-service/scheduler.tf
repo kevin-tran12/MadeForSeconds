@@ -67,7 +67,8 @@ resource "google_cloud_scheduler_job" "weekly_usage_report" {
   time_zone   = "Etc/UTC"
 
   retry_config {
-    retry_count = 3
+    retry_count          = 3
+    min_backoff_duration = "60s"
   }
 
   http_target {
