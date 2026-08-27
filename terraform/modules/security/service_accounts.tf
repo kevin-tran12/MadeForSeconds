@@ -44,22 +44,6 @@ resource "google_secret_manager_secret_iam_member" "backend_secret_access" {
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
-# Dead as of the Cloud Build deploy identity below: this existed so Cloud
-# Build, then running as mfs-backend, could deploy Cloud Run services that
-# also run as mfs-backend — actAs on itself. The trigger now runs as
-# mfs-deploy instead, which holds the same actAs grant on mfs-backend
-# (deploy_act_as_backend below) — this one has no remaining consumer. Left in
-# place for the same reason cloudbuild.tf's matching grants are: removing it
-# now would make this apply able to break the deploy pipeline with no live run
-# in this environment to test it against. Removed together with those in the
-# follow-up PR, once a real push to main is observed succeeding under
-# mfs-deploy.
-resource "google_service_account_iam_member" "backend_act_as_self" {
-  service_account_id = google_service_account.backend.name
-  role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.backend.email}"
-}
-
 # Allow the backend to sign GCS URLs via the IAM signBlob API. Cloud Run
 # metadata credentials have no private key, so generate_signed_url must call
 # iamcredentials.signBlob as the SA itself.
@@ -103,9 +87,10 @@ resource "google_secret_manager_secret_iam_member" "backend_instagram_token_adde
 # of which a build step that only needs to push an image and deploy it should
 # be able to touch.
 #
-# mfs-backend's matching build-time grants stay in place for now — see
-# cloudbuild.tf for why removing them is a separate, follow-up change rather
-# than part of this one.
+# mfs-backend's matching build-time grants and its actAs-on-self binding are
+# gone as of Epic 2 (2.1) — `gcloud builds list` showed 8 consecutive SUCCESS
+# runs under this trigger as mfs-deploy before they were removed, confirming
+# nothing outside a build ever depended on mfs-backend holding them.
 resource "google_service_account" "deploy" {
   project      = var.gcp_project_id
   account_id   = "mfs-deploy"
@@ -136,9 +121,9 @@ resource "google_project_iam_member" "deploy_logging" {
 }
 
 # actAs: deploying a Cloud Run revision that runs as mfs-backend requires the
-# deployer to be allowed to act as that identity — the same requirement
-# backend_act_as_self grants mfs-backend on itself today, moved to the
-# identity that will actually need it once the cutover lands.
+# deployer to be allowed to act as that identity. mfs-backend no longer holds
+# this grant on itself (removed alongside its other build-time permissions in
+# Epic 2, story 2.1) — mfs-deploy is the only identity that needs it now.
 resource "google_service_account_iam_member" "deploy_act_as_backend" {
   service_account_id = google_service_account.backend.name
   role               = "roles/iam.serviceAccountUser"
