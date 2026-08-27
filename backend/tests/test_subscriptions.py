@@ -276,6 +276,26 @@ class FakeDb:
 _NOW = datetime.now(timezone.utc)
 
 
+class _FakeStripeObject:
+    """Mimics stripe.StripeObject well enough to catch what a plain-dict
+    mock can't: __getitem__ and __contains__ work, but .get() raises
+    AttributeError, same as the real object stripe.Webhook.construct_event
+    returns in production. Recursively wraps nested dicts so
+    event["data"]["object"] behaves the same way too."""
+
+    def __init__(self, data: dict):
+        self._data = {k: _FakeStripeObject(v) if isinstance(v, dict) else v for k, v in data.items()}
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __contains__(self, key):
+        return key in self._data
+
+    def to_dict(self):
+        return {k: v.to_dict() if isinstance(v, _FakeStripeObject) else v for k, v in self._data.items()}
+
+
 def _subscription_checkout_event(event_id="evt_1", email="test@example.com", amount_total=1000):
     return {
         "id": event_id,
@@ -595,6 +615,24 @@ def test_webhook_process_event_exception_alerts_and_raises(client, mock_db, mock
         with pytest.raises(RuntimeError):
             client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
         mock_alert.assert_called_once()
+
+
+def test_webhook_handles_real_stripe_event_object_not_just_a_dict(client, mock_db, mock_process_event):
+    """Regression test for a bug live-QA caught: every other webhook test in
+    this file mocks construct_event to return a plain dict, but the real
+    stripe.Webhook.construct_event returns a typed stripe.Event that supports
+    __getitem__/__contains__, not .get(). Only this test's mock reproduces
+    that distinction, exercising the hasattr(event, "to_dict") conversion in
+    stripe_webhook()."""
+    mock_process_event.return_value = "processed"
+    with (
+        patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct,
+        patch("app.routes.subscriptions._alert") as mock_alert,
+    ):
+        mock_construct.return_value = _FakeStripeObject(_subscription_checkout_event())
+        response = client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
+        assert response.status_code == 200
+        mock_alert.assert_not_called()
 
 
 # ── Rate limiting on subscribe endpoints ─────────────────────────────────────

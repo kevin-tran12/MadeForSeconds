@@ -432,6 +432,15 @@ async def stripe_webhook(request: Request):
     except stripe.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
+    # construct_event returns a typed stripe.Event in production — it supports
+    # __getitem__ and __contains__ (used below and throughout
+    # _apply_*/_read_existing_doc) but not dict methods like .get(), which
+    # every one of those functions relies on. Converting once here, at the
+    # boundary, keeps the rest of the file's dict-shaped type hints accurate.
+    # Test fixtures mock construct_event to return a plain dict directly —
+    # hasattr guards against calling .to_dict() on something that's already one.
+    if hasattr(event, "to_dict"):
+        event = event.to_dict()
     event_id = event.get("id", "")
     event_type = event["type"]
     data = event["data"]["object"]
