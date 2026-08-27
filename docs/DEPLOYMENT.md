@@ -268,28 +268,46 @@ Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild
 > images bucket, or their IAM.** Unit tests mock every GCS call; they prove
 > the logic is correct but cannot catch a wrong deployed IAM grant, a
 > mismatched signed-URL header, an unexpected bucket policy, or promotion
-> behaving differently against real GCS than a mock. This is a manual gate,
-> not a CI step — it needs real ADC with write access to the target
-> project's Firestore and buckets, and it creates and deletes a disposable
-> recipe using an isolated UUID-prefixed object name, so it should not run
-> unattended against production on every push.
+> behaving differently against real GCS than a mock. This is a manual,
+> operator-only gate, not a CI step — it needs real credentials with write
+> access to the target project's Firestore and buckets, and it creates and
+> deletes disposable recipes using isolated UUID-prefixed object names, so it
+> should not run unattended against production on every push.
 >
 > ```bash
-> gcloud auth application-default login
+> gcloud auth application-default login \
+>     --impersonate-service-account=<backend-sa-email>
 > cd backend
-> python scripts/smoke_test_image_pipeline.py --project made-for-seconds
+> python scripts/smoke_test_image_pipeline.py \
+>     --project made-for-seconds \
+>     --backend-url "$(terraform -chdir=../terraform output -raw cloud_run_url)"
 > ```
 >
-> It requests a real signed upload URL, PUTs a GPS-bearing JPEG to staging,
-> confirms staging is not publicly readable, attaches it through the real
-> `create_recipe()` (which is what actually triggers promotion), confirms the
-> promoted object is metadata-stripped with the immutable cache header,
-> confirms Firestore holds the promoted URL, confirms the staged copy was
-> deleted, and confirms a non-image payload is rejected without leaving a
-> Firestore document behind. It cleans up the disposable recipe and any
-> objects it created whether it passes or fails. **Treat a failure as
+> Impersonating the backend service account — not the operator's own,
+> typically broader, ADC — means the script's GCS/Firestore calls run under
+> the same IAM the deployed revision actually has. This needs
+> `roles/iam.serviceAccountTokenCreator` on the backend SA, granted to
+> `var.state_admin_email` by `backend_operator_impersonation` in
+> `terraform/modules/security/service_accounts.tf`.
+>
+> It first confirms the deployed revision is actually healthy
+> (`GET /api/health`), then requests a real signed upload URL, PUTs a
+> GPS-bearing JPEG to staging, confirms staging is not publicly readable,
+> attaches it through the real `create_recipe()` (which is what actually
+> triggers promotion), confirms the promoted object is metadata-stripped with
+> the immutable cache header, confirms Firestore holds the promoted URL,
+> confirms the staged copy was deleted, and confirms a non-image payload is
+> rejected without leaving a Firestore document behind. It cleans up every
+> object it could have created, in both buckets, whether it passes or fails
+> at any step, and reports anything it could not remove. **Treat a failure as
 > blocking** — do not let normal traffic depend on a revision or apply this
 > hasn't passed against.
+>
+> **What this does not prove**: it calls application code in-process, not
+> through the deployed HTTP surface. It does not verify that a real MCP
+> client can authenticate through `/mcp` (interactive WorkOS OAuth) or that
+> the admin UI can authenticate through `/api/admin/*` (Firebase ID token) —
+> neither has a non-interactive, scriptable auth path today.
 
 ### What requires what kind of deploy?
 

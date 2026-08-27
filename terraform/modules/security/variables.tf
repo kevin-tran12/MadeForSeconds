@@ -10,6 +10,11 @@ variable "admin_emails" {
   type        = string
 }
 
+variable "state_admin_email" {
+  description = "Google account granted objectAdmin on the Terraform state bucket — the human who runs apply and operational scripts (e.g. the image-pipeline smoke test)"
+  type        = string
+}
+
 variable "redis_url" {
   description = "Redis connection URL — the secret is only created when this is non-empty"
   type        = string
