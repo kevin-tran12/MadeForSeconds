@@ -119,6 +119,13 @@ resource "google_firestore_index" "recipes_slug_published" {
 # timestamp 30 days out on write, comfortably past that, and this policy tells
 # Firestore to delete the doc once its `ttl` has passed. Without this the
 # collection grows unbounded against the 1 GiB free-tier ceiling.
+#
+# COST: unlike ordinary deletes (20K/day free), every TTL-triggered delete is
+# billed at $0.01 per 100K documents with no free quota at all — see
+# https://cloud.google.com/firestore/pricing. At this project's webhook
+# volume that's a fraction of a cent per year; accepted on that basis, same
+# as the weekly backup schedule above. Billing is already enabled on this
+# project (see modules/cost-controls/billing.tf), so nothing new to provision.
 resource "google_firestore_field" "processed_events_ttl" {
   project    = var.gcp_project_id
   database   = google_firestore_database.default.name

@@ -400,7 +400,10 @@ gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
   (`google_firestore_field.processed_events_ttl`) deletes them automatically —
   comfortably past Stripe's 24h minimum idempotency-key window, so retries
   stay covered while the collection doesn't grow unbounded against the 1 GiB
-  free-tier ceiling.
+  free-tier ceiling. TTL-triggered deletes aren't covered by Firestore's free
+  delete quota (unlike manual deletes) and are billed at $0.01 per 100K
+  documents — negligible at this project's webhook volume, but a real,
+  deliberately accepted cost rather than a free-tier feature.
 
 ### Receipt & financial-record recovery
 
