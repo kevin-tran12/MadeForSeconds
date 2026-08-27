@@ -25,6 +25,7 @@ from uuid import uuid4
 from google.cloud.firestore_v1.base_query import FieldFilter
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings as FastMCPSettings
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import ValidationError
 
@@ -42,6 +43,12 @@ from .services import recipes as recipe_service
 from .services import uploads
 
 logger = logging.getLogger(__name__)
+
+# pydantic-settings 2.15 detects FastMCP's generic lifespan annotation as an
+# unresolved forward reference. Rebuild it before FastMCP constructs Settings
+# so environment-backed settings remain fully resolved and warning-free. MCP
+# 2.x removes this API entirely, so this can go with the planned 2.x migration.
+FastMCPSettings.model_rebuild()
 
 _INSTRUCTIONS = """Manage MadeForSeconds recipes and expenses.
 
@@ -369,7 +376,7 @@ def update_recipe(
 
     body = RecipeUpdate.model_validate(updates)
     recipe = recipe_service.update_recipe(get_db(), recipe_id, body, source="mcp")
-    logger.info("MCP update_recipe: %s (%s) fields=%s", recipe.title, recipe.id, sorted(updates))
+    logger.info("MCP update_recipe: %s (%s) field_count=%d", recipe.title, recipe.id, len(updates))
     return {
         "id": recipe.id,
         "slug": recipe.slug,
@@ -412,7 +419,10 @@ def unpublish_recipe(recipe_id: str) -> dict:
 @mcp.tool()
 @_tool_errors
 def delete_recipe(recipe_id: str, confirm_title: str) -> dict:
-    """Delete a DRAFT recipe and its stored image/receipts.
+    """Delete a DRAFT recipe and its stored image.
+
+    Any attached receipts are kept — they are expense records under seven-year
+    retention, so deleting the recipe unlinks them rather than destroying them.
 
     Published recipes must be unpublished first. confirm_title must exactly
     match the recipe's title — fetch it with get_recipe if unsure.
@@ -429,7 +439,7 @@ def delete_recipe(recipe_id: str, confirm_title: str) -> dict:
             "expected_title": actual_title,
         }
 
-    recipe_service.delete_recipe(db, recipe_id, require_draft=True)
+    recipe_service.delete_recipe(db, recipe_id, source="mcp", require_draft=True)
     logger.info("MCP delete_recipe: %s (%s)", actual_title, recipe_id)
     return {"deleted": True, "id": recipe_id, "title": actual_title}
 
@@ -442,8 +452,9 @@ def delete_recipe(recipe_id: str, confirm_title: str) -> dict:
 def request_image_upload(filename: str, content_type: str, kind: str = "recipe_image") -> dict:
     """Get a short-lived signed PUT URL to upload a file directly to storage.
 
-    kind="recipe_image" (JPEG/PNG/WebP → public images bucket) or
-    kind="receipt" (also HEIC/PDF → private receipts bucket).
+    kind="recipe_image" (JPEG/PNG/WebP; sanitized and made public once attached
+    via update_recipe) or kind="receipt" (also HEIC/PDF → private receipts
+    bucket).
 
     Upload the file bytes with an HTTP PUT to upload_url, sending exactly the
     required_headers (a ready-to-run curl_example is included). Then use
@@ -451,10 +462,22 @@ def request_image_upload(filename: str, content_type: str, kind: str = "recipe_i
     to create_expense(receipt_url=...) for receipts. Max 10MB; the URL
     expires in 15 minutes.
     """
+    # recipe_image: the signed PUT targets the private staging bucket — the
+    # backend has no visibility into these bytes until they're attached, so
+    # they must never land directly in the public bucket. upload_bucket and
+    # public_bucket deliberately stay separate variables here: final_url must
+    # keep pointing at the public bucket (it's what gets saved as the
+    # recipe's image_url and what sanitize_recipe_image matches against),
+    # while the signed URL itself must point at staging. Collapsing these
+    # into one variable would silently break both.
     if kind == "recipe_image":
-        allowed, bucket = uploads.ALLOWED_IMAGE_TYPES, settings.gcs_bucket_name
+        allowed = uploads.ALLOWED_IMAGE_TYPES
+        upload_bucket = settings.gcs_staging_bucket_name
+        public_bucket = settings.gcs_bucket_name
     elif kind == "receipt":
-        allowed, bucket = uploads.ALLOWED_RECEIPT_TYPES, settings.gcs_receipts_bucket_name
+        allowed = uploads.ALLOWED_RECEIPT_TYPES
+        upload_bucket = settings.gcs_receipts_bucket_name
+        public_bucket = None
     else:
         raise ValueError("kind must be 'recipe_image' or 'receipt'")
 
@@ -466,12 +489,12 @@ def request_image_upload(filename: str, content_type: str, kind: str = "recipe_i
     safe_name = uploads.sanitize_filename(filename)
     if kind == "recipe_image":
         blob_name = f"{uuid4()}-{safe_name}"
-        final_url = f"https://storage.googleapis.com/{bucket}/{blob_name}"
+        final_url = f"https://storage.googleapis.com/{public_bucket}/{blob_name}"
     else:
         blob_name = f"receipts/{uuid4()}-{safe_name}"
-        final_url = f"gs://{bucket}/{blob_name}"
+        final_url = f"gs://{upload_bucket}/{blob_name}"
 
-    if settings.is_dev or not bucket:
+    if settings.is_dev:
         dev_final = (
             f"https://placehold.co/800x400?text={blob_name}"
             if kind == "recipe_image"
@@ -486,7 +509,23 @@ def request_image_upload(filename: str, content_type: str, kind: str = "recipe_i
             "note": "Dev mode: no real upload happens; use final_url directly.",
         }
 
-    result = uploads.signed_put_url(bucket, blob_name, content_type)
+    # recipe_image needs both buckets configured; receipt needs only one.
+    # Reserved for is_dev above — a bucket missing in production must raise,
+    # not silently fall back to the same dev-mode placeholder. That placeholder
+    # is not a real upload URL; a caller saving it as a recipe's image_url or
+    # an expense's receipt_url would be attaching fake data to real content.
+    # config.validate_production_settings already refuses to start the
+    # process in that state; this is the backstop in case that check ever has
+    # a gap. Not a ValueError — this is a server misconfiguration, not bad
+    # input, so it should surface through _tool_errors' generic
+    # `except Exception` branch as {"error": "internal", ...} and get logged,
+    # not read like something the caller could fix by retrying differently.
+    if not upload_bucket or (kind == "recipe_image" and not public_bucket):
+        raise uploads.StorageNotConfiguredError(
+            f"backend storage is not fully configured for kind={kind!r}"
+        )
+
+    result = uploads.signed_put_url(upload_bucket, blob_name, content_type)
     header_flags = " ".join(f"-H '{k}: {v}'" for k, v in result["required_headers"].items())
     logger.info("MCP request_image_upload: kind=%s blob=%s", kind, blob_name)
     return {

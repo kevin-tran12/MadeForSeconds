@@ -7,8 +7,6 @@ resource "google_firestore_database" "default" {
   location_id             = var.gcp_region
   type                    = "FIRESTORE_NATIVE"
   delete_protection_state = "DELETE_PROTECTION_ENABLED"
-
-  depends_on = [google_project_service.required_apis]
 }
 
 # Daily managed backup, 7-day retention. Expenses are tax records — losing
@@ -20,6 +18,43 @@ resource "google_firestore_backup_schedule" "daily" {
   retention = "604800s" # 7 days
 
   daily_recurrence {}
+}
+
+# Weekly backup at the 14-week maximum, alongside the daily one.
+#
+# Seven days is the wrong horizon for financial records specifically. A receipt
+# object now survives for seven years (see buckets.tf), but the Firestore
+# document that says which expense it belongs to, for how much, and on what
+# date is what makes it evidence rather than an anonymous scan. A bad write or
+# an accidental wipe noticed a fortnight later — which is entirely plausible
+# for a page nobody visits daily — would age past the daily backups and
+# permanently separate the two.
+#
+# Daily backups stay for fast recovery of recent mistakes; this is the long
+# tail. 14 weeks is the maximum Firestore allows for a backup schedule, and
+# daily schedules are separately capped at 7 days, which is why depth needs a
+# second schedule rather than a longer retention on the first.
+#
+# COST: this is a real recurring charge — Firestore backup storage has no free
+# allowance, and backups are full copies, not incremental. These 14 weekly
+# copies add ≈$0.42 per GiB of live database per month on top of the ≈$0.21 the
+# 7 daily copies already cost. Bounded at ≈$0.63/mo total because live storage
+# stays inside the 1 GiB free tier at this scale. Approved on that basis; the
+# arithmetic, the measurement command, and what is deliberately excluded are in
+# docs/DEPLOYMENT.md § What the backup schedules cost.
+#
+# The depth is load-bearing only while a recipe-attached receipt's sole record
+# of what it belongs to is the recipe document. Once receipts carry a durable
+# association record of their own, re-evaluate this rather than keeping it out
+# of habit.
+resource "google_firestore_backup_schedule" "weekly" {
+  project   = var.gcp_project_id
+  database  = google_firestore_database.default.name
+  retention = "8467200s" # 14 weeks — the Firestore maximum
+
+  weekly_recurrence {
+    day = "SUNDAY"
+  }
 }
 
 # ─── Firestore Composite Indexes ──────────────────────────────────────────────

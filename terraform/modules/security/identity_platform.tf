@@ -24,14 +24,22 @@ resource "google_identity_platform_config" "default" {
 
   # Domains allowed to initiate Firebase auth flows.
   # Must include every hostname where the login UI is served.
+  #
+  # Cloudflare Pages gives every branch a preview at <branch>.madeforseconds.pages.dev,
+  # and this list does NOT cover those — wildcards are not supported here, so each
+  # would need adding by hand. That is why a one-off deploy hash
+  # (39e71d85.madeforseconds.pages.dev) accumulated here and was removed. Admin
+  # sign-in is only exercised on the production hostname; if you ever need it on a
+  # preview, add that host temporarily and take it out again afterwards.
   authorized_domains = [
     "localhost",
+    # Load-bearing: this is VITE_FIREBASE_AUTH_DOMAIN, the origin that handles the
+    # OAuth redirect. Removing it breaks signInWithPopup, however unused it looks.
     "made-for-seconds.firebaseapp.com",
+    # Firebase Hosting default. Nothing is served from it — the site is on Pages —
+    # but it costs nothing to keep and is awkward to prove unused.
     "made-for-seconds.web.app",
     "madeforseconds.com",
     "madeforseconds.pages.dev",
-    "39e71d85.madeforseconds.pages.dev",
   ]
-
-  depends_on = [google_project_service.required_apis]
 }

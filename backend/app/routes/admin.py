@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from google.cloud import storage
 
 from ..auth import require_admin
@@ -11,6 +11,7 @@ from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
 from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
+from ..services import receipt_ledger
 from ..services import recipes as recipe_service
 from ..services import uploads
 
@@ -41,24 +42,36 @@ async def admin_create_recipe(body: RecipeCreate):
                 f"(slug '{exc.existing['slug']}', id '{exc.existing['id']}')"
             ),
         )
+    except uploads.ImageSanitizationError as exc:
+        raise HTTPException(status_code=422, detail=f"Image could not be attached: {exc}")
 
 
 @router.put("/recipes/{recipe_id}", response_model=Recipe)
-async def admin_update_recipe(recipe_id: str, body: RecipeUpdate):
+async def admin_update_recipe(recipe_id: str, body: RecipeUpdate, request: Request):
     db = get_db()
     try:
-        return recipe_service.update_recipe(db, recipe_id, body, source="admin")
+        return recipe_service.update_recipe(
+            db,
+            recipe_id,
+            body,
+            source="admin",
+            actor=getattr(request.state, "admin_email", None),
+        )
     except recipe_service.InvalidCategories as exc:
         raise HTTPException(status_code=422, detail=f"Unknown categories: {exc.invalid}")
     except recipe_service.RecipeNotFound:
         raise HTTPException(status_code=404, detail="Recipe not found")
+    except uploads.ImageSanitizationError as exc:
+        raise HTTPException(status_code=422, detail=f"Image could not be attached: {exc}")
 
 
 @router.delete("/recipes/{recipe_id}", status_code=204)
-async def admin_delete_recipe(recipe_id: str):
+async def admin_delete_recipe(recipe_id: str, request: Request):
     db = get_db()
     try:
-        recipe_service.delete_recipe(db, recipe_id)
+        recipe_service.delete_recipe(
+            db, recipe_id, source="admin", actor=getattr(request.state, "admin_email", None)
+        )
     except recipe_service.RecipeNotFound:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
@@ -80,13 +93,30 @@ async def admin_upload_image(file: Annotated[UploadFile, File()]):
 
     filename = f"{uuid.uuid4()}-{uploads.sanitize_filename(file.filename or '')}"
 
-    if settings.is_dev or not settings.gcs_bucket_name:
+    if settings.is_dev:
         return {"url": f"https://placehold.co/800x400?text={filename}"}
+    if not settings.gcs_bucket_name:
+        # Reserved for is_dev above — a missing bucket in production must
+        # not fall back to the same placeholder. config.validate_production_settings
+        # already refuses to start the process in that state; this is the
+        # backstop in case that check ever has a gap.
+        raise HTTPException(status_code=500, detail="GCS_BUCKET_NAME is not configured")
+
+    # Phone photos carry a GPS IFD. This bucket is world-readable, so uploading
+    # one unmodified publishes the coordinates it was taken at. Lossless — only
+    # the metadata segments go, the compressed image is untouched.
+    try:
+        contents = uploads.strip_image_metadata(contents, content_type)
+    except uploads.MetadataStripError as exc:
+        # Fail closed: better to reject an odd file than to publish its location.
+        logger.warning("Rejected image that could not be stripped: %s", exc)
+        raise HTTPException(status_code=400, detail="Image could not be processed")
 
     try:
         client = storage.Client()
         bucket = client.bucket(settings.gcs_bucket_name)
         blob = bucket.blob(filename)
+        blob.cache_control = uploads.PUBLIC_IMAGE_CACHE_CONTROL
         blob.upload_from_string(contents, content_type=content_type)
 
         # Construct a reliable public URL
@@ -112,8 +142,10 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
 
     filename = f"{uuid.uuid4()}-{uploads.sanitize_filename(file.filename or '')}"
 
-    if settings.is_dev or not settings.gcs_receipts_bucket_name:
+    if settings.is_dev:
         return {"url": f"https://placehold.co/400x300?text=receipt-{filename}"}
+    if not settings.gcs_receipts_bucket_name:
+        raise HTTPException(status_code=500, detail="GCS_RECEIPTS_BUCKET_NAME is not configured")
 
     try:
         client = storage.Client()
@@ -127,8 +159,21 @@ async def admin_upload_recipe_receipt(file: Annotated[UploadFile, File()]):
 
 
 @router.delete("/recipes/{recipe_id}/receipts", status_code=204)
-async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
-    """Remove a single receipt URL from a recipe and delete its GCS blob."""
+async def admin_delete_recipe_receipt(
+    recipe_id: str, body: ReceiptDeleteBody, request: Request
+):
+    """Unlink a single receipt URL from a recipe. The stored object is kept.
+
+    Detaching a receipt is an editing action — the wrong file was attached, or
+    it belongs on a different recipe. Destroying a tax record is not, so this
+    only updates Firestore. The receipts bucket enforces seven-year retention
+    (terraform/modules/storage/buckets.tf), which would reject the delete in
+    any case.
+
+    An association record is written first, so the object does not become an
+    anonymous scan the moment the recipe stops naming it — see
+    services/receipt_ledger.py.
+    """
     url = body.url
     if not url:
         raise HTTPException(status_code=400, detail="url is required")
@@ -140,13 +185,24 @@ async def admin_delete_recipe_receipt(recipe_id: str, body: ReceiptDeleteBody):
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Recipe not found")
 
-    current_urls: list[str] = doc.to_dict().get("receipt_urls", [])
+    data = doc.to_dict()
+    current_urls: list[str] = data.get("receipt_urls", [])
     if url not in current_urls:
         raise HTTPException(status_code=404, detail="Receipt not found on this recipe")
 
-    doc_ref.update({"receipt_urls": [u for u in current_urls if u != url]})
+    # Before the link goes away — see services/receipt_ledger.py. If this
+    # raises, the receipt stays attached, which is the recoverable outcome.
+    receipt_ledger.record_detachment(
+        db,
+        receipt_urls=[url],
+        recipe_id=recipe_id,
+        recipe=data,
+        reason=receipt_ledger.DETACH_UNLINKED,
+        source="admin",
+        actor=getattr(request.state, "admin_email", None),
+    )
 
-    uploads.delete_recipe_receipt_blob(url)
+    doc_ref.update({"receipt_urls": [u for u in current_urls if u != url]})
 
     cache.clear()
 

@@ -1,7 +1,12 @@
+import base64
+import io
+from fractions import Fraction
+
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi import Request
 from fastapi.testclient import TestClient
+from PIL import Image, PngImagePlugin
 from app.main import app
 from app.firestore import get_db
 from app.auth import require_admin
@@ -220,3 +225,47 @@ PDF_BYTES = b"%PDF-1.4\n" + b"\x00" * 16
 
 # Content that no sniffer should accept — the "renamed .html to .jpg" case.
 NOT_A_MEDIA_FILE = b"<html><body>hello</body></html>"
+
+# The signatures above are enough to exercise sniffing, but they are not decodable
+# images — they have no IEND chunk, no scan segment. Anything that goes through the
+# upload *route* now also passes through metadata stripping, which fails closed on
+# input it cannot parse, so route tests need genuinely valid files. These are 2x2
+# solid-colour images carrying no metadata of their own.
+REAL_PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM8YaPBwMDAxAAGAA7a"
+    "ATDQ5FyAAAAAAElFTkSuQmCC"
+)
+REAL_WEBP_BYTES = base64.b64decode(
+    "UklGRjwAAABXRUJQVlA4IDAAAADwAQCdASoCAAIAAUAmJaACdLoB+AAEgwAA/u4KZ/5BcsLrka/9"
+    "pZ+pZ+pZ/ioAAAA="
+)
+
+# Images carrying real EXIF/GPS/text metadata, for the sanitize/strip tests in
+# test_uploads_hardening.py and test_uploads_service.py. Built rather than
+# committed as blobs so the tags being asserted on are visible in the test.
+
+def _exif_with_gps():
+    image = Image.new("RGB", (8, 8))
+    exif = image.getexif()
+    exif[0x010F] = "TestMake"
+    gps = exif.get_ifd(0x8825)
+    gps[1], gps[2] = "N", (Fraction(33), Fraction(56), Fraction(1744, 100))
+    gps[3], gps[4] = "W", (Fraction(83), Fraction(56), Fraction(4590, 100))
+    return exif
+
+
+def _image_with_metadata(fmt: str) -> bytes:
+    image = Image.new("RGB", (8, 8), (120, 80, 40))
+    buffer = io.BytesIO()
+    if fmt == "PNG":
+        text = PngImagePlugin.PngInfo()
+        text.add_text("Comment", "kitchen, home address")
+        image.save(buffer, format=fmt, pnginfo=text, exif=_exif_with_gps())
+    else:
+        image.save(buffer, format=fmt, exif=_exif_with_gps())
+    return buffer.getvalue()
+
+
+def _gps_tag_count(data: bytes) -> int:
+    exif = Image.open(io.BytesIO(data)).getexif()
+    return len(exif.get_ifd(0x8825)) if exif else 0

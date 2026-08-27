@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listPublicRecipes, getGroupedRecipes } from '../lib/api'
+import { isConnectivityError } from '../lib/site-status'
 import type { Recipe, GroupedRecipes } from '../lib/types'
 
 interface UseRecipesOptions {
@@ -18,6 +19,7 @@ export function useRecipes({ search, category, searchBy, forceFlat }: UseRecipes
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isConnectionError, setIsConnectionError] = useState(false)
   const [nextCursor, setNextCursor] = useState<string | null>(null)
 
   const cursorRef = useRef<string | null>(null)
@@ -33,6 +35,7 @@ export function useRecipes({ search, category, searchBy, forceFlat }: UseRecipes
     async function load() {
       setLoading(true)
       setError(null)
+      setIsConnectionError(false)
       setNextCursor(null)
       cursorRef.current = null
 
@@ -56,7 +59,10 @@ export function useRecipes({ search, category, searchBy, forceFlat }: UseRecipes
           }
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load recipes')
+        if (!cancelled) {
+          setIsConnectionError(isConnectivityError(err))
+          setError(err instanceof Error ? err.message : 'Failed to load recipes')
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -79,6 +85,7 @@ export function useRecipes({ search, category, searchBy, forceFlat }: UseRecipes
       setNextCursor(data.next_cursor)
       cursorRef.current = data.next_cursor
     } catch (err) {
+      setIsConnectionError(isConnectivityError(err))
       setError(err instanceof Error ? err.message : 'Failed to load more recipes')
     } finally {
       loadingMoreRef.current = false
@@ -92,6 +99,7 @@ export function useRecipes({ search, category, searchBy, forceFlat }: UseRecipes
     loading,
     loadingMore,
     error,
+    isConnectionError,
     hasMore: !!nextCursor,
     loadMore,
     isFiltering,

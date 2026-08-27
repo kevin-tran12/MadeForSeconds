@@ -2,6 +2,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime
 
+from app.services import uploads
+
 from conftest import JPEG_BYTES, NOT_A_MEDIA_FILE, PDF_BYTES
 
 def test_admin_list_recipes(authenticated_client, mock_db):
@@ -76,6 +78,24 @@ def test_admin_create_recipe_duplicate_slug_returns_409(authenticated_client, mo
     mock_db.set.assert_not_called()
 
 
+def test_admin_create_recipe_sanitization_failure_returns_422(authenticated_client, mock_db):
+    """A recipe attached to an image we could not sanitize must not be saved
+    — this is the route-layer half of the fail-open fix in recipes.py."""
+    mock_db.stream.return_value = iter([])  # no slug conflict
+    with patch(
+        "app.services.uploads.sanitize_recipe_image",
+        side_effect=uploads.ImageSanitizationError("could not write x.jpg"),
+    ):
+        response = authenticated_client.post(
+            "/api/admin/recipes",
+            json={"title": "New Recipe", "image_url": "https://x/img.jpg"},
+        )
+
+    assert response.status_code == 422
+    assert "could not write x.jpg" in response.json()["detail"]
+    mock_db.set.assert_not_called()
+
+
 def test_admin_update_recipe(authenticated_client, mock_db, sample_recipe_doc):
     """Verifies that the admin can update an existing recipe."""
     mock_doc = sample_recipe_doc(id="test-id", title="Old Title")
@@ -95,9 +115,27 @@ def test_admin_update_recipe_not_found(authenticated_client, mock_db):
     mock_doc = MagicMock()
     mock_doc.exists = False
     mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
-    
+
     response = authenticated_client.put("/api/admin/recipes/ghost", json={"title": "New"})
     assert response.status_code == 404
+
+def test_admin_update_recipe_sanitization_failure_returns_422(authenticated_client, mock_db, sample_recipe_doc):
+    mock_doc = sample_recipe_doc(id="test-id", image_url="https://storage.googleapis.com/b/old.jpg")
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    with patch(
+        "app.services.uploads.sanitize_recipe_image",
+        side_effect=uploads.ImageSanitizationError("could not write new.jpg"),
+    ), patch("app.services.uploads.delete_recipe_image_blob") as deleter:
+        response = authenticated_client.put(
+            "/api/admin/recipes/test-id",
+            json={"image_url": "https://storage.googleapis.com/b/new.jpg"},
+        )
+
+    assert response.status_code == 422
+    assert "could not write new.jpg" in response.json()["detail"]
+    mock_db.update.assert_not_called()
+    deleter.assert_not_called()
 
 def test_admin_delete_recipe(authenticated_client, mock_db):
     """Verifies that the admin can delete a recipe."""
@@ -128,6 +166,31 @@ def test_admin_upload_image_dev_mode(authenticated_client):
         response = authenticated_client.post("/api/admin/upload-image", files=file_data)
         assert response.status_code == 200
         assert "placehold.co" in response.json()["url"]
+
+def test_admin_upload_image_fails_closed_when_unconfigured_in_production(authenticated_client):
+    """The placeholder response is reserved for is_dev. Cloud Build
+    auto-deploys the backend on every push to main while Terraform (which
+    creates the bucket and wires GCS_BUCKET_NAME) is applied manually and
+    separately — a revision that reaches production ahead of that apply
+    must fail loudly, not silently report a fake upload success that could
+    get saved as a recipe's real image_url."""
+    with patch("app.routes.admin.settings") as mock_settings:
+        mock_settings.is_dev = False
+        mock_settings.gcs_bucket_name = None
+        file_data = {"file": ("test.jpg", JPEG_BYTES, "image/jpeg")}
+        response = authenticated_client.post("/api/admin/upload-image", files=file_data)
+        assert response.status_code == 500
+        assert "GCS_BUCKET_NAME" in response.json()["detail"]
+        assert "placehold.co" not in response.text
+
+def test_admin_upload_receipt_fails_closed_when_unconfigured_in_production(authenticated_client):
+    with patch("app.routes.admin.settings") as mock_settings:
+        mock_settings.is_dev = False
+        mock_settings.gcs_receipts_bucket_name = None
+        file_data = {"file": ("r.pdf", PDF_BYTES, "application/pdf")}
+        response = authenticated_client.post("/api/admin/upload-receipt", files=file_data)
+        assert response.status_code == 500
+        assert "GCS_RECEIPTS_BUCKET_NAME" in response.json()["detail"]
 
 def test_admin_upload_image_rejects_oversize(authenticated_client):
     """Uploads over 10MB are rejected before touching storage."""

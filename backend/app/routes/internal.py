@@ -9,6 +9,7 @@ and (when configured) match the expected audience. Anything else → 403.
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
+from google.api_core.exceptions import GoogleAPICallError
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
@@ -70,7 +71,14 @@ def refresh_instagram_token(request: Request) -> dict:
 async def weekly_usage_report(request: Request) -> dict:
     """Email a weekly aggregate usage summary. Invoked on a schedule by Cloud Scheduler."""
     _verify_oidc_caller(request, settings.usage_report_audience)
-    summary = usage_stats.get_weekly_summary()
+    try:
+        summary = usage_stats.get_weekly_summary()
+    except GoogleAPICallError:
+        # Best-effort internal cron job — a transient Cloud Logging error (e.g.
+        # quota exhaustion) shouldn't 500 and trigger a Cloud Scheduler retry
+        # storm against an already-exhausted read quota.
+        logger.warning("Weekly usage report: failed to read Cloud Logging", exc_info=True)
+        return {"sent": False, "reason": "log-read-failed"}
 
     paths_html = "".join(f"<li>{p['path']} — {p['count']}</li>" for p in summary["top_paths"]) or "<li>(no requests)</li>"
     html = f"""

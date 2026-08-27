@@ -8,6 +8,7 @@ email mismatch, and a valid caller.
 from unittest.mock import patch
 
 import pytest
+from google.api_core.exceptions import ResourceExhausted
 
 
 REFRESH_URL = "/api/internal/instagram/refresh-token"
@@ -183,3 +184,17 @@ def test_usage_report_prod_valid_oidc_sends_email(client):
     args, _ = mock_send.call_args
     assert args[0] == "owner@example.com"
     assert "/api/recipes" in args[2]
+
+
+def test_usage_report_cloud_logging_failure_returns_200_not_500(client):
+    with (
+        patch(
+            "app.routes.internal.usage_stats.get_weekly_summary",
+            side_effect=ResourceExhausted("quota exceeded"),
+        ),
+        patch("app.routes.internal.send_email") as mock_send,
+    ):
+        response = client.post(USAGE_REPORT_URL)
+    assert response.status_code == 200
+    assert response.json() == {"sent": False, "reason": "log-read-failed"}
+    mock_send.assert_not_called()

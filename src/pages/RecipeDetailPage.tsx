@@ -18,21 +18,34 @@ function RecipeDetailMeta({ recipe }: { recipe: { title: string; description: st
 
 export function RecipeDetailPage() {
   const { slug } = useParams<{ slug: string }>()
-  const { recipe, loading, error } = useRecipe(slug)
+  const { recipe, loading, error, isConnectionError } = useRecipe(slug)
 
   if (loading) {
     return <LoadingSpinner size="lg" className="py-24" />
+  }
+
+  // Connectivity failures are already explained by the global SiteStatusNotice
+  // banner above — claiming the recipe "might not exist" here would be false,
+  // and often the more alarming of the two messages.
+  if (isConnectionError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
+        <div className="text-5xl">🍳</div>
+        <h1 className="font-display text-2xl font-bold text-content">Couldn't load this recipe</h1>
+        <p className="text-content-muted">Try again in a moment.</p>
+      </div>
+    )
   }
 
   if (error || !recipe) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
         <div className="text-5xl">🍳</div>
-        <h1 className="font-display text-2xl font-bold text-gray-900">Recipe not found</h1>
-        <p className="text-gray-500">This recipe might be private or no longer exists.</p>
+        <h1 className="font-display text-2xl font-bold text-content">Recipe not found</h1>
+        <p className="text-content-muted">This recipe might be private or no longer exists.</p>
         <Link
           to="/recipes/"
-          className="mt-2 rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-primary-700"
+          className="mt-2 rounded-lg bg-primary-600 px-5 py-2.5 text-sm font-semibold text-on-brand hover:bg-primary-500"
         >
           Browse all recipes
         </Link>

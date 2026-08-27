@@ -14,18 +14,18 @@ interface RecipeSearchProps {
 
 export function RecipeSearch({ value, onChange, searchBy, onSearchByChange }: RecipeSearchProps) {
   return (
-    <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 shadow-sm ring-2 ring-primary-100 focus-within:ring-primary-300 transition-shadow">
+    <div className="flex items-center gap-2 rounded-xl border border-control-border bg-control px-3 py-1.5 shadow-sm ring-2 ring-brand-border focus-within:border-brand focus-within:ring-brand-border transition-shadow">
       {/* Search icon */}
-      <svg className="h-4 w-4 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg className="h-4 w-4 shrink-0 text-content-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
       </svg>
 
       {/* Inline search-by dropdown */}
-      <div className="relative flex items-center border-r border-gray-200 pr-5 mr-0.5 shrink-0">
+      <div className="relative flex items-center border-r border-control-border pr-5 mr-0.5 shrink-0">
         <select
           value={searchBy}
           onChange={(e) => onSearchByChange(e.target.value)}
-          className="appearance-none bg-transparent text-xs font-semibold text-gray-500 outline-none cursor-pointer"
+          className="appearance-none bg-transparent text-xs font-semibold text-content-muted outline-none cursor-pointer"
           aria-label="Search by"
         >
           {SEARCH_BY_OPTIONS.map((opt) => (
@@ -33,7 +33,7 @@ export function RecipeSearch({ value, onChange, searchBy, onSearchByChange }: Re
           ))}
         </select>
         <svg
-          className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400"
+          className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-content-muted"
           viewBox="0 0 20 20"
           fill="currentColor"
           aria-hidden="true"
@@ -52,7 +52,7 @@ export function RecipeSearch({ value, onChange, searchBy, onSearchByChange }: Re
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder="Search recipes…"
-        className="flex-1 bg-transparent text-sm text-gray-900 placeholder-gray-400 outline-none min-w-0"
+        className="flex-1 bg-transparent text-sm text-content placeholder:text-control-placeholder outline-none min-w-0"
       />
 
       {/* Clear button */}
@@ -60,7 +60,7 @@ export function RecipeSearch({ value, onChange, searchBy, onSearchByChange }: Re
         <button
           type="button"
           onClick={() => onChange('')}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
+          className="text-content-muted hover:text-content-body transition-colors"
           aria-label="Clear search"
         >
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

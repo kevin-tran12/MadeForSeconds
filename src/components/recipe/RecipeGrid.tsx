@@ -41,7 +41,7 @@ export function RecipeGrid({
           <button
             onClick={onLoadMore}
             disabled={loadingMore}
-            className="inline-flex items-center gap-2 rounded-xl border border-surface-darker bg-white px-6 py-3 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:pointer-events-none disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-xl border border-control-border bg-control px-6 py-3 text-sm font-semibold text-content-body shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-border hover:text-brand hover:shadow-md disabled:pointer-events-none disabled:opacity-50"
           >
             {loadingMore ? (
               <>

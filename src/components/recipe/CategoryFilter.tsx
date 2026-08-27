@@ -14,8 +14,8 @@ export function CategoryFilter({ categories, selected, onSelect }: CategoryFilte
         className={[
           'shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
           selected === null
-            ? 'bg-primary-600 text-white'
-            : 'bg-surface-dark text-gray-700 hover:bg-surface-darker',
+            ? 'bg-primary-600 text-on-brand'
+            : 'border border-card-border bg-card-muted text-content-body hover:border-brand-border hover:bg-brand-surface hover:text-brand',
         ].join(' ')}
       >
         All
@@ -27,8 +27,8 @@ export function CategoryFilter({ categories, selected, onSelect }: CategoryFilte
           className={[
             'shrink-0 rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors',
             selected === cat
-              ? 'bg-primary-600 text-white'
-              : 'bg-surface-dark text-gray-700 hover:bg-surface-darker',
+              ? 'bg-primary-600 text-on-brand'
+              : 'border border-card-border bg-card-muted text-content-body hover:border-brand-border hover:bg-brand-surface hover:text-brand',
           ].join(' ')}
         >
           {cat}

@@ -50,6 +50,20 @@
   --color-card-muted: #f9fafb;
   --color-card-border: #e5e7eb;
 
+  /* Theme-aware controls and interactive chrome. These aliases keep inputs,
+     pills, floating buttons, dividers, and hover states on the same palette. */
+  --color-control: #ffffff;
+  --color-control-hover: #f9fafb;
+  --color-control-border: #d1d5db;
+  --color-control-placeholder: #6b7280;
+
+  /* Brand orange used for text/links must be darker than the filled-button
+     orange in light mode. It flips brighter in dark mode. */
+  --color-brand: #c2410c;
+  --color-brand-hover: #9a3412;
+  --color-brand-surface: #fff7ed;
+  --color-brand-border: #fed7aa;
+
   /* Call to action (donate / support). The amber is identical in both themes;
      the label is near-black rather than white because white-on-amber is only
      2.15:1. Near-black gives 8.14:1 and keeps the brand colour untouched. */
@@ -79,9 +93,60 @@
   --color-danger: #b91c1c;
   --color-danger-surface: #fef2f2;
   --color-danger-border: #fecaca;
+  --color-danger-fill: #b91c1c;
+  --color-danger-fill-hover: #991b1b;
+  --color-danger-content: #ffffff;
   --color-success: #15803d;
   --color-success-surface: #f0fdf4;
   --color-success-border: #bbf7d0;
+  --color-success-fill: #15803d;
+  --color-success-fill-hover: #166534;
+  --color-success-content: #ffffff;
+
+  --color-warning: #92400e;
+  --color-warning-surface: #fffbeb;
+  --color-warning-border: #fde68a;
+
+  /* Compact labels use their own semantic pairs so badges never need a
+     component-level dark override. */
+  --color-badge: #374151;
+  --color-badge-surface: #f3f4f6;
+  --color-badge-primary: #9a3412;
+  --color-badge-primary-surface: #ffedd5;
+
+  /* The hero and cooking view deliberately stay dark in either site theme. */
+  --color-hero-content: #ffffff;
+  --color-hero-overlay: rgb(0 0 0 / 0.68);
+  --color-hero-panel: rgb(255 255 255 / 0.12);
+  --color-hero-border: rgb(255 255 255 / 0.42);
+  --color-cook-surface: #030712;
+  --color-cook-content: #f9fafb;
+  --color-cook-muted: #d1d5db;
+  --color-cook-subtle: #9ca3af;
+  --color-cook-panel: rgb(255 255 255 / 0.1);
+  --color-cook-panel-hover: rgb(255 255 255 / 0.18);
+  --color-cook-border: rgb(255 255 255 / 0.16);
+  --color-modal-scrim: rgb(0 0 0 / 0.62);
+
+  /* Social brand fills are theme-independent; the paired icon colors are
+     chosen for contrast rather than assuming white works on every logo. */
+  --color-social-facebook: #1877f2;
+  --color-social-facebook-content: #ffffff;
+  --color-social-x: #000000;
+  --color-social-x-content: #ffffff;
+  --color-social-whatsapp: #25d366;
+  --color-social-whatsapp-content: #102a18;
+  --color-social-pinterest: #e60023;
+  --color-social-pinterest-content: #ffffff;
+  --color-social-reddit: #ff4500;
+  --color-social-reddit-content: #1c1917;
+  --color-social-telegram: #26a5e4;
+  --color-social-telegram-content: #111827;
+
+  /* Planned-pause notice (SiteStatusNotice's confirmed budget-cap state) —
+     calm and informational, not an error, so blue rather than danger/success. */
+  --color-notice-surface: #eff6ff;
+  --color-notice-border: #bfdbfe;
 
   /* Typography */
   --font-family-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
@@ -90,7 +155,34 @@
 
 body {
   background-color: var(--color-surface);
+  color: var(--color-content-body);
   font-family: var(--font-family-sans);
+}
+
+/* Form controls inherit their foreground from the browser by default, which
+   is a common source of black-on-dark text. Keep native controls aligned with
+   the semantic palette even when a component only supplies layout classes.
+   Base-layer placement lets an intentional utility such as bg-transparent win. */
+@layer base {
+  input,
+  textarea,
+  select {
+    background-color: var(--color-control);
+    color: var(--color-content);
+    caret-color: var(--color-brand);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-control-placeholder);
+    opacity: 1;
+  }
+
+  option,
+  optgroup {
+    background-color: var(--color-control);
+    color: var(--color-content);
+  }
 }
 
 /* Dark mode: override the tokens. Every bg-surface-*, text-content-*, bg-card-*
@@ -107,8 +199,18 @@ body {
   --color-content-muted: #a8a29e;
 
   --color-card: #292524;
-  --color-card-muted: #292524;
+  --color-card-muted: #35302d;
   --color-card-border: #44403c;
+
+  --color-control: #292524;
+  --color-control-hover: #35302d;
+  --color-control-border: #57534e;
+  --color-control-placeholder: #a8a29e;
+
+  --color-brand: #fb923c;
+  --color-brand-hover: #fdba74;
+  --color-brand-surface: #431407;
+  --color-brand-border: #7c2d12;
 
   /* --color-cta-* intentionally not overridden: the amber reads correctly on
      both backgrounds (8.14:1 against the dark page), and flipping it would
@@ -125,9 +227,27 @@ body {
   --color-danger: #fca5a5;
   --color-danger-surface: #450a0a;
   --color-danger-border: #7f1d1d;
+  --color-danger-fill: #fca5a5;
+  --color-danger-fill-hover: #fecaca;
+  --color-danger-content: #450a0a;
   --color-success: #86efac;
   --color-success-surface: #052e16;
   --color-success-border: #166534;
+  --color-success-fill: #86efac;
+  --color-success-fill-hover: #bbf7d0;
+  --color-success-content: #052e16;
+
+  --color-warning: #fde68a;
+  --color-warning-surface: #451a03;
+  --color-warning-border: #92400e;
+
+  --color-badge: #d6d3d1;
+  --color-badge-surface: #44403c;
+  --color-badge-primary: #fdba74;
+  --color-badge-primary-surface: #431407;
+
+  --color-notice-surface: #172554;
+  --color-notice-border: #1e3a8a;
 
   color-scheme: dark;
 }

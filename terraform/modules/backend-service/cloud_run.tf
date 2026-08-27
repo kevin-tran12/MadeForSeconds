@@ -2,14 +2,45 @@
 # Always-free tier: 2M req/mo · 360K GB-sec · 180K vCPU-sec · 1 GB egress
 # Region MUST be us-central1, us-east1, or us-west1 for free egress.
 
+# Optional secret-backed env vars: env var name → the secret it reads from.
+#
+# Gated on the secret_id being non-null rather than on a separate "was this
+# tfvar set" input. module.security creates each optional secret under the same
+# count, so a null secret_id means the secret does not exist — the two can never
+# disagree, and the five sensitive gating variables this module used to take
+# just to re-derive the same fact are gone.
+#
+# Not incidental: gating on those variables made this whole expression inherit
+# their sensitive marking, which propagates to referenced_secret_ids and made
+# the root outputs below refuse to render. Secret *ids* are not secret; only
+# their values are.
+#
+# A list rather than a map so the declaration order below is the order the env
+# blocks are rendered in — a map would iterate lexicographically and reshuffle
+# the container's env list for no reason.
+#
+# This drives both the dynamic env block and the referenced_secret_ids output,
+# so "what Cloud Run injects" is stated exactly once. The IAM bindings that make
+# these readable are derived from the same set of secrets in module.security,
+# and terraform/tests/secret_access.tftest.hcl asserts the two agree.
+locals {
+  optional_secret_env = [
+    for entry in [
+      { name = "REDIS_URL", secret_id = var.secret_ids.redis_url },
+      { name = "STRIPE_SECRET_KEY", secret_id = var.secret_ids.stripe_secret_key },
+      { name = "STRIPE_WEBHOOK_SECRET", secret_id = var.secret_ids.stripe_webhook_secret },
+      { name = "SUBSCRIBER_JWT_SECRET", secret_id = var.secret_ids.subscriber_jwt_secret },
+      { name = "RESEND_API_KEY", secret_id = var.secret_ids.resend_api_key },
+    ] : entry if entry.secret_id != null
+  ]
+}
+
 resource "google_cloud_run_v2_service" "backend" {
   project  = var.gcp_project_id
   name     = "mfs-backend"
   location = var.gcp_region
 
   deletion_protection = true
-
-  depends_on = [google_project_service.required_apis]
 
   lifecycle {
     # The running image is owned by the deploy pipeline — `gcloud run services
@@ -31,7 +62,7 @@ resource "google_cloud_run_v2_service" "backend" {
   }
 
   template {
-    service_account = google_service_account.backend.email
+    service_account = var.backend_sa_email
     timeout         = "120s"
 
     containers {
@@ -47,7 +78,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "ENVIRONMENT"
-        value = "production"
+        value = var.environment
       }
       env {
         name  = "ALLOWED_ORIGINS"
@@ -55,11 +86,15 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "GCS_BUCKET_NAME"
-        value = google_storage_bucket.images.name
+        value = var.images_bucket_name
       }
       env {
         name  = "GCS_RECEIPTS_BUCKET_NAME"
-        value = google_storage_bucket.receipts.name
+        value = var.receipts_bucket_name
+      }
+      env {
+        name  = "GCS_STAGING_BUCKET_NAME"
+        value = var.staging_bucket_name
       }
 
       # ADMIN_EMAILS read from Secret Manager — not passed as plaintext
@@ -67,7 +102,7 @@ resource "google_cloud_run_v2_service" "backend" {
         name = "ADMIN_EMAILS"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.admin_emails.secret_id
+            secret  = var.secret_ids.admin_emails
             version = "latest"
           }
         }
@@ -85,42 +120,16 @@ resource "google_cloud_run_v2_service" "backend" {
         value = var.mcp_resource_url
       }
 
-      # REDIS_URL — read from Secret Manager; only injected when redis_url is provided
+      # Secret-backed optional env vars — each read from Secret Manager, each
+      # injected only when its tfvar was supplied. See local.optional_secret_env
+      # at the top of this file for the list and why it is a list.
       dynamic "env" {
-        for_each = var.redis_url != "" ? [1] : []
+        for_each = local.optional_secret_env
         content {
-          name = "REDIS_URL"
+          name = env.value.name
           value_source {
             secret_key_ref {
-              secret  = google_secret_manager_secret.redis_url[0].secret_id
-              version = "latest"
-            }
-          }
-        }
-      }
-
-      # STRIPE_SECRET_KEY — only injected when provided
-      dynamic "env" {
-        for_each = var.stripe_secret_key != "" ? [1] : []
-        content {
-          name = "STRIPE_SECRET_KEY"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.stripe_secret_key[0].secret_id
-              version = "latest"
-            }
-          }
-        }
-      }
-
-      # STRIPE_WEBHOOK_SECRET — only injected when provided
-      dynamic "env" {
-        for_each = var.stripe_webhook_secret != "" ? [1] : []
-        content {
-          name = "STRIPE_WEBHOOK_SECRET"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.stripe_webhook_secret[0].secret_id
+              secret  = env.value.secret_id
               version = "latest"
             }
           }
@@ -133,34 +142,6 @@ resource "google_cloud_run_v2_service" "backend" {
         content {
           name  = "STRIPE_PRODUCT_ID"
           value = var.stripe_product_id
-        }
-      }
-
-      # SUBSCRIBER_JWT_SECRET — only injected when provided
-      dynamic "env" {
-        for_each = var.subscriber_jwt_secret != "" ? [1] : []
-        content {
-          name = "SUBSCRIBER_JWT_SECRET"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.subscriber_jwt_secret[0].secret_id
-              version = "latest"
-            }
-          }
-        }
-      }
-
-      # RESEND_API_KEY — only injected when provided
-      dynamic "env" {
-        for_each = var.resend_api_key != "" ? [1] : []
-        content {
-          name = "RESEND_API_KEY"
-          value_source {
-            secret_key_ref {
-              secret  = google_secret_manager_secret.resend_api_key[0].secret_id
-              version = "latest"
-            }
-          }
         }
       }
 
@@ -194,7 +175,7 @@ resource "google_cloud_run_v2_service" "backend" {
       }
       env {
         name  = "INSTAGRAM_REFRESH_INVOKER_EMAIL"
-        value = google_service_account.backend.email
+        value = var.backend_sa_email
       }
       env {
         name  = "INSTAGRAM_REFRESH_AUDIENCE"
@@ -237,7 +218,14 @@ resource "google_cloud_run_v2_service" "backend" {
   }
 }
 
-# Allow unauthenticated access (public API)
+# Allow unauthenticated access (public API).
+#
+# This binding is also the budget breaker's kill switch: tripping removes
+# allUsers here, which is what stops requests (and therefore spend). Terraform
+# still declares it, so a `terraform apply` while the breaker is tripped will
+# re-add it and put the site back online. That is the same drift caveat that
+# applies to the scaling config, and the breaker-tripped alert is the mitigation
+# — if you get that alert, find out why before applying.
 resource "google_cloud_run_v2_service_iam_member" "public" {
   project  = var.gcp_project_id
   location = var.gcp_region

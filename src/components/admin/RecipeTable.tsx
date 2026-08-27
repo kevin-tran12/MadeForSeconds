@@ -4,6 +4,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { LoadingSpinner } from '../ui/LoadingSpinner'
 import { EmptyState } from '../ui/EmptyState'
+import { safeImageUrl } from '../../lib/safe-url'
 
 const PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Crect width='60' height='60' fill='%23faedcd'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='28' fill='%23e85d04'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E"
@@ -47,7 +48,7 @@ export function RecipeTable({ recipes, loading, onEdit, onDelete, onTogglePublis
               <td className="px-4 py-3">
                 <div className="flex items-center gap-3">
                   <img
-                    src={recipe.image_url ?? PLACEHOLDER}
+                    src={safeImageUrl(recipe.image_url) ?? PLACEHOLDER}
                     alt={recipe.title}
                     onError={(e) => { e.currentTarget.src = PLACEHOLDER }}
                     className="h-10 w-10 shrink-0 rounded-lg object-cover"

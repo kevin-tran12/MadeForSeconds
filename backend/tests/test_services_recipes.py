@@ -7,6 +7,7 @@ import pytest
 
 from app.models import RecipeCreate, RecipeUpdate
 from app.services import recipes as svc
+from app.services import uploads
 
 
 def _chain_db():
@@ -148,6 +149,37 @@ class TestCreateRecipe:
         assert exc.value.allowed == ["mains", "sides"]
         db.set.assert_not_called()
 
+    def test_sanitizes_before_writing_firestore(self, db, svc_cache):
+        """Order matters: a recipe must never be committed pointing at an
+        image that was never even attempted to be sanitized yet, let alone
+        one that failed."""
+        db.stream.return_value = iter([])
+        db.document.return_value.id = "new-id"
+        calls = []
+        with patch(
+            "app.services.uploads.sanitize_recipe_image",
+            side_effect=lambda url: calls.append(("sanitize", url)),
+        ):
+            db.set.side_effect = lambda data: calls.append(("set", data.get("image_url")))
+            svc.create_recipe(
+                db, RecipeCreate(title="X", image_url="https://x/img.jpg"), source="admin"
+            )
+
+        assert [c[0] for c in calls] == ["sanitize", "set"]
+
+    def test_sanitization_failure_prevents_the_write(self, db, svc_cache):
+        with patch(
+            "app.services.uploads.sanitize_recipe_image",
+            side_effect=uploads.ImageSanitizationError("could not write x.jpg"),
+        ):
+            with pytest.raises(uploads.ImageSanitizationError):
+                svc.create_recipe(
+                    db, RecipeCreate(title="X", image_url="https://x/img.jpg"), source="admin"
+                )
+
+        db.set.assert_not_called()
+        svc_cache.clear.assert_not_called()
+
 
 # ── update_recipe ─────────────────────────────────────────────────────────────
 
@@ -190,6 +222,50 @@ class TestUpdateRecipe:
                 db, "doc-id", RecipeUpdate.model_validate({"title": "T"}), source="admin"
             )
 
+        deleter.assert_not_called()
+
+    def test_sanitizes_before_committing_and_deletes_old_image_after(self, db, svc_cache):
+        """The full ordering the fix is about: sanitize the incoming image,
+        THEN commit the Firestore update, THEN delete the old image — never
+        the other way round."""
+        old_url = "https://storage.googleapis.com/b/old.jpg"
+        new_url = "https://storage.googleapis.com/b/new.jpg"
+        db.get.side_effect = [_doc(image_url=old_url), _doc(image_url=new_url)]
+        calls = []
+
+        with patch(
+            "app.services.uploads.sanitize_recipe_image",
+            side_effect=lambda url: calls.append(("sanitize", url)),
+        ), patch(
+            "app.services.uploads.delete_recipe_image_blob",
+            side_effect=lambda url: calls.append(("delete", url)),
+        ):
+            db.update.side_effect = lambda updates: calls.append(("update", updates.get("image_url")))
+            svc.update_recipe(
+                db, "doc-id", RecipeUpdate.model_validate({"image_url": new_url}), source="admin"
+            )
+
+        assert calls == [
+            ("sanitize", new_url),
+            ("update", new_url),
+            ("delete", old_url),
+        ]
+
+    def test_sanitization_failure_leaves_old_image_and_firestore_untouched(self, db, svc_cache):
+        old_url = "https://storage.googleapis.com/b/old.jpg"
+        new_url = "https://storage.googleapis.com/b/new.jpg"
+        db.get.return_value = _doc(image_url=old_url)
+
+        with patch(
+            "app.services.uploads.sanitize_recipe_image",
+            side_effect=uploads.ImageSanitizationError("could not write new.jpg"),
+        ), patch("app.services.uploads.delete_recipe_image_blob") as deleter:
+            with pytest.raises(uploads.ImageSanitizationError):
+                svc.update_recipe(
+                    db, "doc-id", RecipeUpdate.model_validate({"image_url": new_url}), source="admin"
+                )
+
+        db.update.assert_not_called()
         deleter.assert_not_called()
 
 
@@ -248,11 +324,19 @@ class TestDeleteRecipe:
         db.get.return_value = _doc(published=True)
 
         with pytest.raises(svc.RecipeServiceError):
-            svc.delete_recipe(db, "doc-id", require_draft=True)
+            svc.delete_recipe(db, "doc-id", source="admin", require_draft=True)
 
         db.delete.assert_not_called()
 
-    def test_deletes_image_and_receipt_blobs(self, db, svc_cache):
+    def test_deletes_image_blob_but_keeps_receipt_objects(self, db, svc_cache):
+        """Receipts outlive the recipe they were attached to.
+
+        They are expense records under a seven-year retention policy, so the
+        only correct behaviour is to drop the Firestore document and leave the
+        objects alone. Asserted through delete_gcs_blob — the lowest point every
+        deletion path funnels through — so reintroducing a receipt delete by any
+        route fails here, not just the helper this used to patch.
+        """
         db.get.return_value = _doc(
             image_url="https://storage.googleapis.com/b/img.jpg",
             receipt_urls=["https://storage.googleapis.com/r/r1.jpg", "https://storage.googleapis.com/r/r2.jpg"],
@@ -260,11 +344,11 @@ class TestDeleteRecipe:
 
         with (
             patch("app.services.uploads.delete_recipe_image_blob") as img_deleter,
-            patch("app.services.uploads.delete_recipe_receipt_blob") as receipt_deleter,
+            patch("app.services.uploads.delete_gcs_blob") as raw_deleter,
         ):
-            svc.delete_recipe(db, "doc-id")
+            svc.delete_recipe(db, "doc-id", source="admin")
 
         img_deleter.assert_called_once()
-        assert receipt_deleter.call_count == 2
+        raw_deleter.assert_not_called()
         db.delete.assert_called_once()
         svc_cache.clear.assert_called_once()

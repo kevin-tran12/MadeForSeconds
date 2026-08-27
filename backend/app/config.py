@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:5173"  # comma-separated list
     gcs_bucket_name: str | None = None
     gcs_receipts_bucket_name: str | None = None
+    gcs_staging_bucket_name: str | None = None
     # MCP OAuth (WorkOS AuthKit is the authorization server; the MCP server is a resource
     # server that only validates tokens). workos_authkit_domain is the OAuth issuer URL.
     workos_authkit_domain: str = ""  # e.g. https://<slug>.authkit.app
@@ -79,6 +80,38 @@ def validate_production_settings(s: "Settings") -> None:
         )
     if len(s.subscriber_jwt_secret) < 32:
         raise RuntimeError("SUBSCRIBER_JWT_SECRET must be at least 32 characters in production")
+    # Cloud Build auto-deploys the backend on every push to main; Terraform is
+    # applied manually and separately. Crashing here on a missing bucket name
+    # is what stops a revision deployed ahead of Terraform from silently
+    # reporting fake upload success instead — see routes/admin.py and
+    # mcp_server.py's request_image_upload/upload_image_from_url, which used
+    # to fall back to a placeholder response whenever a bucket was unset,
+    # in production as much as in dev. Crashing at import time is also the
+    # SAFE failure mode: cloudbuild.yaml deploys with --no-traffic, smoke-tests
+    # the tagged candidate revision, and only then promotes that exact tag. A
+    # revision that crash-loops here never receives normal traffic — the
+    # previous, working revision keeps serving, and no manual rollback step is
+    # needed. See docs/DEPLOYMENT.md § "Terraform must be applied before
+    # deploying a revision that needs it".
+    if not s.gcs_bucket_name:
+        raise RuntimeError(
+            "GCS_BUCKET_NAME must be set in production — recipe images cannot be "
+            "uploaded or attached without it. Apply Terraform before deploying a "
+            "revision that depends on it."
+        )
+    if not s.gcs_receipts_bucket_name:
+        raise RuntimeError(
+            "GCS_RECEIPTS_BUCKET_NAME must be set in production — expense receipts "
+            "cannot be uploaded without it. Apply Terraform before deploying a "
+            "revision that depends on it."
+        )
+    if not s.gcs_staging_bucket_name:
+        raise RuntimeError(
+            "GCS_STAGING_BUCKET_NAME must be set in production — the MCP "
+            "signed-PUT recipe-image flow (request_image_upload) has nowhere to "
+            "land uploads without it. Apply Terraform before deploying a "
+            "revision that depends on it."
+        )
     if not s.workos_authkit_domain:
         raise RuntimeError(
             "WORKOS_AUTHKIT_DOMAIN must be set in production — without it the /mcp endpoint "
