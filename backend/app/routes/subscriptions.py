@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import stripe
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -22,6 +22,19 @@ stripe.api_key = settings.stripe_secret_key
 # How stale a "processing" webhook-event reservation must be before we assume
 # the worker that created it crashed and it's safe to reclaim and reprocess.
 _STALE_RESERVATION_SECONDS = 120
+
+# Retention for processed_events docs, stamped as the `ttl` field on write.
+# Must outlive any window in which Stripe could redeliver or replay this
+# event, or a replay after this doc expires would look like a brand-new
+# event and get double-processed. Automatic retries stop after 3 days, but
+# manual replay (dashboard/CLI, via the List Events API) is possible for any
+# event Stripe still has on file — and "Stripe only returns events created
+# in the last 30 days" (https://docs.stripe.com/webhooks/process-undelivered-events),
+# which is the real ceiling this needs to match, not the 24h idempotency-key
+# minimum. The actual deletion is done by the Firestore TTL policy in
+# terraform/modules/storage/firestore.tf (google_firestore_field.processed_events_ttl) —
+# keep the two in sync.
+_PROCESSED_EVENTS_TTL_DAYS = 30
 
 
 class WebhookProcessingError(Exception):
@@ -249,7 +262,12 @@ def _process_event_logic(transaction, ref, db, event_type: str, data: dict, now)
     existing_doc = _read_existing_doc(transaction, db, event_type, data)
 
     # ---- WRITE PHASE ----
-    transaction.set(ref, {"type": event_type, "status": "processing", "created_at": now})
+    transaction.set(ref, {
+        "type": event_type,
+        "status": "processing",
+        "created_at": now,
+        "ttl": now + timedelta(days=_PROCESSED_EVENTS_TTL_DAYS),
+    })
     outcome = _apply_mutation(transaction, db, event_type, data, existing_doc, now)
     transaction.update(ref, {"status": "completed", "processed_at": now, "outcome": outcome})
     return outcome

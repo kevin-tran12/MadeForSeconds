@@ -395,6 +395,20 @@ gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
   budget/uptime/error alerts above. The report is aggregate-only: no IP
   addresses or per-request rows ever appear in the email or get stored
   anywhere new — they're only counted in memory while the report is built.
+- **Stripe webhook idempotency**: `processed_events` documents carry a `ttl`
+  timestamp (30 days from creation) and a matching Firestore TTL policy
+  (`google_firestore_field.processed_events_ttl`) deletes them automatically.
+  30 days matches Stripe's own event-retention window — the List Events API
+  (and CLI/Dashboard manual replay, which relies on it) only returns events
+  created in the last 30 days, so that's the real ceiling a replayed event
+  needs the reservation doc to survive, not Stripe's 24h idempotency-key
+  minimum. The collection doesn't grow unbounded against the 1 GiB free-tier
+  ceiling as a result. TTL-triggered deletes aren't covered by Firestore's
+  free delete quota (unlike manual deletes) and are billed at $0.01 per 100K
+  documents — negligible at this project's webhook volume, but a real,
+  deliberately accepted cost rather than a free-tier feature. The `ttl` field
+  also has its automatic single-field index disabled (`index_config {}`),
+  since nothing ever queries by it.
 
 ### Receipt & financial-record recovery
 
