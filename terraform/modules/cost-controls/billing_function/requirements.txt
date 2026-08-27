@@ -1,25 +1,68 @@
-# Exact pins, not 3.*/0.* wildcards. This file is one of the archive_file
-# `source` blocks in billing.tf — the whole point of that explicit-blocks
-# change was a byte-identical, reproducible deployment archive, and a
-# wildcard range here would silently undermine it: GCP resolves this file
-# fresh at *build* time (Cloud Functions buildpacks, not this repo's Docker
-# image), so the same unchanged source could still deploy different code
-# on a later rebuild. That is a real risk specifically for the budget
-# breaker — its whole job is to behave identically every time it fires.
+# The complete resolved dependency graph, every package exact-pinned — direct
+# and transitive alike. This file is one of the archive_file `source` blocks
+# in billing.tf, and it is also literally what the Cloud Functions Python
+# buildpack installs: `pip install -r requirements.txt`, same as anywhere
+# else. Pip honours `==` pins on every line regardless of what invokes it, so
+# pinning transitives here is exactly as effective as pinning them in any
+# other Python project — there is no separate lock-file mechanism the
+# buildpack understands, and none is needed. This is a real determinism
+# requirement, not a nice-to-have: this function's whole job is behaving
+# identically every time it fires, and an unpinned transitive graph meant the
+# same unchanged archive could install different code on a later rebuild.
 #
-# Resolved and verified inside python:3.12-slim, matching the function's
+# Resolved and verified inside python:3.12-slim, matching this function's
 # `runtime = "python312"` in billing.tf.
 #
-# Transitive dependencies (Flask, gunicorn, grpcio, etc.) are intentionally
-# left unpinned here: Cloud Functions' Python buildpack installs this file
-# directly rather than through this repo's own Docker build, and pinning
-# ~35 transitive packages via a constraints file would need a real deploy to
-# confirm the buildpack actually honours it — not something verifiable from
-# a local check. The two direct dependencies below are what matters most and
-# what a wildcard range was actually floating.
+# Regenerate whenever functions-framework or google-cloud-run changes:
+#   1. Keep only the two direct pins below, drop everything else.
+#   2. docker build a throwaway image: `FROM python:3.12-slim`, COPY this
+#      file in, `RUN pip install --no-cache-dir -r requirements.txt`.
+#   3. `docker run --rm <image> pip freeze --all`, excluding pip/setuptools/
+#      wheel, and paste the full result back in below the direct pins.
 functions-framework==3.10.2
 google-cloud-run==0.16.1
 # Same version backend/requirements.txt pins — the status.json
 # write/delete uses the same client surface (Client().bucket().blob()) that's
 # already exercised there.
 google-cloud-storage==3.13.1
+
+# ── Transitive — regenerated via pip freeze, see above. Do not hand-edit. ──
+anyio==4.14.2
+blinker==1.9.0
+certifi==2026.7.22
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.5.0
+cloudevents==1.12.0
+cryptography==50.0.1
+deprecation==2.1.0
+Flask==3.1.3
+google-api-core==2.34.0
+google-auth==2.57.0
+google-cloud-core==2.7.0
+google-crc32c==1.8.0
+google-resumable-media==2.10.2
+googleapis-common-protos==1.75.2
+grpc-google-iam-v1==0.14.5
+grpcio==1.83.0
+grpcio-status==1.83.0
+gunicorn==26.2.0
+h11==0.16.0
+idna==3.19
+itsdangerous==2.2.0
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+packaging==26.3
+proto-plus==1.28.4
+protobuf==7.36.0
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
+pycparser==3.0
+requests==2.34.2
+starlette==1.6.0
+typing_extensions==4.16.0
+urllib3==2.7.0
+uvicorn==0.52.4
+uvicorn-worker==0.4.0
+watchdog==6.0.0
+Werkzeug==3.1.8
