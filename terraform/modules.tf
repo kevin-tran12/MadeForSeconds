@@ -6,8 +6,9 @@
 module "security" {
   source = "./modules/security"
 
-  gcp_project_id = var.gcp_project_id
-  admin_emails   = var.admin_emails
+  gcp_project_id    = var.gcp_project_id
+  admin_emails      = var.admin_emails
+  state_admin_email = var.state_admin_email
 
   redis_url              = var.redis_url
   stripe_secret_key      = var.stripe_secret_key

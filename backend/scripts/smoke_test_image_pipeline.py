@@ -9,15 +9,42 @@ exercises the real path end to end against the real target project.
 
 Run it after any `terraform apply` or backend deploy that touches image
 uploads, the staging bucket, or their IAM — before normal traffic starts
-relying on the new revision. It is NOT part of CI: it needs real
-Application Default Credentials with write access to the target project's
-Firestore and the images/staging buckets, and it is not something to run
-unattended against production on every push.
+relying on the new revision. It is NOT part of CI, and it is a manual,
+operator-only gate: it needs real credentials with write access to the
+target project's Firestore and the images/staging buckets, and it is not
+something to run unattended against production on every push.
 
-    gcloud auth application-default login
-    python scripts/smoke_test_image_pipeline.py --project made-for-seconds
+    gcloud auth application-default login \\
+        --impersonate-service-account=<backend-sa-email>
+    cd backend
+    python scripts/smoke_test_image_pipeline.py \\
+        --project made-for-seconds \\
+        --backend-url "$(terraform -chdir=../terraform output -raw cloud_run_url)"
 
-Steps (matching the golden path a real MCP-driven upload takes):
+Impersonating the backend service account (rather than using the operator's
+own, typically broader, ADC) means the GCS/Firestore calls below run under
+the SAME IAM the deployed revision actually has — a grant missing from the
+backend SA specifically will fail here even if the operator's own account
+would have papered over it. This requires the operator to hold
+roles/iam.serviceAccountTokenCreator on the backend SA (granted via
+terraform/modules/security/service_accounts.tf's backend_operator_impersonation
+resource).
+
+What this script does NOT prove: it calls application code in-process, not
+through the deployed HTTP surface. It does not verify that a real MCP client
+can authenticate through /mcp (interactive WorkOS OAuth) or that the admin
+web UI can authenticate through /api/admin/* (Firebase ID token) — neither
+has a non-interactive, scriptable auth path today, and building one is a
+separate, larger effort. The --backend-url health check below covers "did
+the deployed revision start with valid config", not "can a real client log
+in to it".
+
+Steps:
+  0. GET {backend_url}/api/health — confirms the deployed Cloud Run revision
+     actually started. validate_production_settings() runs at import time,
+     before the FastAPI app object exists, so a bad/missing env var
+     crash-loops the revision and it never receives traffic; a passing
+     health check is direct evidence the live revision has valid config.
   1. Request a signed staging-bucket PUT URL — exercises signed_put_url and
      the backend SA's IAM on the staging bucket.
   2. PUT a JPEG carrying GPS EXIF to it — exercises the signed URL itself.
@@ -34,8 +61,11 @@ Steps (matching the golden path a real MCP-driven upload takes):
      raises rather than silently promoting it — and that no Firestore
      document is left behind by the aborted attempt.
 
-Cleans up the disposable recipe (and its promoted image) in a `finally`,
-whether the run passed or failed.
+Cleans up the disposable recipe and every object this run could have
+created — in both buckets, under both generated blob names — in a `finally`,
+whether the run passed or failed at any step. Cleanup is idempotent and
+tolerates objects that were never created or already deleted; anything it
+could not remove is reported at the end rather than silently dropped.
 """
 
 from __future__ import annotations
@@ -50,6 +80,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx  # noqa: E402
+from google.cloud.exceptions import NotFound  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from app import config  # noqa: E402
@@ -86,11 +117,22 @@ def _check(label: str, condition: bool, detail: str = "") -> None:
         raise SmokeTestFailure(f"{label}: {detail}")
 
 
+def _cleanup_blob(bucket, blob_name: str, leftover: list[str]) -> None:
+    """Best-effort delete, idempotent whether or not the object ever existed."""
+    try:
+        bucket.blob(blob_name).delete()
+    except NotFound:
+        pass
+    except Exception as exc:
+        leftover.append(f"{bucket.name}/{blob_name}: {exc}")
+
+
 def run(args: argparse.Namespace) -> int:
     # Point the real app config at the target project rather than importing
     # under a mocked settings object — this script's whole point is proving
-    # the actual deployed configuration works, so it must use it.
-    config.settings.is_dev = False
+    # the actual deployed configuration works, so it must use it. is_dev is a
+    # computed property (reads `environment`); it has no setter.
+    config.settings.environment = "production"
     config.settings.gcp_project_id = args.project
     config.settings.gcs_bucket_name = args.images_bucket
     config.settings.gcs_staging_bucket_name = args.staging_bucket
@@ -103,13 +145,26 @@ def run(args: argparse.Namespace) -> int:
     recipe_id: str | None = None
     reject_recipe_id: str | None = None
     marker = uuid.uuid4().hex[:8]
+    # Generated before `try` — pure local computation that can't fail, so
+    # `finally` always has both names to sweep regardless of where the run
+    # aborts.
+    blob_name = f"{uuid.uuid4()}-smoketest.jpg"
+    reject_blob_name = f"{uuid.uuid4()}-smoketest-reject.txt"
 
     try:
         print(f"Target: project={args.project} images={args.images_bucket} staging={args.staging_bucket}")
 
+        # ── 0: the deployed revision is actually up with valid config ──────
+        print("\n[0] Deployed revision health check")
+        health_resp = httpx.get(f"{args.backend_url}/api/health", timeout=30.0)
+        _check(
+            "deployed revision responds healthy",
+            health_resp.status_code == 200 and health_resp.json().get("status") == "ok",
+            f"HTTP {health_resp.status_code}: {health_resp.text}",
+        )
+
         # ── 1–3: signed PUT into staging, confirm it isn't public ──────────
         print("\n[1-3] Signed upload into staging")
-        blob_name = f"{uuid.uuid4()}-smoketest.jpg"
         signed = uploads.signed_put_url(args.staging_bucket, blob_name, "image/jpeg")
         payload = _gps_jpeg()
         put_resp = httpx.put(
@@ -170,7 +225,6 @@ def run(args: argparse.Namespace) -> int:
 
         # ── 8: reject path — non-image payload must not promote ────────────
         print("\n[8] Reject path: non-image content must not be promoted")
-        reject_blob_name = f"{uuid.uuid4()}-smoketest-reject.txt"
         reject_signed = uploads.signed_put_url(args.staging_bucket, reject_blob_name, "image/jpeg")
         httpx.put(
             reject_signed["upload_url"],
@@ -193,11 +247,6 @@ def run(args: argparse.Namespace) -> int:
         _check("no Firestore document left behind by the rejected attempt", len(found) == 0)
         promoted_reject = storage_client.bucket(args.images_bucket).get_blob(reject_blob_name)
         _check("rejected content was not promoted to the public bucket", promoted_reject is None)
-        # Clean up the still-staged reject object directly — it was never promoted.
-        staging_bucket = storage_client.bucket(args.staging_bucket)
-        reject_staged = staging_bucket.get_blob(reject_blob_name)
-        if reject_staged is not None:
-            reject_staged.delete()
 
         print("\nAll checks passed.")
         return 0
@@ -207,6 +256,9 @@ def run(args: argparse.Namespace) -> int:
         return 1
     finally:
         print("\nCleaning up...")
+        # Firestore documents first — delete_recipe is the only thing that
+        # removes them, and it already best-effort-deletes the promoted
+        # image itself (delete_gcs_blob swallows its own errors).
         if recipe_id:
             try:
                 recipe_service.delete_recipe(db, recipe_id, source="smoke-test")
@@ -220,13 +272,40 @@ def run(args: argparse.Namespace) -> int:
             except Exception as exc:
                 print(f"  WARNING: could not clean up recipe {reject_recipe_id}: {exc}")
 
+        # Unconditional sweep of every object this run could have created, in
+        # both buckets, under both blob names — covers every failure point
+        # above: a crash before create_recipe() (staged object, never
+        # attached), or promotion succeeding but the Firestore write inside
+        # create_recipe() failing afterward (public object, no recipe to
+        # find it by). Idempotent: an already-deleted or never-created blob
+        # just hits the NotFound branch.
+        images_bucket = storage_client.bucket(args.images_bucket)
+        staging_bucket = storage_client.bucket(args.staging_bucket)
+        leftover: list[str] = []
+        _cleanup_blob(staging_bucket, blob_name, leftover)
+        _cleanup_blob(images_bucket, blob_name, leftover)
+        _cleanup_blob(staging_bucket, reject_blob_name, leftover)
+        _cleanup_blob(images_bucket, reject_blob_name, leftover)
+        if leftover:
+            print("  WARNING: could not remove the following objects — check and delete manually:")
+            for item in leftover:
+                print(f"    {item}")
+        else:
+            print("  no leftover objects in staging or public buckets")
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--project", required=True, help="GCP project id")
+    parser.add_argument(
+        "--backend-url",
+        required=True,
+        help="Deployed Cloud Run URL, e.g. $(terraform -chdir=../terraform output -raw cloud_run_url)",
+    )
     parser.add_argument("--images-bucket", default=None, help="Public images bucket (default: {project}-images)")
     parser.add_argument("--staging-bucket", default=None, help="Staging bucket (default: {project}-images-staging)")
     args = parser.parse_args()
+    args.backend_url = args.backend_url.rstrip("/")
     args.images_bucket = args.images_bucket or f"{args.project}-images"
     args.staging_bucket = args.staging_bucket or f"{args.project}-images-staging"
     return args

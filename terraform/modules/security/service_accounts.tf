@@ -69,6 +69,18 @@ resource "google_service_account_iam_member" "backend_token_creator" {
   member             = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Let the operator impersonate the backend SA (via `gcloud auth
+# application-default login --impersonate-service-account`) so operational
+# scripts — e.g. backend/scripts/smoke_test_image_pipeline.py — exercise the
+# real backend SA's IAM instead of the operator's own, typically broader,
+# credentials. Without this, the smoke test can pass even when the deployed
+# revision itself would fail for lack of a grant only the backend SA needs.
+resource "google_service_account_iam_member" "backend_operator_impersonation" {
+  service_account_id = google_service_account.backend.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "user:${var.state_admin_email}"
+}
+
 # Instagram token: the backend reads the latest version at runtime — covered by
 # backend_secret_access above like every other secret — and writes refreshed
 # versions during rotation, which is this grant. versionAdder is genuinely
