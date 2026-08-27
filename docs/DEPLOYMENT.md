@@ -309,6 +309,49 @@ Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild
 > the admin UI can authenticate through `/api/admin/*` (Firebase ID token) —
 > neither has a non-interactive, scriptable auth path today.
 
+> **Run the receipts-role smoke test after touching the receipts bucket's
+> IAM.** The receipts bucket carries a 7-year retention policy, so unlike
+> the image-pipeline test above it cannot exercise the real bucket — a
+> synthetic test object there would be permanent. Instead it creates a
+> throwaway scratch bucket with the same custom role bound and runs the
+> real receipt code paths against it as the impersonated backend SA,
+> deleting the scratch bucket at the end. Also a manual, operator-only gate,
+> not a CI step.
+>
+> ```bash
+> cd backend
+> python scripts/smoke_test_receipt_role.py --project made-for-seconds
+> ```
+>
+> Unlike the image-pipeline test, no separate `gcloud auth
+> application-default login --impersonate-service-account=...` step is
+> needed first — the script builds impersonated credentials itself for the
+> exercise phase. Prerequisites the operator needs, beyond
+> `roles/iam.serviceAccountTokenCreator` on the backend SA (the same grant
+> the image-pipeline test relies on): `storage.buckets.{create,delete,get,
+> update,getIamPolicy,setIamPolicy}` and `storage.objects.{list,delete}` on
+> the project, for scratch-bucket lifecycle. **Terraform does not grant
+> these** — only `roles/storage.objectAdmin` on the separate Terraform state
+> bucket — so this relies on the operator's own broader project-level
+> access (Owner/Editor), same as whoever runs `terraform apply` already
+> needs.
+>
+> It creates the scratch bucket with soft-delete explicitly disabled (new
+> buckets default to 7 days of it, which would leave a "deleted" bucket
+> recoverable-but-orphaned for a week — confirmed live on an early version
+> of this script before that fix), waits out Cloud Storage's eventually-
+> consistent IAM propagation before exercising the newly bound role, then
+> runs the direct-SDK-upload, signed-PUT, `get_blob`, and signed-GET code
+> paths for real, plus confirms list/overwrite/delete stay denied. Cleanup
+> is verified, not just attempted — the script exits non-zero if the
+> scratch bucket can't be confirmed gone, even if every functional check
+> passed.
+>
+> **What this does not prove**: same in-process caveat as the image-pipeline
+> test above, plus it does not exercise the Firestore expense-receipt
+> association — it is a real-GCS IAM integration test for the storage layer
+> specifically, not a full-stack receipt test.
+
 ### What requires what kind of deploy?
 
 | Change | Action |
