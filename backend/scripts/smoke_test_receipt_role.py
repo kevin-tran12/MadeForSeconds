@@ -136,15 +136,18 @@ def wait_until(
 
     Returns the number of attempts taken. Raises TimeoutError if check()
     never returns True before deadline_seconds elapses. Enforced as an
-    absolute deadline, not just "check elapsed before each sleep": each
-    sleep is capped to whatever time remains, so a condition first observed
-    after the deadline is never accepted, and total sleep time never exceeds
-    deadline_seconds (both are covered by tests, not just implied). Default
-    is 300s (5 min) — Cloud Storage documents IAM propagation as "commonly
-    about a minute" but sometimes several minutes longer; 120s previously
-    used here was inside that "sometimes longer" range and could reject a
-    correct role. `sleep`/`now` are injectable so this is testable without
-    actually waiting — see tests/test_smoke_test_receipt_role.py.
+    absolute deadline: each sleep is capped to whatever time remains so a
+    condition first observed *between* attempts is never accepted late, and
+    — since check() itself can be a slow network call, not an instant
+    operation — a success is only accepted if check() actually returned
+    before the deadline, not merely started before it. A probe that begins
+    at 9.9s and doesn't return until 11s under a 10s deadline is a timeout,
+    not a success (covered by a test, not just implied). Default is 300s
+    (5 min) — Cloud Storage documents IAM propagation as "commonly about a
+    minute" but sometimes several minutes longer; 120s previously used here
+    was inside that "sometimes longer" range and could reject a correct
+    role. `sleep`/`now` are injectable so this is testable without actually
+    waiting — see tests/test_smoke_test_receipt_role.py.
     """
     start = now()
     deadline = start + deadline_seconds
@@ -152,11 +155,18 @@ def wait_until(
     attempt = 0
     while True:
         attempt += 1
-        if check():
-            return attempt
-        remaining = deadline - now()
+        success = check()
+        completed_at = now()
+        if success:
+            if completed_at <= deadline:
+                return attempt
+            raise TimeoutError(
+                f"condition became true on attempt {attempt} at {completed_at - start:.1f}s, "
+                f"after the {deadline_seconds:.1f}s deadline (the probe itself was slow)"
+            )
+        remaining = deadline - completed_at
         if remaining <= 0:
-            raise TimeoutError(f"condition not met after {attempt} attempts over {now() - start:.1f}s")
+            raise TimeoutError(f"condition not met after {attempt} attempts over {completed_at - start:.1f}s")
         sleep(min(delay + random.uniform(0, delay * 0.25), remaining))
         delay = min(delay * 2, max_delay)
 
@@ -250,8 +260,13 @@ def run(args: argparse.Namespace) -> int:
             impersonated_bucket = gcs_module.Client().bucket(bucket_name)
 
             def _role_is_active() -> bool:
+                # Bounded timeout so one hung request can't blow the overall
+                # deadline by itself — wait_until() rejects a slow-but-true
+                # probe that finishes past the deadline, but a probe that
+                # simply never returns would otherwise stall the script
+                # indefinitely rather than failing loudly at the deadline.
                 try:
-                    impersonated_bucket.blob("__iam_propagation_probe__").exists()
+                    impersonated_bucket.blob("__iam_propagation_probe__").exists(timeout=30.0)
                     return True
                 except Forbidden:
                     return False

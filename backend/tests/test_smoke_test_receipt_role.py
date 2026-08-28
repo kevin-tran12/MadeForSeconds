@@ -84,6 +84,24 @@ def test_persistent_denial_raises_timeout_and_does_not_hang():
     assert len(clock.sleeps) >= 2
 
 
+def test_slow_probe_returning_true_after_the_deadline_is_rejected():
+    """check() itself can be a slow network call, not an instant operation --
+    a call that starts before the deadline but doesn't return until after it
+    must not be accepted just because it eventually said True.
+
+    Reproduces the exact scenario reported: a 10s deadline, a probe that
+    (by the time it completes) has pushed the clock to 11s and returns True.
+    """
+    clock = _FakeClock()
+
+    def slow_probe_that_succeeds() -> bool:
+        clock.t += 11.0  # simulates the probe call itself taking 11s
+        return True
+
+    with pytest.raises(TimeoutError):
+        wait_until(slow_probe_that_succeeds, deadline_seconds=10.0, sleep=clock.sleep, now=clock.now)
+
+
 def test_success_observed_only_after_deadline_is_rejected():
     """A check() that would eventually return True, but not soon enough,
     must still raise TimeoutError -- not be accepted late.
