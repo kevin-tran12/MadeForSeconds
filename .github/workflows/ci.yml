@@ -45,13 +45,27 @@ jobs:
         run: pip install bandit pip-audit
 
       - name: Bandit — Python SAST (medium+ severity)
-        run: bandit -r backend/app -ll
+        # Also covers the two Cloud Functions (terraform/modules/*/*_function/)
+        # — billing_function holds run.admin on the backend service and
+        # secret_pruner_function holds secretmanager.versions.destroy, so a
+        # vulnerability there is at least as consequential as one in the
+        # backend app.
+        run: |
+          bandit -r backend/app -ll
+          bandit -r terraform/modules/cost-controls/billing_function -ll
+          bandit -r terraform/modules/secret-maintenance/secret_pruner_function -ll
 
       - name: pip-audit — Python dependency CVEs
         # requirements.lock, not requirements.txt: audit what actually ships,
-        # not whatever a range happens to resolve to on a given day.
+        # not whatever a range happens to resolve to on a given day. The two
+        # Cloud Functions have no separate lock step (see their
+        # requirements.txt headers — the whole file is already fully pinned,
+        # direct and transitive alike, so it doubles as its own lock file).
         # CVE-2026-4539: pygments (via rich) — no fix released yet, ignore until patch ships
-        run: pip-audit -r backend/requirements.lock --ignore-vuln CVE-2026-4539
+        run: |
+          pip-audit -r backend/requirements.lock --ignore-vuln CVE-2026-4539
+          pip-audit -r terraform/modules/cost-controls/billing_function/requirements.txt
+          pip-audit -r terraform/modules/secret-maintenance/secret_pruner_function/requirements.txt
 
       - name: Set up Node
         uses: actions/setup-node@v7

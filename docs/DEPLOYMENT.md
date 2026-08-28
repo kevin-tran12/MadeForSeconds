@@ -756,22 +756,50 @@ exists solely to prove this end-to-end without ever risking a real secret:
    versions must not also compromise the thing that undoes its mistakes.
    Confirm the value is still readable:
    `gcloud secrets versions access VERSION --secret=secret-pruner-canary`
+5. Remove `"secret-pruner-canary"` from `secret_pruner_write_enabled_ids` and
+   `terraform apply` again. Skipping this step leaves the canary allowlisted
+   for real, so next week's scheduled run destroys the very version you just
+   restored — `gcloud functions describe secret-pruner --region us-central1
+   --gen2 --format="value(serviceConfig.environmentVariables.WRITE_ENABLED_SECRET_IDS)"`
+   should come back empty (or list only whatever real secrets you've since
+   allowlisted) before you consider the drill done.
 
 Only once that full cycle succeeds should a real secret's id go into
 `secret_pruner_write_enabled_ids`.
 
-**If pruning stops for one secret.** `secret-pruner` skips a secret entirely,
-rather than guessing, whenever that secret's numerically latest version is
-not `ENABLED` — usually a rotation that added a version and never enabled it.
-This fires the "Secret pruner found a disabled latest version" alert email.
-`gcloud secrets versions list <secret-id>` to see why, then enable or disable
-the stray version by hand; pruning resumes for that secret on the next run.
+**If pruning stops, or a destroy fails.** One alert policy, two conditions:
+
+- **Anomaly** — `secret-pruner` skips a secret entirely, rather than
+  guessing, whenever that secret's numerically latest version is not
+  `ENABLED` — usually a rotation that added a version and never enabled it.
+  `gcloud secrets versions list <secret-id>` to see why, then enable or
+  disable the stray version by hand; pruning resumes for that secret on the
+  next run.
+- **Error** — a secret couldn't be listed, or a specific version failed to
+  destroy (e.g. an etag conflict from a concurrent change). This also makes
+  the function return a non-2xx response, so Cloud Scheduler's own
+  `retry_config` gets a few immediate attempts to recover before the alert
+  really means something's stuck. Check the `secret-pruner` Cloud Run
+  revision's logs for the `SECRET_PRUNE_ERROR` line naming the secret and the
+  underlying error.
+
+Both fire the same "Secret pruner needs attention" alert email.
 
 **Cost.** The pruner's own Cloud Scheduler job is a genuine 4th job on this
 billing account (~$0.10/month — the first 3 are free); see
-[GCP free tier summary](#gcp-free-tier-summary) below. Steady-state, pruning
-down to 2 enabled versions per secret is expected to *reduce* the Secret
-Manager line versus today's unpruned baseline, not increase it.
+[GCP free tier summary](#gcp-free-tier-summary) below. This was weighed and
+accepted during this story's design review against a $1.00/month ceiling for
+the combined Secret Manager + Scheduler line, well above a plausible
+multi-secret rotation-overlap spike.
+
+The moment this merges and applies, spend on this line goes *up*, not down:
+the canary secret itself is one more active version (today's already-unpruned
+baseline plus one), and the Scheduler job is billable from its first
+invocation — while `secret_pruner_write_enabled_ids` stays empty by design
+until the recovery drill above succeeds, so no real secret is actually pruned
+yet. The Secret Manager line only starts trending back down once real secrets
+are allowlisted; steady-state, pruning down to 2 enabled versions per secret
+is expected to net out below today's unpruned baseline.
 
 ### Removing an optional secret
 
