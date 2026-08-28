@@ -25,11 +25,16 @@ concurrent state change on that specific version (someone hand-disabling it,
 or a second run overlapping) is rejected by the API rather than silently
 overwritten.
 
-A secret that does not exist in this environment (e.g. resend-api-key, when
-that feature has never been enabled) is reported as skipped, not an error —
-SECRET_IDS is built from modules/security/secrets.tf's local.created_secrets,
-which already carries null for anything not created; only names that survive
-that filter reach here, but an out-of-band deletion could still race it.
+A secret that isn't configured in this environment (e.g. resend-api-key, when
+that feature has never been enabled) never reaches here at all — SECRET_IDS
+is built by Terraform from modules/security/secrets.tf's
+local.created_secrets, which already carries null for anything not created,
+and only surviving names make it into the deployed env var. That means a
+NotFound at runtime is never the "not configured" case; it means a secret
+Terraform's config says should exist has been deleted out of band, which is
+real drift worth surfacing loudly — it may also mean mfs-backend just lost a
+credential it depends on. It is treated as a per-secret failure like any
+other, not a benign skip.
 
 Every other per-secret failure is isolated to that secret: one secret's error
 must not stop the others from being pruned. But isolation is not the same as
@@ -55,7 +60,6 @@ clock the API keeps for it.
 import os
 
 import functions_framework
-from google.api_core.exceptions import NotFound
 from google.cloud import secretmanager
 from google.cloud.secretmanager_v1.types import DestroySecretVersionRequest
 
@@ -139,15 +143,18 @@ def plan_destructions(versions: list[dict], keep_enabled_count: int = KEEP_ENABL
 def process_secret(client: secretmanager.SecretManagerServiceClient, secret_id: str, write_enabled: bool) -> dict:
     """Lists, plans, and (if allowed) destroys old versions for one secret.
 
-    Never raises for a missing secret — that is a normal "not configured in
-    this environment" outcome, reported as skipped. Any other failure while
-    listing propagates to the caller, which isolates it per-secret.
+    Does NOT special-case a missing secret as benign. SECRET_IDS is built by
+    Terraform from local.created_secrets, which already excludes anything not
+    created — every name that reaches here is, per current Terraform config,
+    supposed to exist. A NotFound here means real drift: someone deleted a
+    configured secret out of band, or the deployment's config and its actual
+    GCP state have diverged. That is exactly the kind of thing worth
+    surfacing loudly (it may also mean mfs-backend just lost a credential it
+    depends on), so it propagates to the caller like any other listing
+    failure rather than being swallowed as "skipped".
     """
     parent = client.secret_path(PROJECT_ID, secret_id)
-    try:
-        versions = [_version_info(v) for v in client.list_secret_versions(parent=parent)]
-    except NotFound:
-        return {"skipped": "secret not found"}
+    versions = [_version_info(v) for v in client.list_secret_versions(parent=parent)]
 
     candidates, anomaly = plan_destructions(versions)
 

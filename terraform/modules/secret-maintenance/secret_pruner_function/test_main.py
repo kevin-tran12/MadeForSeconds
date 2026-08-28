@@ -143,6 +143,38 @@ def test_no_versions_is_not_an_anomaly(pruner):
     assert anomaly is None
 
 
+def test_anomaly_clears_by_enabling_the_latest_version_itself(pruner):
+    """Documented recovery path #1: the disabled latest version's value was
+    actually fine, so the fix is to enable that exact version — not some
+    other one. Disabling the already-disabled version again, or enabling an
+    older one, would leave version 3 as the still-disabled numerical latest
+    and never clear the anomaly; only version 3 itself becoming ENABLED does."""
+    before = [_info(pruner, 3, "DISABLED"), _info(pruner, 2, "ENABLED"), _info(pruner, 1, "ENABLED")]
+    _, anomaly_before = pruner.plan_destructions(before)
+    assert anomaly_before is not None
+
+    after_enabling_v3 = [_info(pruner, 3, "ENABLED"), _info(pruner, 2, "ENABLED"), _info(pruner, 1, "ENABLED")]
+    candidates_after, anomaly_after = pruner.plan_destructions(after_enabling_v3)
+    assert anomaly_after is None
+    assert [v["number"] for v in candidates_after] == [1]
+
+
+def test_anomaly_clears_by_rotating_a_new_version_on_top(pruner):
+    """Documented recovery path #2: version 3's value was bad, so a fresh
+    version 4 is added instead. Version 3 stays disabled — never re-enabled —
+    but the anomaly clears because the numerically latest version (4) is now
+    ENABLED, and version 3 stays protected (not pruned) since it's still at
+    or above the new floor."""
+    before = [_info(pruner, 3, "DISABLED"), _info(pruner, 2, "ENABLED"), _info(pruner, 1, "ENABLED")]
+    _, anomaly_before = pruner.plan_destructions(before)
+    assert anomaly_before is not None
+
+    after_rotating_v4 = before + [_info(pruner, 4, "ENABLED")]
+    candidates_after, anomaly_after = pruner.plan_destructions(after_rotating_v4)
+    assert anomaly_after is None
+    assert 3 not in [v["number"] for v in candidates_after]
+
+
 def test_with_only_one_enabled_version_an_older_disabled_one_is_still_prunable(pruner):
     """No enabled predecessor exists to protect — "keep the newest 2 enabled"
     only ever protects versions that are actually enabled, so a disabled
@@ -272,16 +304,45 @@ def test_process_secret_anomaly_never_calls_destroy(pruner):
     assert "anomaly" in result
 
 
-def test_process_secret_missing_secret_is_skipped_not_raised(pruner):
+def test_process_secret_missing_secret_raises_it_is_not_a_benign_skip(pruner):
+    """SECRET_IDS is built by Terraform to exclude anything not configured, so
+    a NotFound here means real drift (an out-of-band deletion of a secret
+    Terraform's config says should exist) — that must propagate like any
+    other listing failure, not be swallowed as a normal outcome."""
     from google.api_core.exceptions import NotFound
 
     client = MagicMock()
     client.secret_path.return_value = "projects/test-project/secrets/gone"
     client.list_secret_versions.side_effect = NotFound("no such secret")
 
-    result = pruner.process_secret(client, "gone", write_enabled=True)
+    with pytest.raises(NotFound):
+        pruner.process_secret(client, "gone", write_enabled=True)
 
-    assert result == {"skipped": "secret not found"}
+
+def test_entry_point_treats_a_deleted_configured_secret_as_a_hard_failure(pruner, monkeypatch, capsys):
+    """End-to-end: a secret vanishing out from under a configured deployment
+    must make the whole run report failure and log the error marker, not
+    return 200 with a quiet "skipped" entry."""
+    from google.api_core.exceptions import NotFound
+
+    client = MagicMock()
+    client.secret_path.return_value = "projects/test-project/secrets/admin-emails"
+
+    def _list(parent):
+        if "admin-emails" in parent:
+            raise NotFound("no such secret")
+        return []
+
+    client.list_secret_versions.side_effect = _list
+    monkeypatch.setattr(pruner, "secretmanager", MagicMock(SecretManagerServiceClient=lambda: client))
+
+    body, status = pruner.prune_secret_versions(MagicMock())
+
+    assert status == 500
+    assert "error" in body["admin-emails"]
+    out = capsys.readouterr().out
+    assert "SECRET_PRUNE_ERROR" in out
+    assert "admin-emails" in out
 
 
 def test_process_secret_logs_the_error_marker_on_a_destroy_failure(pruner, capsys):

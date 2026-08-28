@@ -282,9 +282,21 @@ resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
       **Anomaly** — a secret's numerically latest version is not ENABLED, so
       the pruner skipped it entirely rather than guessing which older version
       is really current. Investigate: `gcloud secrets versions list
-      <secret-id>`. Usually a rotation added a version and never enabled it —
-      decide whether to enable the intended one or disable the stray one,
-      then the pruner resumes normal handling for that secret next run.
+      <secret-id>`. Usually a rotation added a version and never enabled it.
+      Version numbers never change, so the fix has to change what counts as
+      "latest," not just poke at some other version:
+        - If that latest version's value is actually good: enable that exact
+          version — `gcloud secrets versions enable <that-version>
+          --secret=<secret-id>`.
+        - If it's bad and should never be enabled: add a fresh version on top
+          of it — `gcloud secrets versions add <secret-id> --data-file=-` —
+          so a newer, enabled version becomes the latest. The bad version
+          stays disabled and harmless; it's still protected from destruction
+          by the same floor that protects any two most-recent enabled
+          versions, and ages out of that protection naturally as further
+          rotations happen.
+      Either way, the pruner resumes normal handling for that secret next run
+      once its latest version is ENABLED again.
 
       **Error** — a secret couldn't be listed, or a version failed to
       destroy (e.g. an etag conflict from a concurrent change). Check the
