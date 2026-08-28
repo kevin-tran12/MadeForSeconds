@@ -92,9 +92,10 @@ This provisions, across five modules (`modules/security`, `modules/storage`,
 - Cloud Build CI/CD trigger
 - GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, Instagram token)
 - Cloud Scheduler jobs (weekly Instagram token rotation when
-  `instagram_access_token` is set, weekly usage report, monthly budget-breaker
-  reset)
+  `instagram_access_token` is set, weekly usage report, weekly Secret Manager
+  version pruning, monthly budget-breaker reset)
 - Budget alerting and the auto-kill Cloud Functions
+- Secret Manager version pruning Cloud Function (`secret-pruner`)
 - Uptime and error-rate monitoring
 - All required GCP APIs and IAM service accounts
 
@@ -697,6 +698,81 @@ All secrets are stored in GCP Secret Manager. To rotate (e.g. Stripe keys):
    gcloud run services update mfs-backend --region us-central1 --project made-for-seconds
    ```
 
+Stripe, Resend, and the subscriber JWT secret stay manual — there is no
+rotation API for the first two, and the JWT secret is self-issued but
+`subscriber_auth.py` verifies against a single key with no multi-key support,
+so rotating it invalidates every outstanding subscriber session (a real future
+improvement, not attempted here). Recommended cadence: Stripe/Resend keys
+opportunistically (a suspected leak, an offboarded team member), the JWT
+secret only when you're prepared for every subscriber to need a fresh
+cancellation link.
+
+### Secret version pruning
+
+Every `echo -n ... | gcloud secrets versions add` above leaves the old version
+in place — nothing before this story ever removed one. Secret Manager bills
+per active (non-destroyed) version above a 6-version free allowance **shared
+across the whole billing account**, not per secret, so an unbounded count on
+even one secret (`admin-emails` alone once reached 5 from a single day of
+testing) eats into every other secret's free allowance too.
+
+**Mechanism.** A dedicated Cloud Function (`secret-pruner`, its own service
+account, no relation to `mfs-backend`) runs weekly via Cloud Scheduler
+(`secret-version-pruner`, 05:00 UTC Monday — an hour after the Instagram token
+rotates, so that week's new version is already accounted for). For every
+configured secret it keeps the newest 2 `ENABLED` versions — and anything at
+or above that "floor," even a `DISABLED` version — and destroys everything
+older. `secretmanager.versions.destroy` is deliberately never reachable from
+`mfs-backend`; only `secret-pruner` holds it, and only on the application
+secrets (`terraform/modules/secret-maintenance/secret_pruner.tf`).
+
+**Dry-run by default.** A secret is only actually pruned if its `secret_id`
+appears in the `secret_pruner_write_enabled_ids` tfvar (empty list by
+default). Every other configured secret still runs the full selection logic
+and logs exactly what it *would* destroy — check Cloud Logging for the
+`secret-pruner` Cloud Run revision after a scheduled run, or invoke it by hand:
+```bash
+gcloud scheduler jobs run secret-version-pruner --location us-central1 --project made-for-seconds
+```
+
+**Recovery — do this drill before allowlisting any real secret.** Every
+destroy sets `version_destroy_ttl = 604800s` (7 days) on the secret first
+(`modules/security/secrets.tf`), so a "destroy" call only disables the version
+immediately; permanent deletion happens a week later. A dedicated canary
+secret (`secret-pruner-canary`, `terraform output secret_pruner_canary_id`)
+exists solely to prove this end-to-end without ever risking a real secret:
+
+1. Add a couple of extra versions the normal out-of-band way:
+   `echo -n "v2" | gcloud secrets versions add secret-pruner-canary --data-file=-`
+   (repeat for a v3).
+2. Add `"secret-pruner-canary"` to `secret_pruner_write_enabled_ids` and
+   `terraform apply`.
+3. Run the function (command above), then confirm the oldest version moved to
+   `DISABLED` with a `scheduled_destroy_time`:
+   `gcloud secrets versions list secret-pruner-canary`
+4. Restore it: `gcloud secrets versions enable VERSION --secret=secret-pruner-canary`
+   — this cancels the scheduled destruction. `secret-pruner`'s own role does
+   **not** grant `.enable`, by design: a bug in the thing that destroys
+   versions must not also compromise the thing that undoes its mistakes.
+   Confirm the value is still readable:
+   `gcloud secrets versions access VERSION --secret=secret-pruner-canary`
+
+Only once that full cycle succeeds should a real secret's id go into
+`secret_pruner_write_enabled_ids`.
+
+**If pruning stops for one secret.** `secret-pruner` skips a secret entirely,
+rather than guessing, whenever that secret's numerically latest version is
+not `ENABLED` — usually a rotation that added a version and never enabled it.
+This fires the "Secret pruner found a disabled latest version" alert email.
+`gcloud secrets versions list <secret-id>` to see why, then enable or disable
+the stray version by hand; pruning resumes for that secret on the next run.
+
+**Cost.** The pruner's own Cloud Scheduler job is a genuine 4th job on this
+billing account (~$0.10/month — the first 3 are free); see
+[GCP free tier summary](#gcp-free-tier-summary) below. Steady-state, pruning
+down to 2 enabled versions per secret is expected to *reduce* the Secret
+Manager line versus today's unpruned baseline, not increase it.
+
 ### Removing an optional secret
 
 This applies to `redis_url`, `stripe_secret_key`, `stripe_webhook_secret`,
@@ -899,4 +975,5 @@ then required.
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
-| Secret Manager | 6 active secrets free · 10K access/mo | Within limits |
+| Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded |
+| Cloud Scheduler | 3 free jobs per billing account | 4 jobs in use (Instagram refresh, weekly usage report, secret pruning, budget-breaker reset) — the 4th is ~$0.10/month |
