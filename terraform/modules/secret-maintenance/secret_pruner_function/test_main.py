@@ -10,10 +10,13 @@ unusable if they regress:
     "more prunable"
   - a secret whose latest version is not ENABLED is skipped entirely, not
     guessed at
+  - a version already scheduled for delayed destruction is never selected
+    again — a retry or next week's run must not re-issue destroy on it
   - nothing is actually destroyed unless the secret is in the write-enabled
     allowlist
   - one secret's failure (missing secret, a destroy conflict) never stops the
-    others from being processed
+    others from being processed, but never fails silently either — any
+    failure at all surfaces as a non-2xx response
 
 Standing caveat, same as billing_function/test_main.py: these tests mock the
 Secret Manager client, so they verify our selection logic and orchestration,
@@ -45,20 +48,30 @@ def pruner(monkeypatch):
     return importlib.reload(main)
 
 
-def _version(pruner, number: int, state: str, etag: str = "etag", secret_id: str = "test-secret"):
+def _version(pruner, number: int, state: str, etag: str = "etag", secret_id: str = "test-secret", pending_destroy: bool = False):
+    import datetime
+
     from google.cloud.secretmanager_v1.types import SecretVersion
 
     v = SecretVersion()
     v.name = f"projects/test-project/secrets/{secret_id}/versions/{number}"
     v.state = getattr(SecretVersion.State, state)
     v.etag = etag
+    if pending_destroy:
+        v.scheduled_destroy_time = datetime.datetime.now(datetime.timezone.utc)
     return v
 
 
-def _info(pruner, number, state, etag="etag"):
+def _info(pruner, number, state, etag="etag", pending_destroy=False):
     """A plain dict shaped like _version_info's output — for plan_destructions,
     which is pure and never touches a proto."""
-    return {"number": number, "state": state, "etag": etag, "name": f"v{number}"}
+    return {
+        "number": number,
+        "state": state,
+        "etag": etag,
+        "name": f"v{number}",
+        "pending_destroy": pending_destroy,
+    }
 
 
 # ─── plan_destructions ────────────────────────────────────────────────────────
@@ -140,6 +153,60 @@ def test_with_only_one_enabled_version_an_older_disabled_one_is_still_prunable(p
     assert anomaly is None
 
 
+def test_version_already_scheduled_for_destruction_is_never_a_candidate_again(pruner):
+    """A prior successful destroy leaves the version DISABLED with a
+    scheduled_destroy_time — a retry, a manual re-run, or next week's run
+    landing before the 7-day TTL elapses must not re-select it."""
+    versions = [
+        _info(pruner, 3, "ENABLED"),
+        _info(pruner, 2, "ENABLED"),
+        _info(pruner, 1, "DISABLED", pending_destroy=True),
+    ]
+    candidates, anomaly = pruner.plan_destructions(versions)
+    assert candidates == []
+    assert anomaly is None
+
+
+def test_disabled_version_without_a_scheduled_destroy_is_still_a_candidate(pruner):
+    """Only pending_destroy exempts a version — an ordinary disabled leftover
+    (never destroyed, just disabled by hand) is still fair game below the
+    floor. Guards against plan_destructions treating every DISABLED version
+    as if it were already scheduled."""
+    versions = [
+        _info(pruner, 3, "ENABLED"),
+        _info(pruner, 2, "ENABLED"),
+        _info(pruner, 1, "DISABLED", pending_destroy=False),
+    ]
+    candidates, _ = pruner.plan_destructions(versions)
+    assert [v["number"] for v in candidates] == [1]
+
+
+def test_plan_destructions_does_not_reselect_after_a_successful_destroy_response(pruner):
+    """End-to-end shape of the bug: run the planner, "destroy" the resulting
+    candidate (flipping it to DISABLED + pending_destroy, the shape Secret
+    Manager's own list response takes after a real destroy call succeeds),
+    then run the planner again on that updated listing. It must come back
+    empty, not re-select the same version."""
+    versions = [_info(pruner, 3, "ENABLED"), _info(pruner, 2, "ENABLED"), _info(pruner, 1, "ENABLED")]
+    candidates, _ = pruner.plan_destructions(versions)
+    assert [v["number"] for v in candidates] == [1]
+
+    versions_after_destroy = [
+        _info(pruner, 3, "ENABLED"),
+        _info(pruner, 2, "ENABLED"),
+        _info(pruner, 1, "DISABLED", pending_destroy=True),
+    ]
+    candidates_again, _ = pruner.plan_destructions(versions_after_destroy)
+    assert candidates_again == []
+
+
+def test_version_info_reads_pending_destroy_from_the_real_proto(pruner):
+    scheduled = pruner._version_info(_version(pruner, 1, "DISABLED", pending_destroy=True))
+    unscheduled = pruner._version_info(_version(pruner, 2, "DISABLED", pending_destroy=False))
+    assert scheduled["pending_destroy"] is True
+    assert unscheduled["pending_destroy"] is False
+
+
 # ─── process_secret ───────────────────────────────────────────────────────────
 
 
@@ -217,6 +284,21 @@ def test_process_secret_missing_secret_is_skipped_not_raised(pruner):
     assert result == {"skipped": "secret not found"}
 
 
+def test_process_secret_logs_the_error_marker_on_a_destroy_failure(pruner, capsys):
+    """The log-based alert condition in secret_pruner.tf matches this exact
+    string — this must fire right where the failure happens, not just get
+    swallowed into the returned "errored" list."""
+    versions = [_version(pruner, n, "ENABLED") for n in (1, 2, 3)]
+    client = _client_listing(pruner, versions)
+    client.destroy_secret_version.side_effect = Exception("etag mismatch")
+
+    pruner.process_secret(client, "foo", write_enabled=True)
+
+    out = capsys.readouterr().out
+    assert "SECRET_PRUNE_ERROR" in out
+    assert "foo" in out
+
+
 # ─── prune_secret_versions (entry point) ──────────────────────────────────────
 
 
@@ -241,9 +323,10 @@ def test_entry_point_all_secrets_erroring_returns_500(pruner, monkeypatch):
     assert all("error" in v for v in body.values())
 
 
-def test_entry_point_partial_failure_still_returns_200(pruner, monkeypatch):
-    """One secret erroring while another succeeds is real progress — a
-    scheduler retry would just repeat the part that already worked."""
+def test_entry_point_partial_hard_error_still_returns_500(pruner, monkeypatch):
+    """One secret erroring while another succeeds must still surface as a
+    failure — otherwise a single secret stuck erroring forever hides behind
+    the rest of the run succeeding, silently and forever."""
 
     def _mixed(client, sid, write_enabled):
         if sid == "admin-emails":
@@ -254,9 +337,39 @@ def test_entry_point_partial_failure_still_returns_200(pruner, monkeypatch):
 
     body, status = pruner.prune_secret_versions(MagicMock())
 
-    assert status == 200
+    assert status == 500
     assert "error" in body["admin-emails"]
     assert body["stripe-secret-key"] == {"dry_run_would_destroy": []}
+
+
+def test_entry_point_a_destroy_error_without_a_raised_exception_still_returns_500(pruner, monkeypatch):
+    """process_secret returning normally with a non-empty "errored" list (a
+    per-version destroy failure that it already isolated) must still fail the
+    run overall — this path never raises, so the 500 has to come from
+    inspecting the result, not from a try/except around process_secret."""
+
+    def _one_errored(client, sid, write_enabled):
+        if sid == "admin-emails":
+            return {"destroyed": [], "errored": [{"version": 1, "error": "etag mismatch"}]}
+        return {"dry_run_would_destroy": []}
+
+    monkeypatch.setattr(pruner, "process_secret", _one_errored)
+
+    body, status = pruner.prune_secret_versions(MagicMock())
+
+    assert status == 500
+    assert body["admin-emails"]["errored"]
+
+
+def test_entry_point_logs_the_error_marker_for_a_hard_failure(pruner, monkeypatch, capsys):
+    def _boom(client, sid, write_enabled):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(pruner, "process_secret", _boom)
+    pruner.prune_secret_versions(MagicMock())
+
+    out = capsys.readouterr().out
+    assert "SECRET_PRUNE_ERROR" in out
 
 
 def test_entry_point_no_secrets_configured_returns_200(pruner, monkeypatch):

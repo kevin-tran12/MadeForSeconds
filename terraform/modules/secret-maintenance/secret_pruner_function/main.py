@@ -30,10 +30,26 @@ that feature has never been enabled) is reported as skipped, not an error —
 SECRET_IDS is built from modules/security/secrets.tf's local.created_secrets,
 which already carries null for anything not created; only names that survive
 that filter reach here, but an out-of-band deletion could still race it.
+
 Every other per-secret failure is isolated to that secret: one secret's error
-must not stop the others from being pruned. The run only returns a non-2xx
-response when it made no safe progress at all, so Cloud Scheduler's bounded
-retry_config (secret_pruner.tf) has something worth retrying.
+must not stop the others from being pruned. But isolation is not the same as
+silence — any failure at all (a secret that couldn't be listed, or a single
+version that failed to destroy) logs SECRET_PRUNE_ERROR and makes the whole
+run return a non-2xx response, so Cloud Scheduler's bounded retry_config
+(secret_pruner.tf) actually engages and the alert policy actually fires.
+Retrying the whole run is safe even for the secrets that already succeeded:
+plan_destructions never re-selects a version that already has a
+scheduled_destroy_time (see below), so a retry's destroy calls only touch
+versions still genuinely awaiting a first attempt.
+
+A version already scheduled for delayed destruction (state DISABLED with
+scheduled_destroy_time set — see
+https://cloud.google.com/secret-manager/docs/delay-destruction-of-secret-versions)
+is never selected as a candidate again. Without this, a retry, a manual
+re-run, or next week's run landing before the 7-day version_destroy_ttl
+elapses would call destroy_secret_version on a version already mid-deletion —
+at best a wasted, failing API call, at worst resetting whatever destruction
+clock the API keeps for it.
 """
 
 import os
@@ -45,8 +61,10 @@ from google.cloud.secretmanager_v1.types import DestroySecretVersionRequest
 
 PROJECT_ID = os.environ["GCP_PROJECT_ID"]
 
-# Matched verbatim by google_monitoring_alert_policy.secret_prune_anomaly.
+# Both matched verbatim by google_monitoring_alert_policy.secret_prune_anomaly's
+# two conditions.
 ANOMALY_MARKER = "SECRET_PRUNE_ANOMALY"
+ERROR_MARKER = "SECRET_PRUNE_ERROR"
 
 # Sorting versions by number is equivalent to sorting by create_time — Secret
 # Manager version numbers are assigned monotonically and never reused — and
@@ -76,6 +94,12 @@ def _version_info(version) -> dict:
         "name": version.name,
         "state": version.state.name,
         "etag": version.etag,
+        # Presence (not the timestamp value itself) is all plan_destructions
+        # needs: a DISABLED version with this set already has a destroy
+        # scheduled and must never be selected again. Proto3 message fields
+        # carry real field presence, so an unset Timestamp is falsy here and
+        # a set one is truthy — no separate HasField check needed.
+        "pending_destroy": bool(version.scheduled_destroy_time),
     }
 
 
@@ -105,7 +129,9 @@ def plan_destructions(versions: list[dict], keep_enabled_count: int = KEEP_ENABL
 
     candidates = [
         v for v in versions
-        if v["number"] < floor and v["state"] in ("ENABLED", "DISABLED")
+        if v["number"] < floor
+        and v["state"] in ("ENABLED", "DISABLED")
+        and not v.get("pending_destroy")
     ]
     return candidates, None
 
@@ -145,6 +171,7 @@ def process_secret(client: secretmanager.SecretManagerServiceClient, secret_id: 
             destroyed.append(v["number"])
         except Exception as exc:  # noqa: BLE001 - isolate one bad version from the rest of this secret
             errored.append({"version": v["number"], "error": str(exc)})
+            print(f"{ERROR_MARKER} secret={secret_id} version={v['number']}: {exc}")
 
     if destroyed:
         print(f"{secret_id}: destroyed versions {destroyed}")
@@ -154,26 +181,33 @@ def process_secret(client: secretmanager.SecretManagerServiceClient, secret_id: 
 @functions_framework.http
 def prune_secret_versions(request):
     """Entry point. Runs every configured secret independently and returns a
-    per-secret summary. 500 only when every secret failed outright — a mix of
-    successes/skips/anomalies and a few hard errors still returns 200, since
-    the run made real progress and a scheduler retry would just repeat the
-    part that already worked.
+    per-secret summary. Any failure at all — one secret that couldn't be
+    listed, or one version within an otherwise-successful secret that failed
+    to destroy — makes the whole run return 500, so Cloud Scheduler's
+    retry_config engages and the alert policy has a marker to match. This is
+    deliberately stricter than "only if everything failed": a single secret
+    stuck erroring forever must not be able to hide behind the rest of the
+    run succeeding.
     """
     secret_ids = _secret_ids_from_env()
     write_enabled_ids = _write_enabled_ids_from_env()
 
     client = secretmanager.SecretManagerServiceClient()
     results = {}
-    hard_errors = 0
+    any_errors = False
 
     for secret_id in secret_ids:
         try:
-            results[secret_id] = process_secret(client, secret_id, secret_id in write_enabled_ids)
+            result = process_secret(client, secret_id, secret_id in write_enabled_ids)
         except Exception as exc:  # noqa: BLE001 - isolate one secret's failure from the others
-            hard_errors += 1
-            results[secret_id] = {"error": str(exc)}
-            print(f"Error processing {secret_id}: {exc}")
+            any_errors = True
+            result = {"error": str(exc)}
+            print(f"{ERROR_MARKER} secret={secret_id}: {exc}")
+        else:
+            if result.get("errored"):
+                any_errors = True
+        results[secret_id] = result
 
-    if secret_ids and hard_errors == len(secret_ids):
+    if any_errors:
         return results, 500
     return results, 200

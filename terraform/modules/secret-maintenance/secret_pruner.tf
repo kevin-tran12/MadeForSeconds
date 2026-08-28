@@ -220,18 +220,26 @@ resource "google_cloud_scheduler_job" "secret_pruner" {
   ]
 }
 
-# ─── Anomaly alert ───────────────────────────────────────────────────────────
-# Fires when a secret's numerically latest version is not ENABLED — a failed
-# rotation left it stuck on a disabled version, or something disabled it by
-# hand. The pruner deliberately skips destroying anything for that secret when
-# this happens (secret_pruner_function/main.py) rather than guessing which
-# older version is "really" current, so this alert is the only signal that it
-# did — silence here does not mean nothing needed attention, it means nothing
-# was skipped.
+# ─── Alerts ──────────────────────────────────────────────────────────────────
+# Two independent conditions on one policy (combiner = OR), matching the two
+# log markers secret_pruner_function/main.py emits:
+#
+#   SECRET_PRUNE_ANOMALY — a secret's numerically latest version is not
+#   ENABLED. The pruner deliberately skips destroying anything for that secret
+#   rather than guessing which older version is "really" current.
+#
+#   SECRET_PRUNE_ERROR — a secret couldn't be listed, or one of its versions
+#   failed to destroy. This also makes the function return non-2xx, so Cloud
+#   Scheduler's retry_config (above) gets a chance to recover on its own —
+#   this alert is for when it doesn't, or to make the failure visible
+#   immediately rather than waiting on retries to exhaust.
+#
+# Either way, silence from this alert does not mean nothing needed attention —
+# it means nothing was skipped or failed.
 resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
   project = var.gcp_project_id
 
-  display_name = "Secret pruner found a disabled latest version"
+  display_name = "Secret pruner needs attention"
   severity     = "WARNING"
   combiner     = "OR"
 
@@ -247,6 +255,18 @@ resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
     }
   }
 
+  conditions {
+    display_name = "Pruner failed to list or destroy a secret's versions"
+
+    condition_matched_log {
+      filter = <<-EOT
+        resource.type="cloud_run_revision"
+        resource.labels.service_name="${google_cloudfunctions2_function.secret_pruner.name}"
+        textPayload:"SECRET_PRUNE_ERROR"
+      EOT
+    }
+  }
+
   alert_strategy {
     notification_rate_limit {
       period = "300s"
@@ -257,14 +277,21 @@ resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
 
   documentation {
     content   = <<-EOT
-      secret-pruner found a secret whose numerically latest version is not
-      ENABLED and skipped pruning it entirely rather than guessing which older
-      version is really current.
+      secret-pruner hit one of two conditions:
 
-      Investigate: `gcloud secrets versions list <secret-id>`. This usually
-      means a rotation added a version and then failed to enable it — decide
-      whether to enable the intended version or disable the stray one, then
-      the pruner resumes normal handling for that secret on its next run.
+      **Anomaly** — a secret's numerically latest version is not ENABLED, so
+      the pruner skipped it entirely rather than guessing which older version
+      is really current. Investigate: `gcloud secrets versions list
+      <secret-id>`. Usually a rotation added a version and never enabled it —
+      decide whether to enable the intended one or disable the stray one,
+      then the pruner resumes normal handling for that secret next run.
+
+      **Error** — a secret couldn't be listed, or a version failed to
+      destroy (e.g. an etag conflict from a concurrent change). Check the
+      `secret-pruner` Cloud Run revision's logs for the SECRET_PRUNE_ERROR
+      line with the secret_id and underlying error. Cloud Scheduler already
+      retries the whole run a few times on its own; this firing means either
+      those retries also failed, or you're seeing it before they've run.
     EOT
     mime_type = "text/markdown"
   }
