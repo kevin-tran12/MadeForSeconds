@@ -54,8 +54,8 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `billing_account` | GCP billing account ID, for the budget alert |
 | `monthly_budget_amount` | Budget cap in USD (default `15`) — see [Cost circuit breaker](#cost-circuit-breaker) |
 | `alert_email` | Address that receives budget and uptime alerts |
-| `instagram_user_id` | Instagram Creator account numeric ID (optional — leave blank to skip) |
-| `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy) |
+| `instagram_user_id` | Instagram Creator account numeric ID (deprecated for now — leave blank; see [MCP server § Instagram publishing](#mcp-server-recipeexpense-automation)) |
+| `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy, if ever re-enabled — currently left blank) |
 | `environment` | `production` or `development` — only these two are meaningful, injected as `ENVIRONMENT`. Defaults to `production`; leave unset unless you know why you're changing it |
 | `state_admin_email` | Google account of whoever runs `terraform apply` — granted `objectAdmin` on the state bucket. Must match the casing already in state if you're picking up an existing deployment; IAM preserves case and a mismatch forces the binding to be replaced |
 
@@ -90,10 +90,13 @@ This provisions, across five modules (`modules/security`, `modules/storage`,
   held under a 7-year retention policy; staging — private and ephemeral)
 - Identity Platform (Firebase Auth) for admin login
 - Cloud Build CI/CD trigger
-- GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, Instagram token)
-- Cloud Scheduler jobs (weekly Instagram token rotation when
-  `instagram_access_token` is set, weekly usage report, weekly Secret Manager
-  version pruning, monthly budget-breaker reset)
+- GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, and
+  Instagram's token if that feature is ever re-enabled — see
+  [MCP server § Instagram publishing](#mcp-server-recipeexpense-automation),
+  currently deprecated)
+- Cloud Scheduler jobs (weekly usage report, weekly Secret Manager version
+  pruning, monthly budget-breaker reset; a 4th weekly Instagram token
+  rotation job only if `instagram_access_token` is set)
 - Budget alerting and the auto-kill Cloud Functions
 - Secret Manager version pruning Cloud Function (`secret-pruner`)
 - Uptime and error-rate monitoring
@@ -814,60 +817,51 @@ Only once that full cycle succeeds should a real secret's id go into
 Both fire the same "Secret pruner needs attention" alert email.
 
 **Cost.** Measured against the live project (`gcloud secrets versions list`
-for all 6 pruner-managed secrets, `admin-emails` through
-`instagram-access-token`, plus the 2 unrelated Cloud Build OAuth secrets that
+for all 5 pruner-managed secrets, `admin-emails` through
+`subscriber-jwt-secret`, plus the 2 unrelated Cloud Build OAuth secrets that
 share the same free allowance). Secret Manager bills $0.06 per active
-(non-destroyed) version-month above the shared 6-version allowance; the
-Scheduler job is a flat 4th-job cost since the first 3 are free.
+(non-destroyed) version-month above the shared 6-version allowance.
+
+Instagram publishing is deprecated for now (incomplete feature, and its
+`instagram-token-refresh` scheduler job was failing) — `instagram_access_token`
+is blanked in tfvars, which destroys that secret, its bindings, and that
+scheduler job entirely, in the same apply that creates secret-pruner's own
+job. Net effect on Cloud Scheduler: **one job removed, one added, still 3
+jobs total** — the free allowance, not a 4th paid job. This story's Scheduler
+line is therefore **$0/month**, not the $0.10/month estimated in earlier
+drafts of this doc, written when Instagram's job was still going to coexist
+with secret-pruner's.
 
 | Scenario | Active versions | Secret Manager (over free 6) | + Scheduler | Total |
 |---|---|---|---|---|
-| Today, before this merges | 15 (13 across the 6 managed secrets + 2 OAuth) | $0.54/mo | — | $0.54/mo |
-| Immediately after merge/apply, before Step 0 has ever run | 16 (+1 canary seed version; allowlist still empty, nothing pruned yet) | $0.60/mo | +$0.10/mo | $0.70/mo |
-| Steady-state (Step 0 has run at least once, drill done, real secrets allowlisted) | ~17 (5 non-rotating secrets × 2 kept + instagram-access-token's realistic ~3 + 2 OAuth + 2 canary) | $0.66/mo | +$0.10/mo | $0.76/mo |
-| Spike (all 6 managed secrets rotate the same week) | ~22 (6 × [2 kept + 1 aging out over its 7-day `version_destroy_ttl`] + 2 OAuth + 2 canary) | ~$0.96/mo | +$0.10/mo | **~$1.06/mo** |
+| Today, before this merges | 15 (13 across the original 6 managed secrets, including instagram-access-token, + 2 OAuth) | $0.54/mo | — | $0.54/mo |
+| Immediately after merge/apply | 15 (instagram-access-token's secret+version gone, +1 canary seed version — nets to no change) | $0.54/mo | $0/mo (3 jobs, still free) | $0.54/mo |
+| Steady-state (Step 0 has run at least once, drill done, real secrets allowlisted) | 14 (5 secrets × 2 kept + 2 OAuth + 2 canary) | $0.48/mo | $0/mo | $0.48/mo |
+| Spike (all 5 managed secrets rotate the same week) | ~19 (5 × [2 kept + 1 aging out over its 7-day `version_destroy_ttl`] + 2 OAuth + 2 canary) | ~$0.78/mo | $0/mo | **~$0.78/mo** |
 
-Two separate reasons no row here is a clean, static number:
+None of the 5 remaining managed secrets auto-rotate — they only grow when a
+human manually rotates one, which the "spike" row already treats as the
+worst case (all five in the same week). Without Instagram's independent
+weekly schedule in the mix, every row above is otherwise a clean, static
+number except for one remaining source of overhead:
 
-- `instagram-access-token` rotates weekly on its own pre-existing schedule
-  (`instagram-token-refresh`), one hour before secret-pruner runs. Each cycle
-  briefly touches 3 enabled versions, and the version pruned back down to
-  below-floor still counts as active for its full 7-day `version_destroy_ttl`
-  window — so this one secret realistically sits at ~3 active versions on an
-  ordinary week, not 2, and briefly overlaps to 4 right at the boundary where
-  one week's aging-out version hasn't finished its TTL before the next week's
-  rotation adds a new one. The other 5 managed secrets only rotate when
-  someone does it manually, so they do settle at a clean 2 between rotations.
-
-- The canary secret carries **two different kinds of overhead, not one**.
-  `_cleanup_and_verify_healthy` (`backend/scripts/smoke_test_secret_pruner.py`)
-  deliberately converges the canary to 2 enabled versions — the same floor
-  the real algorithm protects everywhere else — and since Step 0 is the
-  mandatory first move before the drill, that 2nd enabled version is a
-  **permanent** addition from the first time anyone runs it, not something
-  that ever clears. On top of that permanent 2, each individual smoke-test
-  run also destroys one more disposable version, which then sits
-  disabled-but-active for its own 7-day `version_destroy_ttl` before actually
-  clearing — genuinely transient, self-clearing overhead, but it stacks on
-  top of the permanent 2, not instead of it. The table above already prices
-  in the permanent 2; a smoke-test run adds roughly +1 more active version
-  for up to 7 days after it runs, worth a few more cents while it's active.
+The canary secret carries **two different kinds of overhead, not one**.
+`_cleanup_and_verify_healthy` (`backend/scripts/smoke_test_secret_pruner.py`)
+deliberately converges the canary to 2 enabled versions — the same floor the
+real algorithm protects everywhere else — and since Step 0 is the mandatory
+first move before the drill, that 2nd enabled version is a **permanent**
+addition from the first time anyone runs it, not something that ever clears.
+On top of that permanent 2, each individual smoke-test run also destroys one
+more disposable version, which then sits disabled-but-active for its own
+7-day `version_destroy_ttl` before actually clearing — genuinely transient,
+self-clearing overhead, but it stacks on top of the permanent 2, not instead
+of it. The table above already prices in the permanent 2; a smoke-test run
+adds roughly +1 more active version for up to 7 days after it runs, worth a
+few more cents while it's active.
 
 The spike figure bills the aging-out version for a full month as a
 conservative ceiling — in reality it's destroyed after 7 days and would be
-prorated lower. Read the spike row as "this is roughly the worst case," not
-as headroom below some larger approved number: it lands close to, not safely
-under, a round $1/month.
-
-**Cumulative growth if the drill is never completed.** This is the case
-against leaving `secret_pruner_write_enabled_ids` empty indefinitely.
-Instagram's weekly rotation keeps adding versions regardless of whether
-pruning is ever turned on for it — with pruning off, nothing ever removes
-them. Left alone, that's roughly +4 versions and +$0.24 every month,
-unbounded, on top of whatever the table above already shows. The other 5
-managed secrets only grow when someone manually rotates them, so they don't
-share this specific risk — but the fix for all six is the same one: complete
-the canary recovery drill above and allowlist the real secrets.
+prorated lower.
 
 All of this is small next to the project's real backstop for its dominant
 cost driver: the $15/month budget breaker (see
@@ -877,6 +871,13 @@ Secret Manager, Scheduler, or anything else this story touches. There is no
 mechanism in this project that puts a hard ceiling on the numbers in this
 table — they're bounded by the modeled scenarios above and by the operator
 noticing the alert email, not by anything automatic.
+
+**If Instagram publishing is re-enabled later:** setting `instagram_access_token`
+back in tfvars recreates the secret and its weekly-rotating scheduler job,
+which also makes secret-pruner a genuine 4th (paid, ~$0.10/month) Scheduler
+job again, and reintroduces the "never settles at a clean 2" per-secret
+overhead this doc used to describe for it — re-derive the numbers above
+rather than assuming they still hold.
 
 ### Removing an optional secret
 
@@ -1045,7 +1046,14 @@ require the `iamcredentials` API and the backend SA's
 `terraform apply` once after upgrading). `upload_image_from_url` copies an
 already-hosted https image instead.
 
-**Instagram publishing**: `publish_recipe_to_instagram(slug)` posts the
+**Instagram publishing** (currently deprecated — not a complete feature, and
+its token-refresh scheduler job was failing; `instagram_access_token` is
+blanked in tfvars, which tears down the secret and that job entirely — see
+[Secret version pruning § Cost](#secret-version-pruning) for what re-enabling
+it would change). The tools and code below still exist and work; they're
+just unreachable without a token configured:
+
+`publish_recipe_to_instagram(slug)` posts the
 recipe's GCS image to Instagram and auto-builds a caption from the title,
 description, link, and hashtags (pass `caption=` to override).
 `publish_instagram_post(image_url, caption)` is the generic primitive for any
@@ -1081,4 +1089,4 @@ then required.
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
 | Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded |
-| Cloud Scheduler | 3 free jobs per billing account | 4 jobs in use (Instagram refresh, weekly usage report, secret pruning, budget-breaker reset) — the 4th is ~$0.10/month |
+| Cloud Scheduler | 3 free jobs per billing account | 3 jobs in use (weekly usage report, secret pruning, budget-breaker reset) — all free. Instagram's token-refresh job would have been a genuine 4th (~$0.10/month) had it stayed; see [Secret version pruning § Cost](#secret-version-pruning) for what re-enabling Instagram would change |
