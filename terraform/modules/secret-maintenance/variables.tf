@@ -44,3 +44,8 @@ variable "scheduler_agent_email" {
   description = "Cloud Scheduler's service agent email (google_project_service_identity.cloudscheduler, declared at root — shared with module.backend-service and module.cost-controls, which need the same agent for their own scheduler jobs)"
   type        = string
 }
+
+variable "state_admin_email" {
+  description = "Google account of whoever runs terraform apply — granted roles/iam.serviceAccountTokenCreator on secret_pruner so backend/scripts/smoke_test_secret_pruner.py can impersonate the real pruner identity, the same way service_accounts.tf's backend_operator_impersonation lets smoke_test_receipt_role.py impersonate mfs-backend"
+  type        = string
+}

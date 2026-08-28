@@ -188,6 +188,7 @@ module "secret-maintenance" {
 
   notification_channel  = google_monitoring_notification_channel.budget_email.name
   scheduler_agent_email = google_project_service_identity.cloudscheduler.email
+  state_admin_email     = var.state_admin_email
 
   depends_on = [google_project_service.required_apis]
 }

@@ -735,12 +735,34 @@ and logs exactly what it *would* destroy — check Cloud Logging for the
 gcloud scheduler jobs run secret-version-pruner --location us-central1 --project made-for-seconds
 ```
 
-**Recovery — do this drill before allowlisting any real secret.** Every
-destroy sets `version_destroy_ttl = 604800s` (7 days) on the secret first
+**Recovery — do this before allowlisting any real secret.** Every destroy
+sets `version_destroy_ttl = 604800s` (7 days) on the secret first
 (`modules/security/secrets.tf`), so a "destroy" call only disables the version
 immediately; permanent deletion happens a week later. A dedicated canary
 secret (`secret-pruner-canary`, `terraform output secret_pruner_canary_id`)
-exists solely to prove this end-to-end without ever risking a real secret:
+exists solely to prove this end-to-end without ever risking a real secret.
+
+Step 0 (automated, do this first):
+
+```bash
+cd backend
+python scripts/smoke_test_secret_pruner.py --project made-for-seconds
+```
+
+This invokes the real deployed function through a real OIDC-authenticated
+call (impersonating `secret-pruner`, the same identity Cloud Scheduler uses)
+and, directly against the Secret Manager API, adds its own throw-away
+canary versions, destroys one as `secret-pruner`, confirms the pruning
+algorithm doesn't re-select it, restores it as the operator, and cleans up
+after itself. It proves the IAM grant, the OIDC audience, the deployed
+function's packaging, and the delayed-destroy/re-selection-avoidance logic
+all work against the real API — everything test_main.py's mocked suite
+structurally can't. It does **not** touch `secret_pruner_write_enabled_ids`
+or run `terraform apply` — see the script's own docstring for why. Only after
+this passes does the manual write-path drill below make sense to run.
+
+Steps 1-5 (manual, exercises the actual deployed *write* path via the real
+allowlist):
 
 1. Add a couple of extra versions the normal out-of-band way:
    `echo -n "v2" | gcloud secrets versions add secret-pruner-canary --data-file=-`

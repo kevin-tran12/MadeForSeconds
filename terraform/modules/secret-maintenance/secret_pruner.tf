@@ -49,6 +49,17 @@ resource "google_service_account" "secret_pruner" {
   display_name = "MFS Secret Version Pruner"
 }
 
+# Lets the operator impersonate secret-pruner to run
+# backend/scripts/smoke_test_secret_pruner.py — mocked unit tests can't catch
+# a wrong IAM grant, wrong OIDC audience, or wrong function packaging, only a
+# real invocation authenticated as the real identity can. Same reasoning as
+# service_accounts.tf's backend_operator_impersonation for mfs-backend.
+resource "google_service_account_iam_member" "pruner_operator_impersonation" {
+  service_account_id = google_service_account.secret_pruner.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "user:${var.state_admin_email}"
+}
+
 # Narrower than the predefined roles/secretmanager.secretVersionManager, which
 # also grants .add/.disable/.enable and secrets.rotate — none of which pruning
 # needs. Deliberately excludes .enable: that is the operator's own recovery
