@@ -823,26 +823,35 @@ Scheduler job is a flat 4th-job cost since the first 3 are free.
 | Scenario | Active versions | Secret Manager (over free 6) | + Scheduler | Total |
 |---|---|---|---|---|
 | Today, before this merges | 15 (13 across the 6 managed secrets + 2 OAuth) | $0.54/mo | — | $0.54/mo |
-| Immediately after merge/apply | 16 (+1 canary; allowlist still empty, nothing actually pruned yet) | $0.60/mo | +$0.10/mo | $0.70/mo |
-| Steady-state (drill done, real secrets allowlisted) | ~16 (5 non-rotating secrets × 2 kept + instagram-access-token's realistic ~3 + 2 OAuth + 1 canary) | $0.60/mo | +$0.10/mo | $0.70/mo |
-| Spike (all 6 managed secrets rotate the same week) | ~21 (6 × [2 kept + 1 aging out over its 7-day `version_destroy_ttl`] + 2 OAuth + 1 canary) | ~$0.90/mo | +$0.10/mo | **~$1.00/mo** |
+| Immediately after merge/apply, before Step 0 has ever run | 16 (+1 canary seed version; allowlist still empty, nothing pruned yet) | $0.60/mo | +$0.10/mo | $0.70/mo |
+| Steady-state (Step 0 has run at least once, drill done, real secrets allowlisted) | ~17 (5 non-rotating secrets × 2 kept + instagram-access-token's realistic ~3 + 2 OAuth + 2 canary) | $0.66/mo | +$0.10/mo | $0.76/mo |
+| Spike (all 6 managed secrets rotate the same week) | ~22 (6 × [2 kept + 1 aging out over its 7-day `version_destroy_ttl`] + 2 OAuth + 2 canary) | ~$0.96/mo | +$0.10/mo | **~$1.06/mo** |
 
-Steady-state isn't a clean "2 enabled" resting point for every secret:
-`instagram-access-token` rotates weekly on its own pre-existing schedule
-(`instagram-token-refresh`), one hour before secret-pruner runs. Each cycle
-briefly touches 3 enabled versions, and the version pruned back down to
-below-floor still counts as active for its full 7-day `version_destroy_ttl`
-window — so this one secret realistically sits at ~3 active versions on an
-ordinary week, not 2, and briefly overlaps to 4 right at the boundary where
-one week's aging-out version hasn't finished its TTL before the next week's
-rotation adds a new one. The other 5 managed secrets only rotate when someone
-does it manually, so they do settle at a clean 2 between rotations.
+Two separate reasons no row here is a clean, static number:
 
-Each smoke-test run (`backend/scripts/smoke_test_secret_pruner.py`) also adds
-a temporary +3 active versions on the canary for up to 7 days while its own
-test data ages out — a few cents at most, self-clearing, not counted in the
-table above since it's transient and operator-triggered rather than a
-standing cost.
+- `instagram-access-token` rotates weekly on its own pre-existing schedule
+  (`instagram-token-refresh`), one hour before secret-pruner runs. Each cycle
+  briefly touches 3 enabled versions, and the version pruned back down to
+  below-floor still counts as active for its full 7-day `version_destroy_ttl`
+  window — so this one secret realistically sits at ~3 active versions on an
+  ordinary week, not 2, and briefly overlaps to 4 right at the boundary where
+  one week's aging-out version hasn't finished its TTL before the next week's
+  rotation adds a new one. The other 5 managed secrets only rotate when
+  someone does it manually, so they do settle at a clean 2 between rotations.
+
+- The canary secret carries **two different kinds of overhead, not one**.
+  `_cleanup_and_verify_healthy` (`backend/scripts/smoke_test_secret_pruner.py`)
+  deliberately converges the canary to 2 enabled versions — the same floor
+  the real algorithm protects everywhere else — and since Step 0 is the
+  mandatory first move before the drill, that 2nd enabled version is a
+  **permanent** addition from the first time anyone runs it, not something
+  that ever clears. On top of that permanent 2, each individual smoke-test
+  run also destroys one more disposable version, which then sits
+  disabled-but-active for its own 7-day `version_destroy_ttl` before actually
+  clearing — genuinely transient, self-clearing overhead, but it stacks on
+  top of the permanent 2, not instead of it. The table above already prices
+  in the permanent 2; a smoke-test run adds roughly +1 more active version
+  for up to 7 days after it runs, worth a few more cents while it's active.
 
 The spike figure bills the aging-out version for a full month as a
 conservative ceiling — in reality it's destroyed after 7 days and would be
