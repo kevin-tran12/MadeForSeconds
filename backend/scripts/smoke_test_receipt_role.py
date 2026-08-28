@@ -34,9 +34,13 @@ needs:
     storage.objects.{list,delete} on the project, for scratch-bucket
     lifecycle. Terraform does NOT grant these to the operator (only
     roles/storage.objectAdmin on the separate Terraform state bucket) — this
-    script relies on the operator's own broader project-level access (e.g.
-    Owner/Editor), which is standard for whoever runs `terraform apply`, but
-    is a real gap if a narrower operator identity is ever introduced.
+    script relies on the operator's own broader project-level access.
+    roles/owner works; roles/editor does NOT (confirmed via `gcloud iam
+    roles describe roles/editor` — it excludes storage.buckets.setIamPolicy,
+    .getIamPolicy, .get, and .update, deliberately, same as it excludes
+    setIamPolicy on most resource types). roles/storage.admin (plus the
+    Token Creator grant above) covers everything this script needs without
+    Owner's much wider blast radius, if that's available instead.
 
 Unlike smoke_test_image_pipeline.py, this does NOT require the operator to
 pre-authenticate with `gcloud auth application-default login
@@ -122,7 +126,7 @@ class SmokeTestFailure(Exception):
 def wait_until(
     check: Callable[[], bool],
     *,
-    deadline_seconds: float = 120.0,
+    deadline_seconds: float = 300.0,
     initial_delay: float = 1.0,
     max_delay: float = 15.0,
     sleep: Callable[[float], None] = time.sleep,
@@ -131,22 +135,29 @@ def wait_until(
     """Poll check() with exponential backoff + jitter until it returns True.
 
     Returns the number of attempts taken. Raises TimeoutError if check()
-    never returns True before deadline_seconds elapses (measured via `now`,
-    not attempt count, so a slow check() doesn't silently grant extra
-    retries). `sleep`/`now` are injectable so this is testable without
+    never returns True before deadline_seconds elapses. Enforced as an
+    absolute deadline, not just "check elapsed before each sleep": each
+    sleep is capped to whatever time remains, so a condition first observed
+    after the deadline is never accepted, and total sleep time never exceeds
+    deadline_seconds (both are covered by tests, not just implied). Default
+    is 300s (5 min) — Cloud Storage documents IAM propagation as "commonly
+    about a minute" but sometimes several minutes longer; 120s previously
+    used here was inside that "sometimes longer" range and could reject a
+    correct role. `sleep`/`now` are injectable so this is testable without
     actually waiting — see tests/test_smoke_test_receipt_role.py.
     """
     start = now()
+    deadline = start + deadline_seconds
     delay = initial_delay
     attempt = 0
     while True:
         attempt += 1
         if check():
             return attempt
-        elapsed = now() - start
-        if elapsed >= deadline_seconds:
-            raise TimeoutError(f"condition not met after {attempt} attempts over {elapsed:.1f}s")
-        sleep(delay + random.uniform(0, delay * 0.25))
+        remaining = deadline - now()
+        if remaining <= 0:
+            raise TimeoutError(f"condition not met after {attempt} attempts over {now() - start:.1f}s")
+        sleep(min(delay + random.uniform(0, delay * 0.25), remaining))
         delay = min(delay * 2, max_delay)
 
 
@@ -193,8 +204,16 @@ def run(args: argparse.Namespace) -> int:
         bucket = gcs_module.Bucket(operator_client, bucket_name)
         bucket.soft_delete_policy.retention_duration_seconds = 0
         bucket.iam_configuration.uniform_bucket_level_access_enabled = True
-        bucket = operator_client.create_bucket(bucket, location=args.region)
+        # Set BEFORE the call, not after it returns: if create_bucket() raises
+        # after the server actually created the bucket (response lost,
+        # client-side retries exhausted), skipping cleanup because the call
+        # "failed" would orphan exactly the resource this flag exists to
+        # catch. _delete_bucket_with_verification() below already treats a
+        # bucket that turns out to have never existed as a no-op success
+        # (NotFound on delete), so marking cleanup as required unconditionally
+        # here is safe in both outcomes.
         bucket_created = True
+        bucket = operator_client.create_bucket(bucket, location=args.region)
         policy = bucket.get_iam_policy(requested_policy_version=3)
         policy.bindings.append({"role": role, "members": {f"serviceAccount:{backend_sa_email}"}})
         bucket.set_iam_policy(policy)
@@ -363,8 +382,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--propagation-timeout",
         type=float,
-        default=120.0,
-        help="Max seconds to wait for the IAM grant to take effect before failing (default: 120)",
+        default=300.0,
+        help="Max seconds to wait for the IAM grant to take effect before failing (default: 300)",
     )
     return parser.parse_args()
 

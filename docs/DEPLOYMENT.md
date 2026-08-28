@@ -333,8 +333,12 @@ Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild
 > the project, for scratch-bucket lifecycle. **Terraform does not grant
 > these** — only `roles/storage.objectAdmin` on the separate Terraform state
 > bucket — so this relies on the operator's own broader project-level
-> access (Owner/Editor), same as whoever runs `terraform apply` already
-> needs.
+> access: `roles/owner` works; **`roles/editor` does not** (confirmed —
+> Editor deliberately excludes `storage.buckets.setIamPolicy`/
+> `.getIamPolicy`/`.get`/`.update`, the same way it excludes `setIamPolicy`
+> on most resource types). `roles/storage.admin` (plus the Token Creator
+> grant above) covers everything needed with a narrower blast radius than
+> Owner, if that's available instead.
 >
 > It creates the scratch bucket with soft-delete explicitly disabled (new
 > buckets default to 7 days of it, which would leave a "deleted" bucket

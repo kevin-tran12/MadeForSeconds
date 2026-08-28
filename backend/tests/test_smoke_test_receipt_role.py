@@ -15,7 +15,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from smoke_test_receipt_role import wait_until  # noqa: E402
+from google.api_core.exceptions import NotFound  # noqa: E402
+
+from smoke_test_receipt_role import _delete_bucket_with_verification, wait_until  # noqa: E402
 
 
 class _FakeClock:
@@ -73,11 +75,45 @@ def test_persistent_denial_raises_timeout_and_does_not_hang():
     clock = _FakeClock()
     with pytest.raises(TimeoutError):
         wait_until(lambda: False, deadline_seconds=30.0, initial_delay=1.0, sleep=clock.sleep, now=clock.now)
-    # The fake clock only advances via sleep(), so reaching the deadline at
-    # all proves retries actually happened rather than failing on the first
-    # check.
-    assert clock.t >= 30.0
+    # The fake clock only advances via sleep(), so reaching (approximately)
+    # the deadline proves retries actually happened rather than failing on
+    # the first check. Not an exact `>= 30.0` -- the last sleep is capped to
+    # the remaining time, which can land a hair under 30 depending on the
+    # backoff schedule's last step size.
+    assert clock.t >= 29.9
     assert len(clock.sleeps) >= 2
+
+
+def test_success_observed_only_after_deadline_is_rejected():
+    """A check() that would eventually return True, but not soon enough,
+    must still raise TimeoutError -- not be accepted late.
+
+    Rigged so the true condition is only reachable on the 100th call; the
+    tight deadline/backoff below burns through far fewer attempts than that
+    before giving up, so if this test ever sees a clean return instead of
+    TimeoutError, the deadline stopped being enforced.
+    """
+    calls = {"n": 0}
+
+    def check():
+        calls["n"] += 1
+        return calls["n"] >= 100
+
+    clock = _FakeClock()
+    with pytest.raises(TimeoutError):
+        wait_until(check, deadline_seconds=10.0, initial_delay=1.0, max_delay=2.0, sleep=clock.sleep, now=clock.now)
+    assert calls["n"] < 100
+
+
+def test_total_sleep_never_exceeds_configured_deadline():
+    """Each sleep must be capped to the remaining budget, not the full
+    jittered backoff step -- otherwise the command can run well past
+    --propagation-timeout before finally giving up."""
+    clock = _FakeClock()
+    with pytest.raises(TimeoutError):
+        wait_until(lambda: False, deadline_seconds=17.0, initial_delay=1.0, max_delay=10.0, sleep=clock.sleep, now=clock.now)
+    assert sum(clock.sleeps) <= 17.0 + 1e-6
+    assert clock.t <= 17.0 + 1e-6
 
 
 def test_unexpected_exception_propagates_without_retry():
@@ -89,3 +125,60 @@ def test_unexpected_exception_propagates_without_retry():
     with pytest.raises(ValueError):
         wait_until(_boom, sleep=clock.sleep, now=clock.now)
     assert clock.sleeps == []
+
+
+# ── _delete_bucket_with_verification: ambiguous bucket-creation cleanup ──────
+#
+# In run(), bucket_created is set True *before* calling create_bucket() --
+# if that call raises after the server actually created the bucket (response
+# lost, client retries exhausted), cleanup must still find and remove it
+# rather than skipping it because the create call "failed". These tests
+# cover both outcomes that unconditional cleanup can encounter: the bucket
+# genuinely exists (server-side creation succeeded despite the client-side
+# error), and it genuinely never existed (creation truly failed).
+
+class _FakeBucketHandle:
+    def __init__(self, existed: bool, delete_raises: Exception | None = None):
+        self._existed = existed
+        self._delete_raises = delete_raises
+
+    def delete(self, force=True):
+        if self._delete_raises is not None:
+            raise self._delete_raises
+        self._existed = False
+
+    def exists(self):
+        return self._existed
+
+
+class _FakeStorageClient:
+    def __init__(self, bucket_handle: _FakeBucketHandle):
+        self._handle = bucket_handle
+
+    def bucket(self, name):
+        return self._handle
+
+
+def test_cleanup_removes_a_bucket_the_server_actually_created():
+    """Simulates create_bucket() having raised even though the bucket exists
+    server-side -- cleanup must still find and delete it."""
+    client = _FakeStorageClient(_FakeBucketHandle(existed=True))
+    assert _delete_bucket_with_verification(client, "whatever-bucket") is True
+    assert client.bucket("whatever-bucket").exists() is False
+
+
+def test_cleanup_is_a_safe_noop_when_bucket_never_existed():
+    """Simulates create_bucket() having genuinely failed -- delete() on a
+    bucket that was never created raises NotFound in the real API; that
+    must count as successful cleanup, not an error."""
+    client = _FakeStorageClient(_FakeBucketHandle(existed=False, delete_raises=NotFound("no such bucket")))
+    assert _delete_bucket_with_verification(client, "whatever-bucket") is True
+
+
+def test_cleanup_reports_failure_when_bucket_persists():
+    """A bucket that still exists after every delete attempt must not be
+    reported as cleaned up -- this is what makes the script exit non-zero
+    even when every functional check passed."""
+    handle = _FakeBucketHandle(existed=True, delete_raises=RuntimeError("transient API error"))
+    client = _FakeStorageClient(handle)
+    assert _delete_bucket_with_verification(client, "whatever-bucket", attempts=1) is False
