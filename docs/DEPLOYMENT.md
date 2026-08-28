@@ -824,8 +824,25 @@ Scheduler job is a flat 4th-job cost since the first 3 are free.
 |---|---|---|---|---|
 | Today, before this merges | 15 (13 across the 6 managed secrets + 2 OAuth) | $0.54/mo | — | $0.54/mo |
 | Immediately after merge/apply | 16 (+1 canary; allowlist still empty, nothing actually pruned yet) | $0.60/mo | +$0.10/mo | $0.70/mo |
-| Steady-state (drill done, real secrets allowlisted, resting between rotations) | ~15 (6 secrets × 2 kept + 2 OAuth + 1 canary) | $0.54/mo | +$0.10/mo | $0.64/mo |
+| Steady-state (drill done, real secrets allowlisted) | ~16 (5 non-rotating secrets × 2 kept + instagram-access-token's realistic ~3 + 2 OAuth + 1 canary) | $0.60/mo | +$0.10/mo | $0.70/mo |
 | Spike (all 6 managed secrets rotate the same week) | ~21 (6 × [2 kept + 1 aging out over its 7-day `version_destroy_ttl`] + 2 OAuth + 1 canary) | ~$0.90/mo | +$0.10/mo | **~$1.00/mo** |
+
+Steady-state isn't a clean "2 enabled" resting point for every secret:
+`instagram-access-token` rotates weekly on its own pre-existing schedule
+(`instagram-token-refresh`), one hour before secret-pruner runs. Each cycle
+briefly touches 3 enabled versions, and the version pruned back down to
+below-floor still counts as active for its full 7-day `version_destroy_ttl`
+window — so this one secret realistically sits at ~3 active versions on an
+ordinary week, not 2, and briefly overlaps to 4 right at the boundary where
+one week's aging-out version hasn't finished its TTL before the next week's
+rotation adds a new one. The other 5 managed secrets only rotate when someone
+does it manually, so they do settle at a clean 2 between rotations.
+
+Each smoke-test run (`backend/scripts/smoke_test_secret_pruner.py`) also adds
+a temporary +3 active versions on the canary for up to 7 days while its own
+test data ages out — a few cents at most, self-clearing, not counted in the
+table above since it's transient and operator-triggered rather than a
+standing cost.
 
 The spike figure bills the aging-out version for a full month as a
 conservative ceiling — in reality it's destroyed after 7 days and would be
@@ -835,18 +852,22 @@ under, a round $1/month.
 
 **Cumulative growth if the drill is never completed.** This is the case
 against leaving `secret_pruner_write_enabled_ids` empty indefinitely.
-`instagram-access-token` rotates weekly on its own schedule
-(`instagram-token-refresh`, unrelated to this story) regardless of whether
+Instagram's weekly rotation keeps adding versions regardless of whether
 pruning is ever turned on for it — with pruning off, nothing ever removes
-those versions. Left alone, that's roughly +4 versions and +$0.24 every
-month, unbounded, on top of whatever the table above already shows. The other
-5 managed secrets only grow when someone manually rotates them, so they don't
+them. Left alone, that's roughly +4 versions and +$0.24 every month,
+unbounded, on top of whatever the table above already shows. The other 5
+managed secrets only grow when someone manually rotates them, so they don't
 share this specific risk — but the fix for all six is the same one: complete
 the canary recovery drill above and allowlist the real secrets.
 
-All of this is against the project's actual, enforced ceiling: the $15/month
-budget breaker (see [Cost circuit breaker](#cost-circuit-breaker)), which this
-story's entire cost footprint is roughly 4-7% of even at the modeled spike.
+All of this is small next to the project's real backstop for its dominant
+cost driver: the $15/month budget breaker (see
+[Cost circuit breaker](#cost-circuit-breaker)) — but that breaker only stops
+public Cloud Run request traffic, same as it always has; it does not cap
+Secret Manager, Scheduler, or anything else this story touches. There is no
+mechanism in this project that puts a hard ceiling on the numbers in this
+table — they're bounded by the modeled scenarios above and by the operator
+noticing the alert email, not by anything automatic.
 
 ### Removing an optional secret
 
@@ -1046,7 +1067,7 @@ then required.
 | Cloud Run | 2M req/mo · 360K GB-sec · 180K vCPU-sec | Well under for personal use |
 | Firestore | 50K reads/day · 20K writes/day · 1 GiB storage | Well under |
 | Cloud Storage | 5 GB-months storage (US regions) · 100 GB/mo egress from North America | Minimal for images + receipts |
-| Artifact Registry | 0.5 GB storage | Already measured at ~0.56 GB (`gcloud artifacts repositories describe mfs`) — over the free allowance despite the cleanup policy (keeps ≤ 5 tagged images, but each backend image is large enough that 5 of them exceed 0.5 GB). Billed at Artifact Registry's per-GB-month storage rate on the overage; still cents at this volume. |
+| Artifact Registry | 0.5 GB storage, aggregated per billing account across every repository | Two repositories share this allowance: `mfs` (the backend's own image, cleanup-policy-managed to ≤ 5 tagged) and `gcf-artifacts` (auto-created build output for every Gen2 Cloud Function — budget-killer, budget-resetter, and now secret-pruner). Measured today (`gcloud artifacts repositories describe`) at ~0.34 GB + ~0.15 GB = ~0.49 GB combined — right at the boundary, not safely under it, and it fluctuates with every deploy and every function's build churn. Any overage bills at Artifact Registry's per-GB-month storage rate; still cents at this volume either way. |
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
