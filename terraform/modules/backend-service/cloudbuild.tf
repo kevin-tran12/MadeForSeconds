@@ -3,35 +3,21 @@
 #
 # The trigger below runs as mfs-deploy (modules/security/service_accounts.tf),
 # not mfs-backend — mfs-backend is the Cloud Run runtime identity, and it holds
-# Firestore read/write, the receipts bucket's objectAdmin, every
-# secretAccessor grant, and signBlob. A compromised dependency or a merged
-# build-script change had no business inheriting any of that just to push an
-# image and deploy it, which mfs-deploy's narrower grants (artifactregistry.
-# writer, run.developer, its own logWriter, and actAs on mfs-backend) are
-# scoped to.
+# Firestore read/write, a get+create-only role on the receipts bucket
+# (mfsReceiptsUploader — narrowed from objectAdmin in Epic 2, story 2.2),
+# every secretAccessor grant, and signBlob. A compromised dependency or a
+# merged build-script change had no business inheriting any of that just to
+# push an image and deploy it, which mfs-deploy's narrower grants are scoped
+# to: artifactregistry.writer on the mfs repository specifically, a
+# resource-scoped custom role (mfsCloudRunDeployer, see deploy_iam.tf) on
+# mfs-backend's own Cloud Run service, its own logWriter, and actAs on
+# mfs-backend.
 #
 # mfs-backend's own cloudbuild_artifact_registry / cloudbuild_run_developer
-# grants below are deliberately UNCHANGED in this PR, even though this trigger
-# no longer runs as that identity and so no longer needs them. Removing them
-# now would make this apply able to break the deploy pipeline if mfs-deploy
-# turns out to be missing something — there is no live run to test it against
-# from this environment. They come out in a follow-up PR, once a real push to
-# main has been observed building, pushing, and deploying successfully under
-# mfs-deploy.
-
-# Allow Cloud Build (running as mfs-backend SA) to push images to Artifact Registry
-resource "google_project_iam_member" "cloudbuild_artifact_registry" {
-  project = var.gcp_project_id
-  role    = "roles/artifactregistry.writer"
-  member  = "serviceAccount:${var.backend_sa_email}"
-}
-
-# Allow Cloud Build (running as mfs-backend SA) to deploy to Cloud Run
-resource "google_project_iam_member" "cloudbuild_run_developer" {
-  project = var.gcp_project_id
-  role    = "roles/run.developer"
-  member  = "serviceAccount:${var.backend_sa_email}"
-}
+# grants used to live here too, kept deliberately in place until a real push
+# to main was observed succeeding under mfs-deploy. `gcloud builds list`
+# showed 8 consecutive SUCCESS runs under this trigger before they were
+# removed (Epic 2, story 2.1) — confirmed dead, not just presumed dead.
 
 # Cloud Build trigger (2nd Gen) — fires on push to main branch
 resource "google_cloudbuild_trigger" "backend_deploy" {

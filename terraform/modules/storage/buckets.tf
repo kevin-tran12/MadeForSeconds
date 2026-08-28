@@ -134,15 +134,31 @@ resource "google_storage_bucket" "receipts" {
 # (V4 signing is checked against the signer's live IAM at request time, so the
 # grant has to cover what the URL will do, not just its creation).
 #
-# Still objectAdmin rather than something narrower: the delete permission it
-# carries is now inert on this bucket — the retention policy refuses deletes
-# regardless of IAM — so tightening it would change nothing an attacker could
-# reach. Narrowing to objectCreator + a reader role is tracked with the rest of
-# the least-privilege pass rather than done here, where it would only add a
-# second, weaker copy of a control the storage layer already enforces.
+# Epic 2.2 (least-privilege pass): was roles/storage.objectAdmin. Its delete
+# permission was already inert here — the retention policy above refuses
+# deletes regardless of IAM — but objectAdmin also carries list and overwrite,
+# neither of which any code path uses today. Narrowed to exactly get (signed-
+# URL reads) + create (upload). Deliberately NOT list: list_unlinked_receipts()
+# (Epic 7.1) doesn't exist yet, so granting list now would be a permission
+# sitting unused ahead of the feature that needs it — add it there, alongside
+# that feature's own authz checks, not here. IAM and the retention policy are
+# two independent controls; narrowing this one is belt-and-suspenders on top
+# of the storage-layer control, not a response to a live gap.
+resource "google_project_iam_custom_role" "receipts_uploader" {
+  project     = var.gcp_project_id
+  role_id     = "mfsReceiptsUploader"
+  title       = "MFS Receipts Uploader"
+  description = "Minimum permissions for the backend to upload receipts and serve them via signed URLs — see buckets.tf"
+
+  permissions = [
+    "storage.objects.get",    # signed-URL reads; also required to generate a V4 signed URL
+    "storage.objects.create", # upload
+  ]
+}
+
 resource "google_storage_bucket_iam_member" "backend_receipts" {
   bucket = google_storage_bucket.receipts.name
-  role   = "roles/storage.objectAdmin"
+  role   = google_project_iam_custom_role.receipts_uploader.id
   member = "serviceAccount:${var.backend_sa_email}"
 }
 
