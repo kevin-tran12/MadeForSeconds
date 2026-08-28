@@ -25,7 +25,7 @@ A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger
 | Infrastructure | Terraform |
 | Observability | Cloud Monitoring alert policies (uptime, error rate, 5xx) + weekly usage email, budget-capped infra |
 
-Every GCP service stays within, or just barely above, the always-free tier for personal/low-traffic use — real spend is capped at $15/month and auto-killed if crossed (see [docs/DEPLOYMENT.md § GCP free tier summary](docs/DEPLOYMENT.md#gcp-free-tier-summary)).
+Every GCP service stays within, or just barely above, the always-free tier for personal/low-traffic use. Public request traffic — the dominant cost driver — is auto-cut off if actual spend crosses $15/month; a handful of small always-on lines (storage, Firestore, egress) are not capped by that mechanism but run to cents at this scale (see [docs/DEPLOYMENT.md § Cost circuit breaker](docs/DEPLOYMENT.md#cost-circuit-breaker) and [§ GCP free tier summary](docs/DEPLOYMENT.md#gcp-free-tier-summary)).
 
 > **First-time production setup?** See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 

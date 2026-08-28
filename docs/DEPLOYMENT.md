@@ -772,9 +772,15 @@ Only once that full cycle succeeds should a real secret's id go into
 - **Anomaly** — `secret-pruner` skips a secret entirely, rather than
   guessing, whenever that secret's numerically latest version is not
   `ENABLED` — usually a rotation that added a version and never enabled it.
-  `gcloud secrets versions list <secret-id>` to see why, then enable or
-  disable the stray version by hand; pruning resumes for that secret on the
-  next run.
+  `gcloud secrets versions list <secret-id>` to see why. Version numbers
+  never change, so the fix has to be one of: enable that *exact* version if
+  its value is actually good (`gcloud secrets versions enable <version>
+  --secret=<id>`), or add a fresh version on top of it if it's bad
+  (`gcloud secrets versions add <id> --data-file=-`) so a newer enabled
+  version becomes the latest — disabling the stray version again, or enabling
+  some *other*, older version, does nothing: neither changes which version is
+  numerically newest. Pruning resumes for that secret once its latest version
+  is `ENABLED` again.
 - **Error** — a secret couldn't be listed, or a specific version failed to
   destroy (e.g. an etag conflict from a concurrent change). This also makes
   the function return a non-2xx response, so Cloud Scheduler's own
@@ -785,21 +791,40 @@ Only once that full cycle succeeds should a real secret's id go into
 
 Both fire the same "Secret pruner needs attention" alert email.
 
-**Cost.** The pruner's own Cloud Scheduler job is a genuine 4th job on this
-billing account (~$0.10/month — the first 3 are free); see
-[GCP free tier summary](#gcp-free-tier-summary) below. This was weighed and
-accepted during this story's design review against a $1.00/month ceiling for
-the combined Secret Manager + Scheduler line, well above a plausible
-multi-secret rotation-overlap spike.
+**Cost.** Measured against the live project (`gcloud secrets versions list`
+for all 6 pruner-managed secrets, `admin-emails` through
+`instagram-access-token`, plus the 2 unrelated Cloud Build OAuth secrets that
+share the same free allowance). Secret Manager bills $0.06 per active
+(non-destroyed) version-month above the shared 6-version allowance; the
+Scheduler job is a flat 4th-job cost since the first 3 are free.
 
-The moment this merges and applies, spend on this line goes *up*, not down:
-the canary secret itself is one more active version (today's already-unpruned
-baseline plus one), and the Scheduler job is billable from its first
-invocation — while `secret_pruner_write_enabled_ids` stays empty by design
-until the recovery drill above succeeds, so no real secret is actually pruned
-yet. The Secret Manager line only starts trending back down once real secrets
-are allowlisted; steady-state, pruning down to 2 enabled versions per secret
-is expected to net out below today's unpruned baseline.
+| Scenario | Active versions | Secret Manager (over free 6) | + Scheduler | Total |
+|---|---|---|---|---|
+| Today, before this merges | 15 (13 across the 6 managed secrets + 2 OAuth) | $0.54/mo | — | $0.54/mo |
+| Immediately after merge/apply | 16 (+1 canary; allowlist still empty, nothing actually pruned yet) | $0.60/mo | +$0.10/mo | $0.70/mo |
+| Steady-state (drill done, real secrets allowlisted, resting between rotations) | ~15 (6 secrets × 2 kept + 2 OAuth + 1 canary) | $0.54/mo | +$0.10/mo | $0.64/mo |
+| Spike (all 6 managed secrets rotate the same week) | ~21 (6 × [2 kept + 1 aging out over its 7-day `version_destroy_ttl`] + 2 OAuth + 1 canary) | ~$0.90/mo | +$0.10/mo | **~$1.00/mo** |
+
+The spike figure bills the aging-out version for a full month as a
+conservative ceiling — in reality it's destroyed after 7 days and would be
+prorated lower. Read the spike row as "this is roughly the worst case," not
+as headroom below some larger approved number: it lands close to, not safely
+under, a round $1/month.
+
+**Cumulative growth if the drill is never completed.** This is the case
+against leaving `secret_pruner_write_enabled_ids` empty indefinitely.
+`instagram-access-token` rotates weekly on its own schedule
+(`instagram-token-refresh`, unrelated to this story) regardless of whether
+pruning is ever turned on for it — with pruning off, nothing ever removes
+those versions. Left alone, that's roughly +4 versions and +$0.24 every
+month, unbounded, on top of whatever the table above already shows. The other
+5 managed secrets only grow when someone manually rotates them, so they don't
+share this specific risk — but the fix for all six is the same one: complete
+the canary recovery drill above and allowlist the real secrets.
+
+All of this is against the project's actual, enforced ceiling: the $15/month
+budget breaker (see [Cost circuit breaker](#cost-circuit-breaker)), which this
+story's entire cost footprint is roughly 4-7% of even at the modeled spike.
 
 ### Removing an optional secret
 
@@ -998,8 +1023,8 @@ then required.
 |---------|---------------|----------------|
 | Cloud Run | 2M req/mo · 360K GB-sec · 180K vCPU-sec | Well under for personal use |
 | Firestore | 50K reads/day · 20K writes/day · 1 GiB storage | Well under |
-| Cloud Storage | 5 GiB storage · 1 GiB/mo egress (US) | Minimal for images + receipts |
-| Artifact Registry | 0.5 GiB storage | Cleanup policy deletes untagged images after 1 day and any tagged image beyond the 5 most recent |
+| Cloud Storage | 5 GB-months storage (US regions) · 100 GB/mo egress from North America | Minimal for images + receipts |
+| Artifact Registry | 0.5 GB storage | Already measured at ~0.56 GB (`gcloud artifacts repositories describe mfs`) — over the free allowance despite the cleanup policy (keeps ≤ 5 tagged images, but each backend image is large enough that 5 of them exceed 0.5 GB). Billed at Artifact Registry's per-GB-month storage rate on the overage; still cents at this volume. |
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
