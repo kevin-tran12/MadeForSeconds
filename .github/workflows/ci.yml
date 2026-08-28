@@ -223,6 +223,12 @@ jobs:
           pip install -r requirements.txt pytest
           python -m pytest -q
 
+      - name: Test secret version pruner
+        working-directory: terraform/modules/secret-maintenance/secret_pruner_function
+        run: |
+          pip install -r requirements.txt pytest
+          python -m pytest -q
+
   build:
     name: Build Check
     needs: [security-scan, test-backend, test-frontend, test-e2e, terraform-check]
