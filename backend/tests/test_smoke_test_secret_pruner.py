@@ -387,51 +387,107 @@ class _FakeClock:
         self.t += seconds
 
 
-def test_get_scheduler_job_state_parses_lastAttemptTime_and_status_code(smoke, monkeypatch):
-    monkeypatch.setattr(smoke, "_run_gcloud_checked", lambda argv, **kw: '{"lastAttemptTime": "2026-08-28T00:00:00Z", "status": {"code": 13}}')
-    attempt_time, code = smoke._get_scheduler_job_state("p", "us-central1", "secret-version-pruner")
-    assert attempt_time == "2026-08-28T00:00:00Z"
-    assert code == 13
+def test_find_attempt_finished_log_parses_a_successful_entry(smoke, monkeypatch):
+    """Real shape observed in this project's own logs: a successful
+    AttemptFinished has severity INFO and no jsonPayload.status at all."""
+    monkeypatch.setattr(smoke, "_run_gcloud_checked", lambda argv, **kw: '[{"severity": "INFO", "jsonPayload": {}}]')
+    entry = smoke._find_attempt_finished_log("p", "secret-version-pruner", "2026-08-28T00:00:00Z")
+    assert entry["severity"] == "INFO"
+    assert "status" not in entry["jsonPayload"]
 
 
-def test_get_scheduler_job_state_missing_status_means_ok(smoke, monkeypatch):
-    """google.rpc.Status omits the "code" field in JSON when it's the
-    zero-value (OK) — an empty status object means success, not "unknown"."""
-    monkeypatch.setattr(smoke, "_run_gcloud_checked", lambda argv, **kw: '{"lastAttemptTime": "2026-08-28T00:00:00Z", "status": {}}')
-    _, code = smoke._get_scheduler_job_state("p", "us-central1", "secret-version-pruner")
-    assert code == 0
+def test_find_attempt_finished_log_parses_a_failed_entry(smoke, monkeypatch):
+    """Real shape observed in this project's own logs (weekly-usage-report's
+    actual failing attempts): severity ERROR, jsonPayload.status set to a
+    google.rpc.Code name."""
+    monkeypatch.setattr(smoke, "_run_gcloud_checked", lambda argv, **kw: '[{"severity": "ERROR", "jsonPayload": {"status": "INTERNAL", "debugInfo": "URL_UNREACHABLE-UNREACHABLE_5xx"}}]')
+    entry = smoke._find_attempt_finished_log("p", "secret-version-pruner", "2026-08-28T00:00:00Z")
+    assert entry["severity"] == "ERROR"
+    assert entry["jsonPayload"]["status"] == "INTERNAL"
 
 
-def test_wait_for_scheduler_attempt_succeeds_once_a_new_successful_attempt_appears(smoke, monkeypatch):
+def test_find_attempt_finished_log_returns_none_when_nothing_landed_yet(smoke, monkeypatch):
+    monkeypatch.setattr(smoke, "_run_gcloud_checked", lambda argv, **kw: "[]")
+    assert smoke._find_attempt_finished_log("p", "secret-version-pruner", "2026-08-28T00:00:00Z") is None
+
+
+def test_find_attempt_finished_log_filters_by_job_id_and_since_time(smoke, monkeypatch):
+    captured = {}
+
+    def _fake(argv, **kw):
+        captured["argv"] = argv
+        return "[]"
+
+    monkeypatch.setattr(smoke, "_run_gcloud_checked", _fake)
+    smoke._find_attempt_finished_log("made-for-seconds", "secret-version-pruner", "2026-08-28T12:00:00+00:00")
+
+    filter_arg = captured["argv"][2]  # ["logging", "read", <filter>, ...]
+    assert 'resource.labels.job_id="secret-version-pruner"' in filter_arg
+    assert 'timestamp>="2026-08-28T12:00:00+00:00"' in filter_arg
+    assert "AttemptFinished" in filter_arg
+
+
+def test_wait_for_scheduler_attempt_succeeds_once_a_successful_entry_appears(smoke, monkeypatch):
     clock = _FakeClock()
-    states = iter([("2026-08-28T00:00:00Z", 0), ("2026-08-28T00:00:00Z", 0), ("2026-08-28T00:05:00Z", 0)])
-    monkeypatch.setattr(smoke, "_get_scheduler_job_state", lambda *a: next(states))
+    results = iter([None, None, {"severity": "INFO", "jsonPayload": {}}])
+    monkeypatch.setattr(smoke, "_find_attempt_finished_log", lambda *a: next(results))
 
     smoke._wait_for_scheduler_attempt("p", "r", "job", "2026-08-28T00:00:00Z", sleep=clock.sleep, now=clock.now)
 
-    assert len(clock.sleeps) == 2  # polled twice before seeing the new attempt
+    assert len(clock.sleeps) == 2  # polled twice before the entry landed
 
 
-def test_wait_for_scheduler_attempt_raises_when_the_new_attempt_failed(smoke, monkeypatch):
+def test_wait_for_scheduler_attempt_raises_when_the_attempt_failed(smoke, monkeypatch):
     """A successful `jobs run` dispatch only forces the attempt — it says
     nothing about whether the HTTP target actually succeeded. This is the
     exact case that must not read as a pass."""
     clock = _FakeClock()
-    monkeypatch.setattr(smoke, "_get_scheduler_job_state", lambda *a: ("2026-08-28T00:05:00Z", 13))
+    monkeypatch.setattr(smoke, "_find_attempt_finished_log", lambda *a: {"severity": "ERROR", "jsonPayload": {"status": "INTERNAL", "debugInfo": "boom"}})
 
-    with pytest.raises(smoke.SmokeTestFailure, match="status code 13"):
+    with pytest.raises(smoke.SmokeTestFailure, match="INTERNAL"):
         smoke._wait_for_scheduler_attempt("p", "r", "job", "2026-08-28T00:00:00Z", sleep=clock.sleep, now=clock.now)
 
 
-def test_wait_for_scheduler_attempt_times_out_if_no_new_attempt_appears(smoke, monkeypatch):
+def test_wait_for_scheduler_attempt_treats_a_status_field_as_failure_even_with_info_severity(smoke, monkeypatch):
+    """Belt and suspenders: jsonPayload.status being present at all (not just
+    severity) is also treated as failure, since that field's mere presence
+    is what the real API uses to distinguish success from failure."""
     clock = _FakeClock()
-    monkeypatch.setattr(smoke, "_get_scheduler_job_state", lambda *a: ("2026-08-28T00:00:00Z", 0))  # never changes
-    with pytest.raises(smoke.SmokeTestFailure, match="no new attempt"):
+    monkeypatch.setattr(smoke, "_find_attempt_finished_log", lambda *a: {"severity": "INFO", "jsonPayload": {"status": "INTERNAL"}})
+
+    with pytest.raises(smoke.SmokeTestFailure):
+        smoke._wait_for_scheduler_attempt("p", "r", "job", "2026-08-28T00:00:00Z", sleep=clock.sleep, now=clock.now)
+
+
+def test_wait_for_scheduler_attempt_times_out_if_no_entry_appears(smoke, monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(smoke, "_find_attempt_finished_log", lambda *a: None)  # never appears
+    with pytest.raises(smoke.SmokeTestFailure, match="no AttemptFinished"):
         smoke._wait_for_scheduler_attempt(
             "p", "r", "job", "2026-08-28T00:00:00Z",
             deadline_seconds=10.0, poll_interval=3.0, sleep=clock.sleep, now=clock.now,
         )
     assert clock.t >= 10.0
+
+
+def test_wait_for_scheduler_attempt_does_not_stop_early_just_because_time_advanced(smoke, monkeypatch):
+    """The exact regression this whole rewrite exists for: a naive
+    "lastAttemptTime changed" check would pass the instant an attempt
+    *starts*, before its outcome (status) is known. This double-checks that
+    the new implementation keeps polling — never returning early — for as
+    long as no AttemptFinished entry has actually landed, regardless of how
+    much wall-clock time passes."""
+    clock = _FakeClock()
+    call_count = {"n": 0}
+
+    def _still_nothing(*a):
+        call_count["n"] += 1
+        return None
+
+    monkeypatch.setattr(smoke, "_find_attempt_finished_log", _still_nothing)
+    with pytest.raises(smoke.SmokeTestFailure):
+        smoke._wait_for_scheduler_attempt("p", "r", "job", "2026-08-28T00:00:00Z", deadline_seconds=15.0, poll_interval=5.0, sleep=clock.sleep, now=clock.now)
+    assert call_count["n"] >= 3  # kept checking across the whole deadline, never assumed success early
 
 
 # ─── _check_response_is_clean ────────────────────────────────────────────────

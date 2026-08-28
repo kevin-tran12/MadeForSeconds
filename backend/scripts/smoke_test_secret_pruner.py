@@ -88,6 +88,10 @@ Prerequisites:
     pruner shouldn't be able to.
   - With --test-write-path: cloudfunctions.functions.update (or broader, e.g.
     roles/cloudfunctions.developer) to flip the deployed env var.
+  - logging.logEntries.list on the project (roles/logging.viewer or
+    broader), to confirm the triggered Cloud Scheduler attempt actually
+    completed via its AttemptFinished log entry — see
+    _find_attempt_finished_log.
   - gcloud CLI on PATH and authenticated (`gcloud auth login` /
     `application-default login`) — resolved via shutil.which and invoked
     with shell=False always, so arguments are never shell-interpreted
@@ -247,43 +251,74 @@ def _set_write_enabled_env(project: str, region: str, function_name: str, value:
     ], timeout=300.0)
 
 
-def _get_scheduler_job_state(project: str, region: str, job_name: str) -> tuple[str, int]:
-    """(lastAttemptTime, status.code) — status.code defaults to 0 (OK) when
-    the field is absent, which is how the API represents "last attempt
-    succeeded" (google.rpc.Status omits the zero-value code in JSON; a
-    freshly created job that has never run also has no lastAttemptTime at
-    all, which the caller treats as "no attempt observed yet", never as
-    success)."""
+def _utc_now_iso() -> str:
+    import datetime
+
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _find_attempt_finished_log(project: str, job_name: str, since_iso: str) -> dict | None:
+    """The earliest AttemptFinished log entry for this job at or after
+    since_iso, or None if none has landed yet.
+
+    Deliberately NOT `gcloud scheduler jobs describe`'s lastAttemptTime/status
+    fields — the API documents lastAttemptTime as when the attempt STARTED
+    and status as "the response for the last attempted execution", two
+    separate pieces of information with no guarantee they update atomically.
+    A describe() call can observe a just-advanced lastAttemptTime while
+    status still reflects the PREVIOUS attempt, which would let this check
+    pass before the triggered attempt has actually authenticated or
+    completed. Cloud Scheduler's own troubleshooting guidance is to
+    correlate AttemptStarted/AttemptFinished log entries instead — confirmed
+    against this project's real logs: a successful AttemptFinished has
+    severity INFO and no jsonPayload.status field at all; a failed one has
+    severity ERROR and jsonPayload.status set to a google.rpc.Code name
+    (e.g. "INTERNAL") — both pulled from `cloudscheduler.googleapis.com/executions`.
+    """
+    filter_str = (
+        f'resource.type="cloud_scheduler_job" '
+        f'resource.labels.job_id="{job_name}" '
+        f'jsonPayload."@type"="type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished" '
+        f'timestamp>="{since_iso}"'
+    )
     raw = _run_gcloud_checked([
-        "scheduler", "jobs", "describe", job_name,
-        "--location", region, "--project", project,
-        "--format=json(lastAttemptTime,status.code)",
+        "logging", "read", filter_str,
+        "--project", project, "--order=asc", "--limit=1",
+        "--format=json(severity,jsonPayload.status,jsonPayload.debugInfo)",
     ])
-    data = json.loads(raw) if raw else {}
-    return data.get("lastAttemptTime", ""), data.get("status", {}).get("code", 0)
+    entries = json.loads(raw) if raw else []
+    return entries[0] if entries else None
 
 
 def _wait_for_scheduler_attempt(
-    project: str, region: str, job_name: str, baseline_attempt_time: str,
-    *, deadline_seconds: float = 120.0, poll_interval: float = 5.0,
+    project: str, region: str, job_name: str, since_iso: str,
+    *, deadline_seconds: float = 180.0, poll_interval: float = 5.0,
     sleep=time.sleep, now=time.monotonic,
 ) -> None:
-    """Polls until the job records an attempt newer than baseline_attempt_time
-    (i.e., the one this script just triggered, not some earlier one) and
-    confirms it succeeded. `gcloud scheduler jobs run` only forces dispatch —
-    it says nothing about whether the HTTP target actually authenticated or
-    completed, so a bare successful `jobs run` proves nothing on its own.
-    Raises SmokeTestFailure either if the triggered attempt fails (non-zero
-    status code) or if no new attempt appears before the deadline."""
+    """Polls Cloud Logging until an AttemptFinished entry for this job lands
+    at or after since_iso (the time this script triggered it — must be
+    recorded BEFORE calling `gcloud scheduler jobs run`, since that command
+    only forces dispatch and says nothing about whether the HTTP target
+    actually authenticated or completed) and confirms it succeeded. Raises
+    SmokeTestFailure either if that attempt failed (severity ERROR / a
+    jsonPayload.status present) or if no AttemptFinished entry appears
+    before the deadline — log delivery to Cloud Logging is itself not
+    instant, so the deadline needs real margin beyond the function's own
+    typical runtime, not just enough for the HTTP round trip.
+    """
+    del region  # kept for call-site symmetry with the other scheduler helpers; the log filter doesn't need it
     deadline = now() + deadline_seconds
     while True:
-        attempt_time, status_code = _get_scheduler_job_state(project, region, job_name)
-        if attempt_time and attempt_time != baseline_attempt_time:
-            if status_code != 0:
-                raise SmokeTestFailure(f"scheduler job {job_name}'s triggered attempt failed with status code {status_code} (lastAttemptTime={attempt_time})")
+        entry = _find_attempt_finished_log(project, job_name, since_iso)
+        if entry is not None:
+            severity = entry.get("severity", "INFO")
+            status = entry.get("jsonPayload", {}).get("status")
+            if severity == "ERROR" or status:
+                debug_info = entry.get("jsonPayload", {}).get("debugInfo", "")
+                raise SmokeTestFailure(f"scheduler job {job_name}'s triggered attempt failed: status={status} debugInfo={debug_info!r}")
             return
         if now() >= deadline:
-            raise SmokeTestFailure(f"scheduler job {job_name} recorded no new attempt within {deadline_seconds}s of being triggered (lastAttemptTime still {attempt_time!r})")
+            raise SmokeTestFailure(f"scheduler job {job_name} recorded no AttemptFinished log entry within {deadline_seconds}s of being triggered (since={since_iso})")
         sleep(poll_interval)
 
 
@@ -372,9 +407,9 @@ def _test_authenticated_boundary(args, pruner_base_creds, function_url: str) -> 
     )
 
     print(f"\n[A2] Confirming the deployed Cloud Scheduler job dispatches and completes ({args.scheduler_job_name})")
-    baseline_attempt_time, _ = _get_scheduler_job_state(args.project, args.region, args.scheduler_job_name)
+    trigger_time = _utc_now_iso()  # recorded BEFORE dispatch, so the log filter can't miss the resulting attempt
     _run_gcloud_checked(["scheduler", "jobs", "run", args.scheduler_job_name, "--location", args.region, "--project", args.project])
-    _wait_for_scheduler_attempt(args.project, args.region, args.scheduler_job_name, baseline_attempt_time)
+    _wait_for_scheduler_attempt(args.project, args.region, args.scheduler_job_name, trigger_time)
     _check("scheduler-triggered attempt completed successfully", True)
 
 
