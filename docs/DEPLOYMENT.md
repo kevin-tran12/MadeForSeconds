@@ -721,8 +721,9 @@ testing) eats into every other secret's free allowance too.
 
 **Mechanism.** A dedicated Cloud Function (`secret-pruner`, its own service
 account, no relation to `mfs-backend`) runs weekly via Cloud Scheduler
-(`secret-version-pruner`, 05:00 UTC Monday — an hour after the Instagram token
-rotates, so that week's new version is already accounted for). For every
+(`secret-version-pruner`, 05:00 UTC Monday — no functional dependency on
+anything else, just spaced away from `weekly-usage-report`'s Monday 13:00 UTC
+slot and `budget-breaker-reset`'s monthly one). For every
 configured secret it keeps the newest 2 `ENABLED` versions — and anything at
 or above that "floor," even a `DISABLED` version — and destroys everything
 older. `secretmanager.versions.destroy` is deliberately never reachable from
@@ -845,23 +846,40 @@ worst case (all five in the same week). Without Instagram's independent
 weekly schedule in the mix, every row above is otherwise a clean, static
 number except for one remaining source of overhead:
 
-The canary secret carries **two different kinds of overhead, not one**.
-`_cleanup_and_verify_healthy` (`backend/scripts/smoke_test_secret_pruner.py`)
-deliberately converges the canary to 2 enabled versions — the same floor the
-real algorithm protects everywhere else — and since Step 0 is the mandatory
-first move before the drill, that 2nd enabled version is a **permanent**
-addition from the first time anyone runs it, not something that ever clears.
-On top of that permanent 2, each individual smoke-test run also destroys one
-more disposable version, which then sits disabled-but-active for its own
-7-day `version_destroy_ttl` before actually clearing — genuinely transient,
-self-clearing overhead, but it stacks on top of the permanent 2, not instead
-of it. The table above already prices in the permanent 2; a smoke-test run
-adds roughly +1 more active version for up to 7 days after it runs, worth a
-few more cents while it's active.
+The canary secret carries **two different kinds of overhead, not one**, and
+the transient half is bigger than it first looks. `_cleanup_and_verify_healthy`
+(`backend/scripts/smoke_test_secret_pruner.py`) converges the canary to 2
+enabled versions — the same floor the real algorithm protects everywhere
+else — and since Step 0 is the mandatory first move before the drill, that
+2nd enabled version is a **permanent** addition from the first time anyone
+runs it (already priced into the steady-state row above). On top of that
+permanent 2, every run also *destroys* some number of disposable versions,
+each of which then sits disabled-but-active for its own 7-day
+`version_destroy_ttl` — and that number isn't a flat "+1":
 
-The spike figure bills the aging-out version for a full month as a
-conservative ceiling — in reality it's destroyed after 7 days and would be
-prorated lower.
+- The canary's very **first** ever cleanup starts from just the Terraform
+  seed version, adds 3 test versions, and settles to 2 enabled by destroying
+  **2** (the seed plus the oldest test version) — both go active-but-pending
+  for 7 days.
+- **Every run after that** starts from an already-2-enabled canary, adds 3
+  more, and destroys **3** to get back to 2 — one more than the first run,
+  because there's no seed version left to also sweep up.
+- Because that pending window is 7 days, running the smoke test **more than
+  once within a week** doesn't reset anything — each run's pending versions
+  stack on top of whatever's still pending from the runs before it.
+
+| Scenario | Canary active versions | Total active | Billable | Total |
+|---|---|---|---|---|
+| Baseline (7+ days since any run) | 2 | 14 | $0.48/mo | $0.48/mo |
+| Normal (one run, within its own 7-day window) | 4 (2 enabled + 2 pending) | 16 | $0.60/mo | $0.60/mo |
+| Repeated (3 runs inside one week, e.g. iterating on a fix) | 10 (2 enabled + 2 + 3 + 3 pending) | 22 | $0.96/mo | $0.96/mo |
+| Worst-reasonable concurrent (repeated runs *and* all 5 managed secrets rotating the same week) | 10 | 27 | $1.26/mo | **$1.26/mo** |
+
+All four rows are transient peaks, not standing costs — every one clears back
+to the $0.48/mo baseline once 7 days pass since the last contributing event
+(the last smoke-test run, or the last rotation), and each bills a full-month
+rate as a conservative ceiling rather than the lower prorated amount an
+actual 7-day window would cost.
 
 All of this is small next to the project's real backstop for its dominant
 cost driver: the $15/month budget breaker (see
@@ -1084,9 +1102,100 @@ then required.
 | Cloud Run | 2M req/mo · 360K GB-sec · 180K vCPU-sec | Well under for personal use |
 | Firestore | 50K reads/day · 20K writes/day · 1 GiB storage | Well under |
 | Cloud Storage | 5 GB-months storage (US regions) · 100 GB/mo egress from North America | Minimal for images + receipts |
-| Artifact Registry | 0.5 GB storage, aggregated per billing account across every repository | Two repositories share this allowance: `mfs` (the backend's own image, cleanup-policy-managed to ≤ 5 tagged) and `gcf-artifacts` (auto-created build output for every Gen2 Cloud Function — budget-killer, budget-resetter, and now secret-pruner). Measured today (`gcloud artifacts repositories describe`) at ~0.34 GB + ~0.15 GB = ~0.49 GB combined — right at the boundary, not safely under it, and it fluctuates with every deploy and every function's build churn. Any overage bills at Artifact Registry's per-GB-month storage rate; still cents at this volume either way. |
+| Artifact Registry | 0.5 GB storage, aggregated per billing account across every repository | Two repositories share this allowance: `mfs` (the backend's own image, cleanup-policy-managed to ≤ 5 tagged) and `gcf-artifacts` (auto-created build output for every Gen2 Cloud Function). See below — the ~0.49 GB figure predates secret-pruner's own deploy and `gcf-artifacts` has no cleanup policy at all. |
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
 | Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded |
 | Cloud Scheduler | 3 free jobs per billing account | 3 jobs in use (weekly usage report, secret pruning, budget-breaker reset) — all free. Instagram's token-refresh job would have been a genuine 4th (~$0.10/month) had it stayed; see [Secret version pruning § Cost](#secret-version-pruning) for what re-enabling Instagram would change |
+
+### Artifact Registry: gcf-artifacts has no cleanup policy
+
+The 0.49 GB combined figure elsewhere in this doc was measured
+(`gcloud artifacts repositories describe`) **before** secret-pruner's own
+first deploy — `gcf-artifacts` only held budget-killer's and
+budget-resetter's images at that point. `gcloud functions describe
+secret-pruner` still 404s as of this writing; there is nothing to measure
+yet, only to estimate.
+
+Two things push this above a rough estimate and into "needs an actual
+decision":
+
+- **`gcf-artifacts` carries no cleanup policy at all** — confirmed via
+  `gcloud artifacts repositories describe gcf-artifacts`, no
+  `cleanupPolicies` field, unlike `mfs`'s three (keep 5 tagged, delete
+  untagged after 1 day, delete anything else tagged). Every image
+  budget-killer and budget-resetter have ever built is still sitting there:
+  14 versioned images across the two of them (8 + 6, plus one build-cache
+  layer each), spanning `2026-06-16` to `2026-08-27` with none ever removed.
+  Adding secret-pruner as a third function
+  redeploying on the same never-cleaned repository doesn't just add one more
+  image — it adds a third unbounded growth source.
+- **Each observed image is ~25-27 MB** (`gcloud artifacts docker images
+  list --format=json`, `metadata.imageSizeBytes`, both existing functions).
+  secret-pruner's own image is a reasonable-guess similar order of
+  magnitude — same Cloud Functions Python buildpack, a comparably small
+  dependency set — but that is an estimate, not a measurement, since it
+  doesn't exist yet.
+
+Rough math: `gcf-artifacts` at 149 MB today, `mfs` capped at ~339 MB by its
+own policy → combined already ~488 MB before secret-pruner's first image
+lands. One more ~25-27 MB image alone would cross 0.5 GB on day one, and
+every future redeploy of any of the three functions adds another, forever,
+with nothing removing old ones.
+
+**Recommended fix** — apply a cleanup policy to `gcf-artifacts` directly via
+`gcloud`, not Terraform: it's a platform-auto-managed repository (labeled
+`goog-managed-by: cloudfunctions`, never declared as a
+`google_artifact_registry_repository` resource anywhere in this codebase),
+and importing an already-live, platform-owned resource into Terraform state
+carries real risk of a subsequent `terraform apply` fighting Cloud
+Functions' own management of it. `gcloud artifacts repositories
+set-cleanup-policies` sets a cleanup policy on an existing repository
+without requiring Terraform to own it at all:
+
+```bash
+cat > /tmp/gcf-artifacts-cleanup.json <<'EOF'
+[
+  {
+    "name": "keep-3-most-recent-per-function",
+    "action": {"type": "Keep"},
+    "mostRecentVersions": {"keepCount": 3}
+  },
+  {
+    "name": "delete-older-than-30-days",
+    "action": {"type": "Delete"},
+    "condition": {"olderThan": "30d"}
+  }
+]
+EOF
+
+# --dry-run first: confirm mostRecentVersions.keepCount applies per package
+# (budget-killer/budget-resetter/secret-pruner each keep their own 3) and
+# not 3 total across all of them combined, before letting it delete anything
+# for real. `gcloud artifacts docker images list` afterward shows what the
+# policy currently marks for cleanup without having removed it yet.
+gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
+  --location=us-central1 --project=made-for-seconds --dry-run \
+  --policy=/tmp/gcf-artifacts-cleanup.json
+
+# Once the dry-run output looks right, apply for real:
+gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
+  --location=us-central1 --project=made-for-seconds \
+  --policy=/tmp/gcf-artifacts-cleanup.json
+```
+
+This is a recommendation, not something applied as part of this story —
+it's a live mutation to a resource outside Terraform's management, and
+whether to run it (and with what retention numbers) is the operator's call,
+not something to apply unilaterally alongside an unrelated Terraform-driven
+PR.
+
+**Rollout acceptance check** — after `terraform apply` deploys secret-pruner
+for the first time, re-measure for real rather than trusting the estimate
+above:
+
+```bash
+gcloud artifacts repositories describe mfs --location=us-central1 --project=made-for-seconds --format="value(sizeBytes)"
+gcloud artifacts repositories describe gcf-artifacts --location=us-central1 --project=made-for-seconds --format="value(sizeBytes)"
+```
