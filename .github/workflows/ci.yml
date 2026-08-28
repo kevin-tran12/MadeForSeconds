@@ -49,9 +49,13 @@ jobs:
         # — billing_function holds run.admin on the backend service and
         # secret_pruner_function holds secretmanager.versions.destroy, so a
         # vulnerability there is at least as consequential as one in the
-        # backend app.
+        # backend app — and backend/scripts, the operator-run smoke tests
+        # that impersonate real production service accounts (previously
+        # unscanned entirely; closing this surfaced a real B602 shell=True
+        # finding in smoke_test_secret_pruner.py, since fixed).
         run: |
           bandit -r backend/app -ll
+          bandit -r backend/scripts -ll
           bandit -r terraform/modules/cost-controls/billing_function -ll
           bandit -r terraform/modules/secret-maintenance/secret_pruner_function -ll
 
@@ -95,6 +99,15 @@ jobs:
         # Docker image must resolve identically. See requirements.lock's
         # header for what generates it and why.
         run: pip install -r backend/requirements.lock
+
+      - name: Install functions-framework for the secret-pruner smoke test's unit tests
+        # test_smoke_test_secret_pruner.py imports secret_pruner_function/main.py
+        # directly (deliberately — see the smoke test script's own docstring on
+        # why it doesn't reimplement that algorithm), which needs
+        # functions_framework at import time. Deliberately not added to
+        # requirements.lock: that file is "what actually ships in the backend
+        # Docker image," and functions_framework never does.
+        run: pip install functions-framework==3.10.2
 
       - name: Run pytest
         working-directory: backend
