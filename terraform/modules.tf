@@ -176,3 +176,18 @@ module "cost-controls" {
 
   depends_on = [google_project_service.required_apis]
 }
+
+module "secret-maintenance" {
+  source = "./modules/secret-maintenance"
+
+  gcp_project_id = var.gcp_project_id
+  gcp_region     = var.gcp_region
+
+  secret_ids               = module.security.secret_ids
+  write_enabled_secret_ids = var.secret_pruner_write_enabled_ids
+
+  notification_channel  = google_monitoring_notification_channel.budget_email.name
+  scheduler_agent_email = google_project_service_identity.cloudscheduler.email
+
+  depends_on = [google_project_service.required_apis]
+}

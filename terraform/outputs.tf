@@ -56,3 +56,8 @@ output "secrets_missing_accessor" {
   description = "Secrets Cloud Run injects that the runtime service account cannot read, after normalizing away any short-name/fully-qualified-name mismatch between how each side's resource happens to report itself. Any entry here is a revision that will fail to start — this must be empty."
   value       = setsubtract(local.secrets_injected_into_cloud_run, local.secrets_granted_accessor)
 }
+
+output "secret_pruner_canary_id" {
+  description = "secret_id of the disposable canary secret used to validate secret-pruner's recovery drill (docs/DEPLOYMENT.md § Secret version pruning) without touching a real application secret"
+  value       = module.secret-maintenance.canary_secret_id
+}

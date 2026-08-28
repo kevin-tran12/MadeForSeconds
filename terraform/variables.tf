@@ -161,3 +161,11 @@ variable "alert_email" {
   description = "Email address for budget alert notifications"
   type        = string
 }
+
+# ─── Secret version pruning (Epic 2, story 2.3) ─────────────────────────────
+
+variable "secret_pruner_write_enabled_ids" {
+  description = "secret_id values the automated pruner is allowed to actually destroy old versions on. Empty by default — everything runs dry-run (log-only) until the recovery drill against secret-pruner-canary has succeeded. See docs/DEPLOYMENT.md § Secret version pruning."
+  type        = list(string)
+  default     = []
+}
