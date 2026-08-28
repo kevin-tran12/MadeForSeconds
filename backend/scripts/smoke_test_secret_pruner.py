@@ -98,6 +98,7 @@ Prerequisites:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -217,18 +218,83 @@ def _get_write_enabled_env(project: str, region: str, function_name: str) -> str
     ])
 
 
-def _set_write_enabled_env(project: str, region: str, function_name: str, value: str) -> None:
+def _write_enabled_env_flag(value: str) -> str:
+    # --update-env-vars is itself a comma-separated KEY=VALUE dict flag, but
+    # WRITE_ENABLED_SECRET_IDS's own value is *also* comma-separated (a list
+    # of secret ids) — gcloud would otherwise split "admin-emails,
+    # instagram-access-token" into two dict entries, the second of which
+    # ("instagram-access-token") has no "=" and fails to parse. ^:^ switches
+    # the flag's own entry delimiter to ":", so commas inside the value stay
+    # literal (see `gcloud topic escaping`). ":" is safe unconditionally:
+    # Secret Manager secret ids are restricted to [a-zA-Z0-9-_] and can never
+    # contain one, so this is correct whether value has zero, one, or many
+    # secret ids — no need to special-case by content.
+    #
     # Empty value ("") is deliberate, not omitted: it sets the key to an
     # explicit empty string, matching exactly what Terraform's
     # join(",", sort(var.write_enabled_secret_ids)) deploys when the
     # allowlist is empty. Using --remove-env-vars instead would drop the key
     # entirely, which the function's os.environ.get(..., "") tolerates but
     # which is not what a `terraform plan` afterward would expect to see.
+    return f"--update-env-vars=^:^WRITE_ENABLED_SECRET_IDS={value}"
+
+
+def _set_write_enabled_env(project: str, region: str, function_name: str, value: str) -> None:
     _run_gcloud_checked([
         "functions", "deploy", function_name,
         "--gen2", "--region", region, "--project", project,
-        f"--update-env-vars=WRITE_ENABLED_SECRET_IDS={value}",
+        _write_enabled_env_flag(value),
     ], timeout=300.0)
+
+
+def _get_scheduler_job_state(project: str, region: str, job_name: str) -> tuple[str, int]:
+    """(lastAttemptTime, status.code) — status.code defaults to 0 (OK) when
+    the field is absent, which is how the API represents "last attempt
+    succeeded" (google.rpc.Status omits the zero-value code in JSON; a
+    freshly created job that has never run also has no lastAttemptTime at
+    all, which the caller treats as "no attempt observed yet", never as
+    success)."""
+    raw = _run_gcloud_checked([
+        "scheduler", "jobs", "describe", job_name,
+        "--location", region, "--project", project,
+        "--format=json(lastAttemptTime,status.code)",
+    ])
+    data = json.loads(raw) if raw else {}
+    return data.get("lastAttemptTime", ""), data.get("status", {}).get("code", 0)
+
+
+def _wait_for_scheduler_attempt(
+    project: str, region: str, job_name: str, baseline_attempt_time: str,
+    *, deadline_seconds: float = 120.0, poll_interval: float = 5.0,
+    sleep=time.sleep, now=time.monotonic,
+) -> None:
+    """Polls until the job records an attempt newer than baseline_attempt_time
+    (i.e., the one this script just triggered, not some earlier one) and
+    confirms it succeeded. `gcloud scheduler jobs run` only forces dispatch —
+    it says nothing about whether the HTTP target actually authenticated or
+    completed, so a bare successful `jobs run` proves nothing on its own.
+    Raises SmokeTestFailure either if the triggered attempt fails (non-zero
+    status code) or if no new attempt appears before the deadline."""
+    deadline = now() + deadline_seconds
+    while True:
+        attempt_time, status_code = _get_scheduler_job_state(project, region, job_name)
+        if attempt_time and attempt_time != baseline_attempt_time:
+            if status_code != 0:
+                raise SmokeTestFailure(f"scheduler job {job_name}'s triggered attempt failed with status code {status_code} (lastAttemptTime={attempt_time})")
+            return
+        if now() >= deadline:
+            raise SmokeTestFailure(f"scheduler job {job_name} recorded no new attempt within {deadline_seconds}s of being triggered (lastAttemptTime still {attempt_time!r})")
+        sleep(poll_interval)
+
+
+def _check_response_is_clean(body: dict) -> None:
+    """Requires no error AND no anomaly on ANY secret in the response, not
+    just the canary — a smoke test that shrugs off drift or a failure on an
+    unrelated secret can miss a real problem in the same deployed function."""
+    errored = {sid: r for sid, r in body.items() if isinstance(r, dict) and (r.get("error") or r.get("errored"))}
+    _check("no secret reported an error in the response", not errored, str(errored))
+    anomalous = {sid: r for sid, r in body.items() if isinstance(r, dict) and r.get("anomaly")}
+    _check("no secret reported an anomaly in the response", not anomalous, str(anomalous))
 
 
 def _destroy_with_retry(client, version_name: str, attempts: int = 3) -> bool:
@@ -294,10 +360,9 @@ def _test_authenticated_boundary(args, pruner_base_creds, function_url: str) -> 
     )
     id_token_creds.refresh(GoogleAuthRequest())
     resp = httpx.post(function_url, headers={"Authorization": f"Bearer {id_token_creds.token}"}, timeout=60.0)
-    _check("function returns a clean 200 (no per-secret errors)", resp.status_code == 200, f"HTTP {resp.status_code}: {resp.text}")
+    _check("function returns a clean 200", resp.status_code == 200, f"HTTP {resp.status_code}: {resp.text}")
     body = resp.json()
-    errored = {sid: r for sid, r in body.items() if isinstance(r, dict) and (r.get("error") or r.get("errored"))}
-    _check("no secret reported an error in the response", not errored, str(errored))
+    _check_response_is_clean(body)
     _check(f"{CANARY_SECRET_ID} appears in the response", CANARY_SECRET_ID in body, str(body))
     canary_result = body[CANARY_SECRET_ID]
     _check(
@@ -306,14 +371,19 @@ def _test_authenticated_boundary(args, pruner_base_creds, function_url: str) -> 
         str(canary_result),
     )
 
-    print(f"\n[A2] Confirming the deployed Cloud Scheduler job dispatches ({args.scheduler_job_name})")
+    print(f"\n[A2] Confirming the deployed Cloud Scheduler job dispatches and completes ({args.scheduler_job_name})")
+    baseline_attempt_time, _ = _get_scheduler_job_state(args.project, args.region, args.scheduler_job_name)
     _run_gcloud_checked(["scheduler", "jobs", "run", args.scheduler_job_name, "--location", args.region, "--project", args.project])
-    _check("scheduler job dispatched without error", True)
+    _wait_for_scheduler_attempt(args.project, args.region, args.scheduler_job_name, baseline_attempt_time)
+    _check("scheduler-triggered attempt completed successfully", True)
 
 
 def _test_destroy_recovery_cycle(pruner_main, operator_client, pruner_client, secret_path: str, run_id: str) -> list[dict]:
-    """Returns the list of version dicts this added, so the caller can clean
-    them up regardless of whether this raises partway through."""
+    """Returns the list of version dicts this added — informational only
+    (e.g. for tests to assert against). run()'s cleanup does NOT depend on
+    this return value: it re-lists the secret's actual current state instead,
+    specifically so a failure here partway through (after some adds but
+    before this returns) still gets cleaned up."""
     print("\n[B] Destroy/recovery cycle against the real Secret Manager API")
     added_versions: list[dict] = []
     print(f"  Adding 3 versions tagged smoke-test-{run_id}-{{a,b,c}}")
@@ -388,7 +458,9 @@ def _test_real_write_path(args, pruner_main, operator_client, pruner_base_creds,
         id_token_creds.refresh(GoogleAuthRequest())
         resp = httpx.post(function_url, headers={"Authorization": f"Bearer {id_token_creds.token}"}, timeout=120.0)
         _check("real write-path invocation returns a clean 200", resp.status_code == 200, f"HTTP {resp.status_code}: {resp.text}")
-        canary_result = resp.json().get(CANARY_SECRET_ID, {})
+        body = resp.json()
+        _check_response_is_clean(body)
+        canary_result = body.get(CANARY_SECRET_ID, {})
         _check(
             f"the deployed function's own code destroyed version {expected_target}",
             expected_target in canary_result.get("destroyed", []),
@@ -411,7 +483,7 @@ def _test_real_write_path(args, pruner_main, operator_client, pruner_base_creds,
                 raise SmokeTestFailure(
                     f"could not confirm WRITE_ENABLED_SECRET_IDS was reverted to {original!r} (describe shows {reverted_to!r}). "
                     f"Fix immediately: gcloud functions deploy {args.function_name} --gen2 --region {args.region} "
-                    f"--project {args.project} --update-env-vars=WRITE_ENABLED_SECRET_IDS={original}"
+                    f"--project {args.project} {_write_enabled_env_flag(original)}"
                 )
             print("  reverted and confirmed")
 
@@ -436,16 +508,14 @@ def run(args: argparse.Namespace) -> int:
     secret_path = operator_client.secret_path(args.project, CANARY_SECRET_ID)
     _require_canary_secret(secret_path)
 
-    added_versions: list[dict] = []
     test_result = 1  # pessimistic default — overwritten only on a real outcome below
-    cleanup_ok = True
 
     try:
         function_url = _get_function_url(args.project, args.region, args.function_name)
         print(f"  function URL: {function_url}")
 
         _test_authenticated_boundary(args, pruner_base_creds, function_url)
-        added_versions = _test_destroy_recovery_cycle(pruner_main, operator_client, pruner_client, secret_path, run_id)
+        _test_destroy_recovery_cycle(pruner_main, operator_client, pruner_client, secret_path, run_id)
 
         if args.test_write_path:
             _test_real_write_path(args, pruner_main, operator_client, pruner_base_creds, function_url, secret_path)
@@ -453,16 +523,31 @@ def run(args: argparse.Namespace) -> int:
         print("\nAll checks passed.")
         test_result = 0
 
-    except SmokeTestFailure as exc:
+    except Exception as exc:  # noqa: BLE001 - deliberately broad, not just SmokeTestFailure: Part B/C's
+        # direct destroy/enable/access calls aren't individually wrapped, so a real
+        # GoogleAPICallError from any of them must still land here (finally below
+        # always runs regardless of exception type, but without this broad catch
+        # the exception would propagate past run() with an unhandled traceback
+        # instead of the same graceful "SMOKE TEST FAILED" + exit 1 as any other
+        # failure).
         print(f"\nSMOKE TEST FAILED: {exc}")
         test_result = 1
 
     finally:
-        if added_versions:
-            print("\nCleaning up test versions...")
-            cleanup_ok = _cleanup_and_verify_healthy(pruner_main, operator_client, secret_path)
-            if not cleanup_ok:
-                print(f"  WARNING: cleanup could not confirm {CANARY_SECRET_ID} was left healthy — see remediation above")
+        # Unconditional, not gated on "did we get far enough to add
+        # versions" — _cleanup_and_verify_healthy re-derives ground truth
+        # from a fresh listing every time, so it's a safe, cheap no-op when
+        # nothing needs cleaning, and it's the only thing standing between a
+        # failure at ANY point above (mid-add, mid-destroy, mid-restore, or
+        # in a verification _check afterward) and orphaned test versions.
+        # Gating this on a mutation list populated only by a helper's normal
+        # return was the previous, confirmed-broken design: an exception
+        # raised after the first add() but before that helper returned left
+        # the caller's list empty and skipped cleanup entirely.
+        print("\nCleaning up test versions...")
+        cleanup_ok = _cleanup_and_verify_healthy(pruner_main, operator_client, secret_path)
+        if not cleanup_ok:
+            print(f"  WARNING: cleanup could not confirm {CANARY_SECRET_ID} was left healthy — see remediation above")
 
     if not cleanup_ok:
         return 1

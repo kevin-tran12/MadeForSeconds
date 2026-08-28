@@ -13,6 +13,7 @@ logic a live run can't cheaply prove wasn't a fluke:
     and reports failure rather than silently succeeding when it can't avoid that
 """
 
+import argparse
 import datetime
 import sys
 from pathlib import Path
@@ -55,30 +56,100 @@ def _version(number: int, state: str, secret_id: str = "secret-pruner-canary", p
 
 
 class _FakeSecretManagerClient:
-    """Enough of the real client's surface for _cleanup_and_verify_healthy:
-    list + destroy against an in-memory version list, mutated in place so a
-    second list_secret_versions call reflects prior destroys — same
-    observable behavior as the real API."""
+    """Enough of the real client's surface for _cleanup_and_verify_healthy and
+    the run()-level orchestration tests below: list/add/destroy/enable/access
+    against a single in-memory version list, mutated in place so every call
+    sees the effect of prior ones — same observable behavior as the real API,
+    and shared between "operator_client" and "pruner_client" in these tests
+    (both are just this one fake, matching how they hit the same underlying
+    secret in reality)."""
 
-    def __init__(self, versions):
+    def __init__(self, versions, project: str = "test-project", secret_id: str = "secret-pruner-canary"):
         self._versions = list(versions)
+        self._payloads: dict[str, bytes] = {}  # version name -> raw bytes; SecretVersion itself has no payload field
+        self._project = project
+        self._secret_id = secret_id
         self.destroy_calls: list[str] = []
-        self.fail_destroy_for: set[str] = set()
+        self.add_calls = 0
+        self.enable_calls: list[str] = []
+        self.access_calls: list[str] = []
+
+        # Failure injection, all one-shot (fails exactly once, then behaves
+        # normally) unless noted — simulates a transient failure partway
+        # through a run that a later retry (this test's own, or cleanup's
+        # separate _destroy_with_retry) can still recover from.
+        self.fail_add_after: int | None = None  # raise once add_calls exceeds this count
+        self.fail_destroy_for: set[str] = set()  # always fails for these names (matches original semantics)
+        self.fail_destroy_once_for: set[str] = set()
+        self.fail_enable_once_for: set[str] = set()
+        self.fail_access_once_for: set[str] = set()
+
+    def secret_path(self, project, secret_id):
+        return f"projects/{project}/secrets/{secret_id}"
 
     def list_secret_versions(self, parent):
         return list(self._versions)
+
+    def add_secret_version(self, request):
+        self.add_calls += 1
+        if self.fail_add_after is not None and self.add_calls > self.fail_add_after:
+            raise RuntimeError(f"simulated add failure on call {self.add_calls}")
+        from google.cloud.secretmanager_v1.types import SecretVersion
+
+        number = max((_version_number_from_name(v.name) for v in self._versions), default=0) + 1
+        v = SecretVersion()
+        v.name = f"projects/{self._project}/secrets/{self._secret_id}/versions/{number}"
+        v.state = SecretVersion.State.ENABLED
+        v.etag = f"etag-{number}"
+        self._payloads[v.name] = request.payload.data
+        self._versions.append(v)
+        return v
 
     def destroy_secret_version(self, name=None, request=None):
         from google.api_core.exceptions import FailedPrecondition
 
         target_name = name or request.name
         if target_name in self.fail_destroy_for:
+            raise FailedPrecondition("simulated destroy failure")
+        if target_name in self.fail_destroy_once_for:
+            self.fail_destroy_once_for.discard(target_name)
             raise FailedPrecondition("simulated transient destroy failure")
         self.destroy_calls.append(target_name)
         for v in self._versions:
             if v.name == target_name:
                 v.state = type(v.state).DISABLED
                 v.scheduled_destroy_time = datetime.datetime.now(datetime.timezone.utc)
+
+    def enable_secret_version(self, name=None, request=None):
+        target_name = name or request.name
+        if target_name in self.fail_enable_once_for:
+            self.fail_enable_once_for.discard(target_name)
+            raise RuntimeError("simulated transient enable failure")
+        self.enable_calls.append(target_name)
+        for v in self._versions:
+            if v.name == target_name:
+                v.state = type(v.state).ENABLED
+                v.scheduled_destroy_time = None
+
+    def access_secret_version(self, name=None, request=None):
+        target_name = name or request.name
+        if target_name in self.fail_access_once_for:
+            self.fail_access_once_for.discard(target_name)
+            raise RuntimeError("simulated transient access failure")
+        self.access_calls.append(target_name)
+        payload_bytes = self._payloads[target_name]
+
+        class _Payload:
+            data = payload_bytes
+
+        class _Resp:
+            payload = _Payload
+
+        return _Resp()
+
+
+def _version_number_from_name(name: str) -> int:
+    return int(name.rsplit("/", 1)[-1])
 
 
 # ─── _require_canary_secret ─────────────────────────────────────────────────
@@ -226,3 +297,257 @@ def test_cleanup_with_nothing_prunable_is_a_healthy_noop(smoke, pruner_main):
 
     assert ok is True
     assert client.destroy_calls == []
+
+
+# ─── _write_enabled_env_flag: gcloud's comma-in-dict-value escaping ─────────
+
+
+def test_single_secret_value_uses_the_alternate_delimiter(smoke):
+    flag = smoke._write_enabled_env_flag("admin-emails")
+    assert flag == "--update-env-vars=^:^WRITE_ENABLED_SECRET_IDS=admin-emails"
+
+
+def test_multi_secret_value_is_preserved_byte_for_byte_not_split_on_comma(smoke):
+    """The regression this exists for: --update-env-vars is itself a
+    comma-separated KEY=VALUE dict flag, and WRITE_ENABLED_SECRET_IDS's value
+    is *also* comma-separated. Without the ^:^ alternate-delimiter prefix,
+    gcloud would parse "admin-emails,instagram-access-token" as two dict
+    entries — the second has no "=" and fails to parse, or worse silently
+    drops half the allowlist."""
+    value = "admin-emails,instagram-access-token,stripe-secret-key"
+    flag = smoke._write_enabled_env_flag(value)
+    assert flag == f"--update-env-vars=^:^WRITE_ENABLED_SECRET_IDS={value}"
+    # The full original value must appear verbatim after the final "=" —
+    # not truncated at the first comma, not re-ordered, not re-escaped.
+    assert flag.endswith(f"WRITE_ENABLED_SECRET_IDS={value}")
+
+
+def test_empty_value_still_uses_the_delimiter_form_for_consistency(smoke):
+    """No special-casing by content — ^:^ is harmless even with zero commas,
+    so every call site can use it unconditionally."""
+    assert smoke._write_enabled_env_flag("") == "--update-env-vars=^:^WRITE_ENABLED_SECRET_IDS="
+
+
+def test_set_write_enabled_env_passes_a_multi_secret_value_through_unchanged(smoke, monkeypatch):
+    """One level up from _write_enabled_env_flag: proves the value that
+    reaches the actual gcloud invocation for a multi-secret allowlist is
+    byte-for-byte what was asked for, not truncated or re-split on comma."""
+    captured = {}
+    monkeypatch.setattr(smoke, "_run_gcloud_checked", lambda argv, **kw: captured.update(argv=argv) or "")
+
+    value = "admin-emails,instagram-access-token,stripe-secret-key"
+    smoke._set_write_enabled_env("made-for-seconds", "us-central1", "secret-pruner", value)
+
+    matching = [a for a in captured["argv"] if a.startswith("--update-env-vars=")]
+    assert matching == [f"--update-env-vars=^:^WRITE_ENABLED_SECRET_IDS={value}"]
+
+
+def test_revert_remediation_message_uses_the_same_safe_encoding(smoke, monkeypatch):
+    """The exact bug reported: the printed fix-it command inside
+    _test_real_write_path's revert-failure path must not repeat the broken
+    plain-comma encoding — it has to be gcloud-runnable as printed.
+
+    Drives the real function: the try body fails naturally (operator_client
+    is a bare object() with none of the real client's methods, so it raises
+    AttributeError the moment the function tries to use it) right after the
+    flip is confirmed, and the post-revert describe call is rigged to report
+    a value that still doesn't match the original — forcing the exact
+    revert-failure branch this remediation message lives in.
+    """
+    original_value = "admin-emails,instagram-access-token"
+    responses = iter([
+        original_value,          # 1st call: read the current (original) value
+        smoke.CANARY_SECRET_ID,  # 2nd call: confirm the flip took effect
+        "something-still-wrong",  # 3rd call: confirm the revert -- deliberately wrong
+    ])
+    monkeypatch.setattr(smoke, "_get_write_enabled_env", lambda *a: next(responses))
+    monkeypatch.setattr(smoke, "_set_write_enabled_env", lambda *a: None)
+
+    args = argparse.Namespace(project="made-for-seconds", region="us-central1", function_name="secret-pruner")
+
+    with pytest.raises(smoke.SmokeTestFailure) as exc_info:
+        smoke._test_real_write_path(args, object(), object(), object(), "https://example.invalid", "projects/p/secrets/secret-pruner-canary")
+
+    assert "^:^WRITE_ENABLED_SECRET_IDS=admin-emails,instagram-access-token" in str(exc_info.value)
+
+
+# ─── Scheduler completion, not just dispatch ────────────────────────────────
+
+
+class _FakeClock:
+    def __init__(self):
+        self.t = 0.0
+        self.sleeps: list[float] = []
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.t += seconds
+
+
+def test_get_scheduler_job_state_parses_lastAttemptTime_and_status_code(smoke, monkeypatch):
+    monkeypatch.setattr(smoke, "_run_gcloud_checked", lambda argv, **kw: '{"lastAttemptTime": "2026-08-28T00:00:00Z", "status": {"code": 13}}')
+    attempt_time, code = smoke._get_scheduler_job_state("p", "us-central1", "secret-version-pruner")
+    assert attempt_time == "2026-08-28T00:00:00Z"
+    assert code == 13
+
+
+def test_get_scheduler_job_state_missing_status_means_ok(smoke, monkeypatch):
+    """google.rpc.Status omits the "code" field in JSON when it's the
+    zero-value (OK) — an empty status object means success, not "unknown"."""
+    monkeypatch.setattr(smoke, "_run_gcloud_checked", lambda argv, **kw: '{"lastAttemptTime": "2026-08-28T00:00:00Z", "status": {}}')
+    _, code = smoke._get_scheduler_job_state("p", "us-central1", "secret-version-pruner")
+    assert code == 0
+
+
+def test_wait_for_scheduler_attempt_succeeds_once_a_new_successful_attempt_appears(smoke, monkeypatch):
+    clock = _FakeClock()
+    states = iter([("2026-08-28T00:00:00Z", 0), ("2026-08-28T00:00:00Z", 0), ("2026-08-28T00:05:00Z", 0)])
+    monkeypatch.setattr(smoke, "_get_scheduler_job_state", lambda *a: next(states))
+
+    smoke._wait_for_scheduler_attempt("p", "r", "job", "2026-08-28T00:00:00Z", sleep=clock.sleep, now=clock.now)
+
+    assert len(clock.sleeps) == 2  # polled twice before seeing the new attempt
+
+
+def test_wait_for_scheduler_attempt_raises_when_the_new_attempt_failed(smoke, monkeypatch):
+    """A successful `jobs run` dispatch only forces the attempt — it says
+    nothing about whether the HTTP target actually succeeded. This is the
+    exact case that must not read as a pass."""
+    clock = _FakeClock()
+    monkeypatch.setattr(smoke, "_get_scheduler_job_state", lambda *a: ("2026-08-28T00:05:00Z", 13))
+
+    with pytest.raises(smoke.SmokeTestFailure, match="status code 13"):
+        smoke._wait_for_scheduler_attempt("p", "r", "job", "2026-08-28T00:00:00Z", sleep=clock.sleep, now=clock.now)
+
+
+def test_wait_for_scheduler_attempt_times_out_if_no_new_attempt_appears(smoke, monkeypatch):
+    clock = _FakeClock()
+    monkeypatch.setattr(smoke, "_get_scheduler_job_state", lambda *a: ("2026-08-28T00:00:00Z", 0))  # never changes
+    with pytest.raises(smoke.SmokeTestFailure, match="no new attempt"):
+        smoke._wait_for_scheduler_attempt(
+            "p", "r", "job", "2026-08-28T00:00:00Z",
+            deadline_seconds=10.0, poll_interval=3.0, sleep=clock.sleep, now=clock.now,
+        )
+    assert clock.t >= 10.0
+
+
+# ─── _check_response_is_clean ────────────────────────────────────────────────
+
+
+def test_response_with_an_anomaly_on_any_secret_is_rejected(smoke):
+    with pytest.raises(smoke.SmokeTestFailure):
+        smoke._check_response_is_clean({"secret-pruner-canary": {"dry_run_would_destroy": []}, "admin-emails": {"anomaly": "latest version 6 is DISABLED"}})
+
+
+def test_response_with_an_error_on_any_secret_is_rejected(smoke):
+    with pytest.raises(smoke.SmokeTestFailure):
+        smoke._check_response_is_clean({"secret-pruner-canary": {"dry_run_would_destroy": []}, "redis-url": {"error": "boom"}})
+
+
+def test_clean_response_passes(smoke):
+    smoke._check_response_is_clean({"secret-pruner-canary": {"dry_run_would_destroy": [1]}, "admin-emails": {"dry_run_would_destroy": []}})  # must not raise
+
+
+# ─── run(): cleanup is guaranteed after a partial mutation, at every point ──
+#
+# Reproduces the exact regression: a failure after some (but not all) of
+# Part B's mutating calls used to leave run()'s local added_versions empty,
+# because _test_destroy_recovery_cycle only handed its mutation record back
+# via a normal return — one an exception skips. Cleanup is now unconditional
+# in run()'s finally and re-derives ground truth from a fresh listing, so
+# these tests drive a real failure through run() at each of add/destroy/
+# restore/verify and confirm the canary is still left healthy afterward,
+# regardless of exactly how far Part B got.
+
+
+@pytest.fixture
+def orchestration(smoke, pruner_main, monkeypatch):
+    """Wires run() up to a single shared fake Secret Manager client and stubs
+    every other live-network dependency (impersonation, the deployed
+    function's HTTP endpoint, gcloud) so only Part B's real logic — the
+    thing this regression is about — actually executes."""
+    import google.auth
+    from google.auth import impersonated_credentials
+
+    client = _FakeSecretManagerClient([_version(2, "ENABLED"), _version(1, "ENABLED")])
+
+    monkeypatch.setattr(google.auth, "default", lambda: (object(), "test-project"))
+    monkeypatch.setattr(impersonated_credentials, "Credentials", lambda **kw: object())
+    monkeypatch.setattr(smoke.secretmanager, "SecretManagerServiceClient", lambda **kw: client)
+    monkeypatch.setattr(smoke, "_get_function_url", lambda *a: "https://example.invalid/secret-pruner")
+    monkeypatch.setattr(smoke, "_test_authenticated_boundary", lambda *a: None)  # real HTTP/gcloud — out of scope here
+
+    return client
+
+
+def _run_args(**overrides):
+    defaults = dict(project="test-project", region="us-central1", function_name="secret-pruner", scheduler_job_name="secret-version-pruner", pruner_sa_email=None, test_write_path=False)
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+def _assert_canary_left_healthy(pruner_main, client):
+    """Two checks, not one: "no anomaly" alone is too weak to prove cleanup
+    actually ran — orphaned extra versions sitting around aren't "anomalous"
+    by plan_destructions' own definition (that only means "latest version
+    disabled"), so a version-count check is what actually catches cleanup
+    having been skipped entirely. Confirmed by deliberately reintroducing the
+    original added_versions-gating bug and observing these tests still pass
+    on anomaly alone but fail once this count check is added."""
+    versions = [pruner_main._version_info(v) for v in client.list_secret_versions(parent=None)]
+    enabled = [v for v in versions if v["state"] == "ENABLED"]
+    _, anomaly = pruner_main.plan_destructions(versions)
+    assert anomaly is None, f"canary left anomalous after run(): {anomaly}"
+    assert len(enabled) <= 2, f"cleanup did not converge back to <=2 enabled versions (found {len(enabled)}): {enabled}"
+
+
+def test_cleanup_runs_when_a_failure_happens_mid_add(orchestration, pruner_main, smoke):
+    orchestration.fail_add_after = 2  # "a" and "b" succeed, "c" fails
+
+    result = smoke.run(_run_args())
+
+    assert result == 1
+    _assert_canary_left_healthy(pruner_main, orchestration)
+
+
+def test_cleanup_runs_when_the_direct_destroy_call_fails(orchestration, pruner_main, smoke):
+    # The target is always the oldest of the three newly-added versions —
+    # predict its name from the pre-seeded state (2 existing) + 1st add.
+    target_name = "projects/test-project/secrets/secret-pruner-canary/versions/3"
+    orchestration.fail_destroy_once_for = {target_name}
+
+    result = smoke.run(_run_args())
+
+    assert result == 1
+    _assert_canary_left_healthy(pruner_main, orchestration)
+
+
+def test_cleanup_runs_when_the_restore_call_fails(orchestration, pruner_main, smoke):
+    target_name = "projects/test-project/secrets/secret-pruner-canary/versions/3"
+    orchestration.fail_enable_once_for = {target_name}
+
+    result = smoke.run(_run_args())
+
+    assert result == 1
+    _assert_canary_left_healthy(pruner_main, orchestration)
+
+
+def test_cleanup_runs_when_the_post_restore_verification_fails(orchestration, pruner_main, smoke):
+    target_name = "projects/test-project/secrets/secret-pruner-canary/versions/3"
+    orchestration.fail_access_once_for = {target_name}
+
+    result = smoke.run(_run_args())
+
+    assert result == 1
+    _assert_canary_left_healthy(pruner_main, orchestration)
+
+
+def test_a_fully_successful_run_also_leaves_the_canary_healthy(orchestration, pruner_main, smoke):
+    """Control case — no injected failure at all."""
+    result = smoke.run(_run_args())
+
+    assert result == 0
+    _assert_canary_left_healthy(pruner_main, orchestration)
