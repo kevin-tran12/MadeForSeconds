@@ -365,6 +365,31 @@ resource "google_monitoring_alert_policy" "secret_prune_error" {
 # `gcloud scheduler jobs pause` or console action can trigger in the first
 # place, and that's already visible via `gcloud scheduler jobs describe
 # secret-version-pruner`. Not worth a 4th Scheduler job for that.
+#
+# The filter excludes debugInfo:"UNREACHABLE_5xx" because an application
+# failure inside the function (any SECRET_PRUNE_ERROR) also makes Cloud
+# Scheduler log its own AttemptFinished severity=ERROR entry for that same
+# request — the target *was* reached and ran, it just returned a 500.
+# Confirmed live against a real failing execution of this project's
+# weekly-usage-report job (also returning 500s in production):
+# jsonPayload.debugInfo = "URL_UNREACHABLE-UNREACHABLE_5xx. Original HTTP
+# response code number = 500". Cloud Scheduler's troubleshooting docs
+# confirm UNREACHABLE_5xx specifically means "the destination target
+# returns an HTTP 5xx or 429 error" (reached and ran), as opposed to e.g.
+# URL_ERROR-ERROR_AUTHENTICATION (401, genuinely never reached — the real
+# OIDC-failure case this policy exists for) or the DNS/connection-reset
+# codes. Without the exclusion, secret_prune_error and this policy would
+# both fire for the exact same application failure, and this one's name
+# and documentation would misdirect the responder toward OIDC/routing.
+# Verified live that the exclusion is correctly scoped: re-running the
+# same query with `NOT jsonPayload.debugInfo:"UNREACHABLE_5xx"` against
+# weekly-usage-report's known-failing history returns zero rows — it drops
+# exactly the reached-the-target case and nothing else.
+#
+# main.py's top-level try/except (see its own comment) guarantees every
+# failure path still logs SECRET_PRUNE_ERROR before returning 500, so
+# excluding UNREACHABLE_5xx here doesn't create a silent gap for failures
+# that happen outside the per-secret loop.
 resource "google_monitoring_alert_policy" "secret_pruner_scheduler_failure" {
   project = var.gcp_project_id
 
@@ -381,6 +406,7 @@ resource "google_monitoring_alert_policy" "secret_pruner_scheduler_failure" {
         resource.labels.job_id="${google_cloud_scheduler_job.secret_pruner.name}"
         jsonPayload."@type"="type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished"
         severity="ERROR"
+        NOT jsonPayload.debugInfo:"UNREACHABLE_5xx"
       EOT
     }
   }
@@ -397,8 +423,13 @@ resource "google_monitoring_alert_policy" "secret_pruner_scheduler_failure" {
     content   = <<-EOT
       The triggered HTTP call itself never reached the function's own code
       (OIDC token minting, IAM, routing, or a cold-start timeout), so
-      neither the anomaly nor the error alert ever had a chance to fire.
-      Check `gcloud logging read 'resource.type="cloud_scheduler_job"
+      neither the anomaly nor the error alert ever had a chance to fire —
+      this is deliberately narrower than "Cloud Scheduler logged any error
+      for this job": an application failure (any SECRET_PRUNE_ERROR) also
+      makes Cloud Scheduler log its own ERROR entry for that same request,
+      but that case is excluded here and handled by the "list/destroy
+      failure" alert instead, since the function did run. Check
+      `gcloud logging read 'resource.type="cloud_scheduler_job"
       resource.labels.job_id="secret-version-pruner"'` for the
       AttemptFinished entry's `status` and `debugInfo` fields — a common
       cause is the OIDC/invoker IAM bindings drifting (secret_pruner.tf's

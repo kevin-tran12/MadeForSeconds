@@ -345,6 +345,26 @@ def test_entry_point_treats_a_deleted_configured_secret_as_a_hard_failure(pruner
     assert "admin-emails" in out
 
 
+def test_entry_point_logs_the_error_marker_for_a_failure_outside_the_per_secret_loop(pruner, monkeypatch, capsys):
+    """secret_pruner.tf's Scheduler-execution-failure alert deliberately
+    excludes any request the function actually ran and 500'd on, leaving
+    that case to this policy's own SECRET_PRUNE_ERROR marker instead — so a
+    failure before the per-secret loop even starts (env parsing, client
+    construction) must still log the marker, or it would alert nowhere."""
+
+    def _boom():
+        raise RuntimeError("could not build a Secret Manager client")
+
+    monkeypatch.setattr(pruner, "secretmanager", MagicMock(SecretManagerServiceClient=_boom))
+
+    body, status = pruner.prune_secret_versions(MagicMock())
+
+    assert status == 500
+    assert "error" in body
+    out = capsys.readouterr().out
+    assert "SECRET_PRUNE_ERROR" in out
+
+
 def test_process_secret_logs_the_error_marker_on_a_destroy_failure(pruner, capsys):
     """The log-based alert condition in secret_pruner.tf matches this exact
     string — this must fire right where the failure happens, not just get

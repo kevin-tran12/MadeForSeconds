@@ -195,26 +195,37 @@ def prune_secret_versions(request):
     deliberately stricter than "only if everything failed": a single secret
     stuck erroring forever must not be able to hide behind the rest of the
     run succeeding.
+
+    The whole body is wrapped in a top-level try/except so ERROR_MARKER is
+    guaranteed to be logged before any 500, even for a failure outside the
+    per-secret loop (env parsing, client construction). Cloud Scheduler's
+    own Scheduler-execution-failure alert deliberately excludes the case
+    where this function ran and returned 5xx (see secret_pruner.tf), so an
+    unmarked 500 here would otherwise alert nowhere at all.
     """
-    secret_ids = _secret_ids_from_env()
-    write_enabled_ids = _write_enabled_ids_from_env()
+    try:
+        secret_ids = _secret_ids_from_env()
+        write_enabled_ids = _write_enabled_ids_from_env()
 
-    client = secretmanager.SecretManagerServiceClient()
-    results = {}
-    any_errors = False
+        client = secretmanager.SecretManagerServiceClient()
+        results = {}
+        any_errors = False
 
-    for secret_id in secret_ids:
-        try:
-            result = process_secret(client, secret_id, secret_id in write_enabled_ids)
-        except Exception as exc:  # noqa: BLE001 - isolate one secret's failure from the others
-            any_errors = True
-            result = {"error": str(exc)}
-            print(f"{ERROR_MARKER} secret={secret_id}: {exc}")
-        else:
-            if result.get("errored"):
+        for secret_id in secret_ids:
+            try:
+                result = process_secret(client, secret_id, secret_id in write_enabled_ids)
+            except Exception as exc:  # noqa: BLE001 - isolate one secret's failure from the others
                 any_errors = True
-        results[secret_id] = result
+                result = {"error": str(exc)}
+                print(f"{ERROR_MARKER} secret={secret_id}: {exc}")
+            else:
+                if result.get("errored"):
+                    any_errors = True
+            results[secret_id] = result
 
-    if any_errors:
-        return results, 500
-    return results, 200
+        if any_errors:
+            return results, 500
+        return results, 200
+    except Exception as exc:  # noqa: BLE001 - guarantee a marker + 500 for every failure path, not just per-secret ones
+        print(f"{ERROR_MARKER} unhandled: {exc}")
+        return {"error": str(exc)}, 500

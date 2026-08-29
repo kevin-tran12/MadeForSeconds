@@ -822,9 +822,17 @@ Scheduler-level failure:
 - **Scheduler execution failed** (`Secret pruner: Scheduler execution
   failed`) — the triggered HTTP call itself never reached the function's
   code at all (OIDC token minting, IAM, routing, a cold-start timeout), so
-  neither marker above had a chance to fire. Backed by a log-based metric on
-  Cloud Scheduler's own `AttemptFinished` records, not the function's logs.
-  Check `gcloud logging read 'resource.type="cloud_scheduler_job"
+  neither marker above had a chance to fire. Backed directly by Cloud
+  Scheduler's own `AttemptFinished` log records (`condition_matched_log`,
+  no metric involved), filtered to exclude `debugInfo:"UNREACHABLE_5xx"` —
+  that specific code means the function *was* reached and ran, just
+  returned a 500, which is the **Error** alert's job above, not this one.
+  Confirmed live: a `SECRET_PRUNE_ERROR` failure makes Cloud Scheduler log
+  its own `severity=ERROR` entry for the same request with
+  `debugInfo = "URL_UNREACHABLE-UNREACHABLE_5xx..."`, so without this
+  exclusion every application failure would raise both alerts and this
+  one's "never reached the function" framing would be actively wrong for
+  that case. Check `gcloud logging read 'resource.type="cloud_scheduler_job"
   resource.labels.job_id="secret-version-pruner"'` for the failing attempt's
   `status`/`debugInfo`.
 
