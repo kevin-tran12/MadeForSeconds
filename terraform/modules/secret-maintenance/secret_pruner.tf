@@ -235,17 +235,34 @@ resource "google_cloud_scheduler_job" "secret_pruner" {
   ]
 }
 
-# ─── Scheduler-level log metrics ─────────────────────────────────────────────
+# ─── Scheduler-level log metric ──────────────────────────────────────────────
 # The two SECRET_PRUNE_* alert conditions below only match log lines the
 # function's own code emits — which means a failure *before* that code ever
 # runs (OIDC token minting, Cloud Run routing/invocation, a disabled or
 # stuck Scheduler job) produces neither log line, so pruning could stop
 # silently and active secret versions would resume growing with no alert
-# ever firing. These two metrics count Cloud Scheduler's own AttemptFinished
+# ever firing. This metric counts Cloud Scheduler's own AttemptFinished
 # execution records for this job — confirmed against this project's real
-# logs (`cloudscheduler.googleapis.com/executions`): a successful attempt is
-# severity INFO, a failed one is severity ERROR with a jsonPayload.status
-# set to a google.rpc.Code name.
+# logs (`cloudscheduler.googleapis.com/executions`): a failed attempt is
+# severity ERROR with a jsonPayload.status set to a google.rpc.Code name.
+#
+# There is deliberately no matching "success" metric with an absence-style
+# alert on top of it. That was tried and reverted: verified live against the
+# real Monitoring API that every mechanism capable of detecting "no data for
+# N days" — condition_absent, MQL's absent_for, and PromQL's
+# absent_over_time — rejects a window longer than ~25 hours for a log-based
+# metric ("greater than the allowed 1d1h" / "lookback windows longer than
+# 1d1h"), and this job's cadence is weekly. There is no way to express "no
+# successful execution in over a week" as a single Cloud Monitoring
+# condition against a metric that only legitimately gets data once a week.
+# A workaround exists (a second, more-frequent heartbeat job) but that means
+# real new infrastructure and cost for a scenario — the job silently
+# paused/disabled — that nothing in this codebase does automatically; only
+# a manual `gcloud scheduler jobs pause` or console action does, and that's
+# already visible via `gcloud scheduler jobs describe secret-version-pruner`.
+# Not worth a 4th Scheduler job to guard against an operator's own manual
+# action. See the alert policies' documentation blocks below for what IS
+# covered instead.
 resource "google_logging_metric" "secret_pruner_scheduler_failure" {
   project     = var.gcp_project_id
   name        = "secret_pruner_scheduler_failure"
@@ -265,72 +282,34 @@ resource "google_logging_metric" "secret_pruner_scheduler_failure" {
   }
 }
 
-resource "google_logging_metric" "secret_pruner_scheduler_success" {
-  project     = var.gcp_project_id
-  name        = "secret_pruner_scheduler_success"
-  description = "Successful Cloud Scheduler execution attempts for secret-version-pruner — its absence for longer than one weekly interval means nothing ran at all: a paused/disabled job, or every attempt failing before Cloud Scheduler could even record one"
-
-  filter = <<-EOT
-    resource.type="cloud_scheduler_job"
-    resource.labels.job_id="${google_cloud_scheduler_job.secret_pruner.name}"
-    jsonPayload."@type"="type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished"
-    severity="INFO"
-  EOT
-
-  metric_descriptor {
-    metric_kind = "DELTA"
-    value_type  = "INT64"
-    unit        = "1"
-  }
-}
-
 # Same reasoning as observability/error_alerts.tf's wait_for_log_metrics: a
 # log-based metric is visible to Logging immediately but the Monitoring API
 # only sees the descriptor a few minutes later, so an alert policy
 # referencing it in the same apply fails with "Cannot find metric(s)...".
 # Create-only delay — free on every apply after the first.
 resource "time_sleep" "wait_for_scheduler_log_metrics" {
-  depends_on = [
-    google_logging_metric.secret_pruner_scheduler_failure,
-    google_logging_metric.secret_pruner_scheduler_success,
-  ]
+  depends_on = [google_logging_metric.secret_pruner_scheduler_failure]
 
   create_duration = "180s"
 }
 
 # ─── Alerts ──────────────────────────────────────────────────────────────────
-# Four independent conditions on one policy (combiner = OR):
-#
-#   SECRET_PRUNE_ANOMALY — a secret's numerically latest version is not
-#   ENABLED. The pruner deliberately skips destroying anything for that secret
-#   rather than guessing which older version is "really" current.
-#
-#   SECRET_PRUNE_ERROR — a secret couldn't be listed, or one of its versions
-#   failed to destroy. This also makes the function return non-2xx, so Cloud
-#   Scheduler's retry_config (above) gets a chance to recover on its own —
-#   this alert is for when it doesn't, or to make the failure visible
-#   immediately rather than waiting on retries to exhaust.
-#
-#   Scheduler execution failure — the triggered HTTP call itself failed
-#   (OIDC auth, routing, a Cloud Run cold-start timeout), so the function's
-#   own code — and therefore the two markers above — never ran at all.
-#
-#   No successful execution in over a week — catches a paused/disabled job,
-#   or a job that fails every single attempt (including all retries) so
-#   consistently that even the failure metric's own alert somehow doesn't
-#   reach anyone; this is the backstop for "pruning silently stopped
-#   entirely," not just "pruning hit an error this run."
-#
-# Either way, silence from this alert does not mean nothing needed attention —
-# it means nothing was skipped, failed, or stopped running.
+# Three separate policies, not conditions on one policy. Cloud Monitoring
+# requires a condition_matched_log ("LogMatch") condition to be the *only*
+# condition in its policy — confirmed against the API guidance ("If you use
+# a LogMatch condition, it must be the only condition in your alerting
+# policy") and consistent with the fact that LogMatch is evaluated by
+# querying Cloud Logging directly rather than through a Monitoring metric.
+# Mixing SECRET_PRUNE_ANOMALY, SECRET_PRUNE_ERROR, and the Scheduler-failure
+# threshold in one policy — the original design — would have been rejected
+# by `terraform apply`, and only after the function, Scheduler job, and log
+# metric had already been created.
 resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
   project = var.gcp_project_id
 
-  display_name = "Secret pruner needs attention"
+  display_name = "Secret pruner: non-ENABLED latest version"
   severity     = "WARNING"
   combiner     = "OR"
-
-  depends_on = [time_sleep.wait_for_scheduler_log_metrics]
 
   conditions {
     display_name = "Pruner skipped a secret with a non-ENABLED latest version"
@@ -344,6 +323,46 @@ resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
     }
   }
 
+  alert_strategy {
+    notification_rate_limit {
+      period = "300s"
+    }
+  }
+
+  notification_channels = [var.notification_channel]
+
+  documentation {
+    content   = <<-EOT
+      A secret's numerically latest version is not ENABLED, so the pruner
+      skipped it entirely rather than guessing which older version is really
+      current. Investigate: `gcloud secrets versions list <secret-id>`.
+      Usually a rotation added a version and never enabled it. Version
+      numbers never change, so the fix has to change what counts as
+      "latest," not just poke at some other version:
+        - If that latest version's value is actually good: enable that exact
+          version — `gcloud secrets versions enable <that-version>
+          --secret=<secret-id>`.
+        - If it's bad and should never be enabled: add a fresh version on top
+          of it — `gcloud secrets versions add <secret-id> --data-file=-` —
+          so a newer, enabled version becomes the latest. The bad version
+          stays disabled and harmless; it's still protected from destruction
+          by the same floor that protects any two most-recent enabled
+          versions, and ages out of that protection naturally as further
+          rotations happen.
+      Either way, the pruner resumes normal handling for that secret next run
+      once its latest version is ENABLED again.
+    EOT
+    mime_type = "text/markdown"
+  }
+}
+
+resource "google_monitoring_alert_policy" "secret_prune_error" {
+  project = var.gcp_project_id
+
+  display_name = "Secret pruner: list/destroy failure"
+  severity     = "WARNING"
+  combiner     = "OR"
+
   conditions {
     display_name = "Pruner failed to list or destroy a secret's versions"
 
@@ -355,6 +374,36 @@ resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
       EOT
     }
   }
+
+  alert_strategy {
+    notification_rate_limit {
+      period = "300s"
+    }
+  }
+
+  notification_channels = [var.notification_channel]
+
+  documentation {
+    content   = <<-EOT
+      A secret couldn't be listed, or a version failed to destroy (e.g. an
+      etag conflict from a concurrent change). Check the `secret-pruner`
+      Cloud Run revision's logs for the SECRET_PRUNE_ERROR line with the
+      secret_id and underlying error. Cloud Scheduler already retries the
+      whole run a few times on its own; this firing means either those
+      retries also failed, or you're seeing it before they've run.
+    EOT
+    mime_type = "text/markdown"
+  }
+}
+
+resource "google_monitoring_alert_policy" "secret_pruner_scheduler_failure" {
+  project = var.gcp_project_id
+
+  display_name = "Secret pruner: Scheduler execution failed"
+  severity     = "WARNING"
+  combiner     = "OR"
+
+  depends_on = [time_sleep.wait_for_scheduler_log_metrics]
 
   conditions {
     display_name = "Scheduler execution failed before reaching the function"
@@ -377,26 +426,6 @@ resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
     }
   }
 
-  conditions {
-    display_name = "No successful secret-pruner execution in over a week"
-
-    condition_absent {
-      # 8 days: the job runs weekly (604800s); this margin absorbs ordinary
-      # scheduling variance without false-alarming on a single day's delay.
-      duration = "691200s"
-      filter   = "resource.type = \"cloud_scheduler_job\" AND metric.type = \"logging.googleapis.com/user/${google_logging_metric.secret_pruner_scheduler_success.name}\""
-
-      aggregations {
-        alignment_period   = "86400s"
-        per_series_aligner = "ALIGN_COUNT"
-      }
-
-      trigger {
-        count = 1
-      }
-    }
-  }
-
   alert_strategy {
     notification_rate_limit {
       period = "300s"
@@ -407,52 +436,27 @@ resource "google_monitoring_alert_policy" "secret_prune_anomaly" {
 
   documentation {
     content   = <<-EOT
-      secret-pruner hit one of four conditions:
-
-      **Anomaly** — a secret's numerically latest version is not ENABLED, so
-      the pruner skipped it entirely rather than guessing which older version
-      is really current. Investigate: `gcloud secrets versions list
-      <secret-id>`. Usually a rotation added a version and never enabled it.
-      Version numbers never change, so the fix has to change what counts as
-      "latest," not just poke at some other version:
-        - If that latest version's value is actually good: enable that exact
-          version — `gcloud secrets versions enable <that-version>
-          --secret=<secret-id>`.
-        - If it's bad and should never be enabled: add a fresh version on top
-          of it — `gcloud secrets versions add <secret-id> --data-file=-` —
-          so a newer, enabled version becomes the latest. The bad version
-          stays disabled and harmless; it's still protected from destruction
-          by the same floor that protects any two most-recent enabled
-          versions, and ages out of that protection naturally as further
-          rotations happen.
-      Either way, the pruner resumes normal handling for that secret next run
-      once its latest version is ENABLED again.
-
-      **Error** — a secret couldn't be listed, or a version failed to
-      destroy (e.g. an etag conflict from a concurrent change). Check the
-      `secret-pruner` Cloud Run revision's logs for the SECRET_PRUNE_ERROR
-      line with the secret_id and underlying error. Cloud Scheduler already
-      retries the whole run a few times on its own; this firing means either
-      those retries also failed, or you're seeing it before they've run.
-
-      **Scheduler execution failed** — the triggered HTTP call itself never
-      reached the function's own code (OIDC token minting, IAM, routing, or
-      a cold-start timeout), so neither marker above ever had a chance to
-      fire. Check `gcloud logging read 'resource.type="cloud_scheduler_job"
+      The triggered HTTP call itself never reached the function's own code
+      (OIDC token minting, IAM, routing, or a cold-start timeout), so
+      neither the anomaly nor the error alert ever had a chance to fire.
+      Check `gcloud logging read 'resource.type="cloud_scheduler_job"
       resource.labels.job_id="secret-version-pruner"'` for the
       AttemptFinished entry's `status` and `debugInfo` fields — a common
       cause is the OIDC/invoker IAM bindings drifting (secret_pruner.tf's
       scheduler_mints_pruner_oidc / secret_pruner_invoker) or the function
       itself failing to deploy.
 
-      **No successful execution in over a week** — the backstop for
-      "pruning silently stopped entirely," not just "hit an error this
-      run": either the job is paused/disabled
-      (`gcloud scheduler jobs describe secret-version-pruner --location
-      us-central1`, check `state`), or every attempt has been failing
-      (including retries) without the failure alert above reaching anyone.
-      `gcloud scheduler jobs run secret-version-pruner --location
-      us-central1` to trigger a manual attempt and see the outcome directly.
+      This alert does NOT cover a job that is silently paused/disabled
+      (zero attempts of any kind, so this metric never sees a failure to
+      count either) — see the comment above
+      google_logging_metric.secret_pruner_scheduler_failure for why no
+      Cloud Monitoring condition can express "no execution in over a week"
+      against a weekly-cadence log-based metric. If pruning seems to have
+      stopped entirely and neither this alert nor the other two have fired,
+      check manually: `gcloud scheduler jobs describe
+      secret-version-pruner --location us-central1` (state should be
+      ENABLED), or trigger one directly with `gcloud scheduler jobs run
+      secret-version-pruner --location us-central1`.
     EOT
     mime_type = "text/markdown"
   }

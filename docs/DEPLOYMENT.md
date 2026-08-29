@@ -793,29 +793,57 @@ allowlist):
 Only once that full cycle succeeds should a real secret's id go into
 `secret_pruner_write_enabled_ids`.
 
-**If pruning stops, or a destroy fails.** One alert policy, two conditions:
+**If pruning stops, or a destroy fails.** Three separate alert policies, not
+one policy with several conditions — Cloud Monitoring requires a
+`condition_matched_log` ("LogMatch") condition to be the *only* condition in
+its policy, confirmed against the Monitoring alerting API docs, so the two
+log-based conditions below each get their own policy, plus a third for the
+Scheduler-level failure:
 
-- **Anomaly** — `secret-pruner` skips a secret entirely, rather than
-  guessing, whenever that secret's numerically latest version is not
-  `ENABLED` — usually a rotation that added a version and never enabled it.
-  `gcloud secrets versions list <secret-id>` to see why. Version numbers
-  never change, so the fix has to be one of: enable that *exact* version if
-  its value is actually good (`gcloud secrets versions enable <version>
-  --secret=<id>`), or add a fresh version on top of it if it's bad
-  (`gcloud secrets versions add <id> --data-file=-`) so a newer enabled
-  version becomes the latest — disabling the stray version again, or enabling
-  some *other*, older version, does nothing: neither changes which version is
-  numerically newest. Pruning resumes for that secret once its latest version
-  is `ENABLED` again.
-- **Error** — a secret couldn't be listed, or a specific version failed to
-  destroy (e.g. an etag conflict from a concurrent change). This also makes
-  the function return a non-2xx response, so Cloud Scheduler's own
-  `retry_config` gets a few immediate attempts to recover before the alert
-  really means something's stuck. Check the `secret-pruner` Cloud Run
-  revision's logs for the `SECRET_PRUNE_ERROR` line naming the secret and the
-  underlying error.
+- **Anomaly** (`Secret pruner: non-ENABLED latest version`) — `secret-pruner`
+  skips a secret entirely, rather than guessing, whenever that secret's
+  numerically latest version is not `ENABLED` — usually a rotation that added
+  a version and never enabled it. `gcloud secrets versions list <secret-id>`
+  to see why. Version numbers never change, so the fix has to be one of:
+  enable that *exact* version if its value is actually good (`gcloud secrets
+  versions enable <version> --secret=<id>`), or add a fresh version on top of
+  it if it's bad (`gcloud secrets versions add <id> --data-file=-`) so a
+  newer enabled version becomes the latest — disabling the stray version
+  again, or enabling some *other*, older version, does nothing: neither
+  changes which version is numerically newest. Pruning resumes for that
+  secret once its latest version is `ENABLED` again.
+- **Error** (`Secret pruner: list/destroy failure`) — a secret couldn't be
+  listed, or a specific version failed to destroy (e.g. an etag conflict
+  from a concurrent change). This also makes the function return a non-2xx
+  response, so Cloud Scheduler's own `retry_config` gets a few immediate
+  attempts to recover before the alert really means something's stuck.
+  Check the `secret-pruner` Cloud Run revision's logs for the
+  `SECRET_PRUNE_ERROR` line naming the secret and the underlying error.
+- **Scheduler execution failed** (`Secret pruner: Scheduler execution
+  failed`) — the triggered HTTP call itself never reached the function's
+  code at all (OIDC token minting, IAM, routing, a cold-start timeout), so
+  neither marker above had a chance to fire. Backed by a log-based metric on
+  Cloud Scheduler's own `AttemptFinished` records, not the function's logs.
+  Check `gcloud logging read 'resource.type="cloud_scheduler_job"
+  resource.labels.job_id="secret-version-pruner"'` for the failing attempt's
+  `status`/`debugInfo`.
 
-Both fire the same "Secret pruner needs attention" alert email.
+  **Known gap, accepted rather than worked around:** none of these three
+  detect a Scheduler job that's silently paused or disabled (zero attempts
+  of any kind — no success, no failure, nothing for any metric to see).
+  Verified against the live Monitoring API that every mechanism capable of
+  expressing "no data for N days" — `condition_absent`, MQL's `absent_for`,
+  and PromQL's `absent_over_time` — rejects windows longer than ~25 hours
+  for a log-based metric, and this job only legitimately produces data once
+  a week. Closing that gap would mean standing up a second, more-frequent
+  heartbeat job — real new infrastructure for a failure mode that only a
+  manual `gcloud scheduler jobs pause` or console action can trigger in the
+  first place. If pruning seems to have silently stopped and none of the
+  three alerts above have fired, check manually: `gcloud scheduler jobs
+  describe secret-version-pruner --location us-central1` (state should read
+  `ENABLED`).
+
+All three notify the same email channel.
 
 **Cost.** Measured against the live project (`gcloud secrets versions list`
 for all 5 pruner-managed secrets, `admin-emails` through
@@ -1102,7 +1130,7 @@ then required.
 | Cloud Run | 2M req/mo · 360K GB-sec · 180K vCPU-sec | Well under for personal use |
 | Firestore | 50K reads/day · 20K writes/day · 1 GiB storage | Well under |
 | Cloud Storage | 5 GB-months storage (US regions) · 100 GB/mo egress from North America | Minimal for images + receipts |
-| Artifact Registry | 0.5 GB storage, aggregated per billing account across every repository | Two repositories share this allowance: `mfs` (the backend's own image, cleanup-policy-managed to ≤ 5 tagged) and `gcf-artifacts` (auto-created build output for every Gen2 Cloud Function). See below — the ~0.49 GB figure predates secret-pruner's own deploy and `gcf-artifacts` has no cleanup policy at all. |
+| Artifact Registry | 0.5 GiB storage-month, aggregated per billing account across every repository (confirmed via the live Cloud Billing Catalog API: SKU 8502-299A-ABAF prices in `GiBy.mo`, first tier free up to `startUsageAmount: 0.5`) | Two repositories share this allowance: `mfs` (the backend's own image, cleanup-policy-managed to ≤ 5 tagged) and `gcf-artifacts` (auto-created build output for every Gen2 Cloud Function). See below — this predates secret-pruner's own deploy, doesn't cross the allowance once measured correctly in GiB, but leaves thin headroom, and `gcf-artifacts` has no cleanup policy at all. |
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
@@ -1111,91 +1139,168 @@ then required.
 
 ### Artifact Registry: gcf-artifacts has no cleanup policy
 
-The 0.49 GB combined figure elsewhere in this doc was measured
-(`gcloud artifacts repositories describe`) **before** secret-pruner's own
-first deploy — `gcf-artifacts` only held budget-killer's and
-budget-resetter's images at that point. `gcloud functions describe
-secret-pruner` still 404s as of this writing; there is nothing to measure
-yet, only to estimate.
+**The free allowance is 0.5 GiB (536,870,912 bytes), not 0.5 GB.** Confirmed
+against the live Cloud Billing Catalog API (`services/149C-F9EC-3994/skus/
+8502-299A-ABAF`, "Artifact Registry Storage"): `pricingExpression.usageUnit`
+is `GiBy.mo` ("gibibyte month"), and the first tier is `$0` up to
+`startUsageAmount: 0.5`. An earlier version of this doc treated that as 0.5
+decimal GB (500,000,000 bytes) and concluded a single new image would cross
+it on day one — wrong, by exactly the GB/GiB gap (536.87 vs. 500 decimal MB,
+a ~7% difference that happened to matter here because the real number was
+this close to the edge either way).
 
-Two things push this above a rough estimate and into "needs an actual
-decision":
+`gcloud artifacts repositories describe` prints "Repository Size" as decimal
+MB (bytes ÷ 1e6), confirmed by comparing its human-readable output against
+the underlying byte math below — that display is not itself part of the
+API response body. Measured live, right before secret-pruner's own first
+deploy (`gcloud functions describe secret-pruner` still 404s as of this
+writing):
+
+| Repository | Reported size | 
+|---|---|
+| `mfs` | 339.343 MB |
+| `gcf-artifacts` | 149.411 MB |
+| **Combined** | **488.754 MB** ≈ 0.4552 GiB |
+| Free allowance | 536.871 MB ≈ **0.5 GiB** |
+| **Headroom today** | **≈ 48 MB** |
+
+So today, pre-deploy, this project is **under** the allowance with room to
+spare — not already over it as an earlier draft claimed. That doesn't make
+this a non-issue; it makes it a "how much longer" question instead of an
+"already broken" one, and the honest answer is: not much longer, for two
+separate reasons.
 
 - **`gcf-artifacts` carries no cleanup policy at all** — confirmed via
   `gcloud artifacts repositories describe gcf-artifacts`, no
   `cleanupPolicies` field, unlike `mfs`'s three (keep 5 tagged, delete
-  untagged after 1 day, delete anything else tagged). Every image
-  budget-killer and budget-resetter have ever built is still sitting there:
-  14 versioned images across the two of them (8 + 6, plus one build-cache
-  layer each), spanning `2026-06-16` to `2026-08-27` with none ever removed.
-  Adding secret-pruner as a third function
-  redeploying on the same never-cleaned repository doesn't just add one more
-  image — it adds a third unbounded growth source.
-- **Each observed image is ~25-27 MB** (`gcloud artifacts docker images
-  list --format=json`, `metadata.imageSizeBytes`, both existing functions).
-  secret-pruner's own image is a reasonable-guess similar order of
-  magnitude — same Cloud Functions Python buildpack, a comparably small
-  dependency set — but that is an estimate, not a measurement, since it
-  doesn't exist yet.
+  untagged after 1 day, delete anything else tagged — and even that only
+  bounds `mfs` by image *count*, not by size; a future backend image could
+  grow larger than today's and still pass the same "≤5 tagged" policy).
+  Every image budget-killer and budget-resetter have ever built is still
+  sitting there: 15 versioned images (7 + cache, 6 + cache) spanning
+  `2026-06-16` to `2026-08-27`, none ever removed. Adding secret-pruner as a
+  third function redeploying on the same never-cleaned repository adds a
+  third unbounded growth source, not just one more image.
+- **But "how much each new image actually adds" is smaller than it looks,
+  and not knowable precisely in advance.** `gcloud artifacts docker images
+  list --format=json` reports each image's own `metadata.imageSizeBytes` —
+  summed across all 15 images in `gcf-artifacts` today, that's **≈386 MB**.
+  The repository's actual measured size is **149.411 MB** — barely a third
+  of that sum, because Artifact Registry deduplicates shared layers (the
+  Python 3.12 buildpack base, the interpreter, common `pip` packages) across
+  every image in the repository. `metadata.imageSizeBytes` is each image's
+  *full logical size*, not its marginal contribution to the repository's
+  billed total, and there's no API field that reports the latter directly —
+  it can only be observed as a before/after delta on the repository itself.
 
-Rough math: `gcf-artifacts` at 149 MB today, `mfs` capped at ~339 MB by its
-own policy → combined already ~488 MB before secret-pruner's first image
-lands. One more ~25-27 MB image alone would cross 0.5 GB on day one, and
-every future redeploy of any of the three functions adds another, forever,
-with nothing removing old ones.
+That cuts both ways for secret-pruner's first deploy:
 
-**Recommended fix** — apply a cleanup policy to `gcf-artifacts` directly via
-`gcloud`, not Terraform: it's a platform-auto-managed repository (labeled
-`goog-managed-by: cloudfunctions`, never declared as a
-`google_artifact_registry_repository` resource anywhere in this codebase),
-and importing an already-live, platform-owned resource into Terraform state
-carries real risk of a subsequent `terraform apply` fighting Cloud
-Functions' own management of it. `gcloud artifacts repositories
-set-cleanup-policies` sets a cleanup policy on an existing repository
-without requiring Terraform to own it at all:
+| Scenario | Basis | New image's real contribution | Combined after deploy | Crosses 0.5 GiB? |
+|---|---|---|---|---|
+| Worst case — shares nothing | Full reported image size, same order as budget-killer/-resetter's own (~25-27 MB) | ~25-27 MB | ~514-516 MB | No — ~21-23 MB headroom left |
+| Observed-average case — shares layers like the existing two functions do | 149.411 MB ÷ 15 images already in the repo | ~10 MB | ~499 MB | No — ~38 MB headroom left |
+
+Either way, secret-pruner's own first deploy does not cross the allowance.
+What it does do is leave somewhere between ~21 and ~38 MB of headroom behind
+it, shared across three functions' worth of future redeploys with nothing
+ever cleaning up after any of them. At the worst-case ~25-27 MB/image rate,
+that's roughly **one more redeploy of any of the three functions** before
+the next one crosses 0.5 GiB; at the observed-average ~10 MB/image rate,
+it's closer to **three or four**. Both are "soon," on a project where any of
+budget-killer, budget-resetter, or secret-pruner could plausibly redeploy
+again within weeks (a dependency bump, a bug fix). This is why the fix below
+is written as a prerequisite, not a suggestion to revisit later.
+
+**Rollout prerequisite — pick one before running `terraform apply` for this
+story:**
+
+1. **Apply the cleanup policy first (recommended).** `gcf-artifacts` is a
+   platform-auto-managed repository (labeled `goog-managed-by:
+   cloudfunctions`, never declared as a `google_artifact_registry_repository`
+   resource anywhere in this codebase), so importing it into Terraform state
+   carries real risk of a subsequent `terraform apply` fighting Cloud
+   Functions' own management of it. `gcloud artifacts repositories
+   set-cleanup-policies` sets a cleanup policy on an existing repository
+   without requiring Terraform to own it:
+
+   ```bash
+   cat > /tmp/gcf-artifacts-cleanup.json <<'EOF'
+   [
+     {
+       "name": "keep-3-most-recent-per-function",
+       "action": {"type": "Keep"},
+       "mostRecentVersions": {"keepCount": 3}
+     },
+     {
+       "name": "delete-older-than-30-days",
+       "action": {"type": "Delete"},
+       "condition": {"olderThan": "30d"}
+     }
+   ]
+   EOF
+
+   gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
+     --location=us-central1 --project=made-for-seconds --dry-run \
+     --policy=/tmp/gcf-artifacts-cleanup.json
+   ```
+
+   `--dry-run` does **not** show results in `gcloud artifacts docker images
+   list` — dry runs execute asynchronously on a background job and Google
+   documents results taking approximately a day to appear, surfaced only
+   through Data Access audit logs with `validateOnly=true`, not through the
+   image listing (confirmed against Artifact Registry's own cleanup-policy
+   docs). To actually see what a dry run marked for deletion:
+
+   ```bash
+   # One-time: Data Access audit logs are off by default for this service.
+   # Console: IAM & Admin > Audit Logs > Artifact Registry > enable "Data Write".
+
+   # Wait ~1 day after the --dry-run call above, then:
+   gcloud logging read \
+     'protoPayload.serviceName="artifactregistry.googleapis.com" AND
+      protoPayload.request.parent="projects/made-for-seconds/locations/us-central1/repositories/gcf-artifacts/packages/-" AND
+      protoPayload.request.validateOnly=true' \
+     --project=made-for-seconds
+   ```
+
+   Confirm the `names` field on those entries keeps each function's active
+   image plus its intended rollback versions before removing `--dry-run` and
+   applying for real:
+
+   ```bash
+   gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
+     --location=us-central1 --project=made-for-seconds \
+     --policy=/tmp/gcf-artifacts-cleanup.json
+   ```
+
+2. **Or: proceed without it, but as an explicit decision, not a default.**
+   If the operator chooses to deploy secret-pruner before applying the
+   cleanup policy above, that's a deliberate acceptance of the growth path
+   documented in this section — normal usage stays free (headroom is
+   positive today, per the table above), a spike (several redeploys close
+   together) is the scenario that turns paid, at $0.10/GiB-month past the
+   free tier, i.e. cents/month even somewhat over. Record that decision
+   here rather than leaving it implicit: _(operator: note the date and
+   choice once made)_.
+
+Either path, this is a live mutation to a resource outside Terraform's
+management — not something this story applies unilaterally alongside an
+unrelated Terraform-driven PR.
+
+**Rollout acceptance check — run after every future deploy of any of the
+three functions, not just secret-pruner's first one**, since this repo has
+no automated size alerting (Artifact Registry doesn't export a storage-size
+metric to Cloud Monitoring at all — confirmed live: querying
+`metricDescriptors` for `artifactregistry.googleapis.com/*` on this project
+returns nothing — so there's no free way to alert on this the way the other
+cost lines in this doc do; a manual check after each deploy is the only
+option that doesn't mean standing up new paid infrastructure to guard a few
+cents of exposure):
 
 ```bash
-cat > /tmp/gcf-artifacts-cleanup.json <<'EOF'
-[
-  {
-    "name": "keep-3-most-recent-per-function",
-    "action": {"type": "Keep"},
-    "mostRecentVersions": {"keepCount": 3}
-  },
-  {
-    "name": "delete-older-than-30-days",
-    "action": {"type": "Delete"},
-    "condition": {"olderThan": "30d"}
-  }
-]
-EOF
-
-# --dry-run first: confirm mostRecentVersions.keepCount applies per package
-# (budget-killer/budget-resetter/secret-pruner each keep their own 3) and
-# not 3 total across all of them combined, before letting it delete anything
-# for real. `gcloud artifacts docker images list` afterward shows what the
-# policy currently marks for cleanup without having removed it yet.
-gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
-  --location=us-central1 --project=made-for-seconds --dry-run \
-  --policy=/tmp/gcf-artifacts-cleanup.json
-
-# Once the dry-run output looks right, apply for real:
-gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
-  --location=us-central1 --project=made-for-seconds \
-  --policy=/tmp/gcf-artifacts-cleanup.json
+gcloud artifacts repositories describe mfs --location=us-central1 --project=made-for-seconds
+gcloud artifacts repositories describe gcf-artifacts --location=us-central1 --project=made-for-seconds
 ```
 
-This is a recommendation, not something applied as part of this story —
-it's a live mutation to a resource outside Terraform's management, and
-whether to run it (and with what retention numbers) is the operator's call,
-not something to apply unilaterally alongside an unrelated Terraform-driven
-PR.
-
-**Rollout acceptance check** — after `terraform apply` deploys secret-pruner
-for the first time, re-measure for real rather than trusting the estimate
-above:
-
-```bash
-gcloud artifacts repositories describe mfs --location=us-central1 --project=made-for-seconds --format="value(sizeBytes)"
-gcloud artifacts repositories describe gcf-artifacts --location=us-central1 --project=made-for-seconds --format="value(sizeBytes)"
-```
+(Read the printed "Repository Size" line — decimal MB — and compare the sum
+against 536.87 MB, not 500 MB.)
