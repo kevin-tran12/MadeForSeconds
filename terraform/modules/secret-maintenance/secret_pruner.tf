@@ -235,64 +235,6 @@ resource "google_cloud_scheduler_job" "secret_pruner" {
   ]
 }
 
-# ─── Scheduler-level log metric ──────────────────────────────────────────────
-# The two SECRET_PRUNE_* alert conditions below only match log lines the
-# function's own code emits — which means a failure *before* that code ever
-# runs (OIDC token minting, Cloud Run routing/invocation, a disabled or
-# stuck Scheduler job) produces neither log line, so pruning could stop
-# silently and active secret versions would resume growing with no alert
-# ever firing. This metric counts Cloud Scheduler's own AttemptFinished
-# execution records for this job — confirmed against this project's real
-# logs (`cloudscheduler.googleapis.com/executions`): a failed attempt is
-# severity ERROR with a jsonPayload.status set to a google.rpc.Code name.
-#
-# There is deliberately no matching "success" metric with an absence-style
-# alert on top of it. That was tried and reverted: verified live against the
-# real Monitoring API that every mechanism capable of detecting "no data for
-# N days" — condition_absent, MQL's absent_for, and PromQL's
-# absent_over_time — rejects a window longer than ~25 hours for a log-based
-# metric ("greater than the allowed 1d1h" / "lookback windows longer than
-# 1d1h"), and this job's cadence is weekly. There is no way to express "no
-# successful execution in over a week" as a single Cloud Monitoring
-# condition against a metric that only legitimately gets data once a week.
-# A workaround exists (a second, more-frequent heartbeat job) but that means
-# real new infrastructure and cost for a scenario — the job silently
-# paused/disabled — that nothing in this codebase does automatically; only
-# a manual `gcloud scheduler jobs pause` or console action does, and that's
-# already visible via `gcloud scheduler jobs describe secret-version-pruner`.
-# Not worth a 4th Scheduler job to guard against an operator's own manual
-# action. See the alert policies' documentation blocks below for what IS
-# covered instead.
-resource "google_logging_metric" "secret_pruner_scheduler_failure" {
-  project     = var.gcp_project_id
-  name        = "secret_pruner_scheduler_failure"
-  description = "Failed Cloud Scheduler execution attempts for secret-version-pruner — catches OIDC/invocation-level failures the function's own SECRET_PRUNE_ERROR log marker can't see, because its code never ran"
-
-  filter = <<-EOT
-    resource.type="cloud_scheduler_job"
-    resource.labels.job_id="${google_cloud_scheduler_job.secret_pruner.name}"
-    jsonPayload."@type"="type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished"
-    severity="ERROR"
-  EOT
-
-  metric_descriptor {
-    metric_kind = "DELTA"
-    value_type  = "INT64"
-    unit        = "1"
-  }
-}
-
-# Same reasoning as observability/error_alerts.tf's wait_for_log_metrics: a
-# log-based metric is visible to Logging immediately but the Monitoring API
-# only sees the descriptor a few minutes later, so an alert policy
-# referencing it in the same apply fails with "Cannot find metric(s)...".
-# Create-only delay — free on every apply after the first.
-resource "time_sleep" "wait_for_scheduler_log_metrics" {
-  depends_on = [google_logging_metric.secret_pruner_scheduler_failure]
-
-  create_duration = "180s"
-}
-
 # ─── Alerts ──────────────────────────────────────────────────────────────────
 # Three separate policies, not conditions on one policy. Cloud Monitoring
 # requires a condition_matched_log ("LogMatch") condition to be the *only*
@@ -396,6 +338,33 @@ resource "google_monitoring_alert_policy" "secret_prune_error" {
   }
 }
 
+# condition_matched_log, not a log-based metric + condition_threshold (the
+# original design here): a metric-threshold policy backed by a metric that
+# only ever emits on failure never emits a healthy/zero point, so its
+# incident stays open for the default 7-day auto-close window and a second
+# failure inside that window (next week's run, or its own retries) reuses
+# the same open incident instead of notifying again — confirmed against
+# Cloud Monitoring's own incident-lifecycle docs. Separately, the
+# `notification_rate_limit` below was silently inert on the old
+# condition_threshold version: confirmed against the Alerting API reference
+# for AlertStrategy.notification_rate_limit — "Required for log-based
+# alerting policies, i.e. policies with a LogMatch condition. This limit is
+# not implemented for alerting policies that do not have a LogMatch
+# condition." Matching secret_prune_anomaly/secret_prune_error's shape above
+# avoids both problems and drops the log-based metric and its 3-minute
+# apply-time propagation wait entirely.
+#
+# This does NOT cover a job that's silently paused/disabled (zero attempts
+# of any kind, so no ERROR log entry is ever written to match either) —
+# verified live against the real Monitoring API that every mechanism
+# capable of expressing "no execution in over a week" — condition_absent,
+# MQL's absent_for, and PromQL's absent_over_time — rejects a window longer
+# than ~25 hours for a log-based metric, and this job's cadence is weekly.
+# Closing that gap for real would mean a second, more-frequent heartbeat
+# job — real new infrastructure and cost for a failure mode only a manual
+# `gcloud scheduler jobs pause` or console action can trigger in the first
+# place, and that's already visible via `gcloud scheduler jobs describe
+# secret-version-pruner`. Not worth a 4th Scheduler job for that.
 resource "google_monitoring_alert_policy" "secret_pruner_scheduler_failure" {
   project = var.gcp_project_id
 
@@ -403,26 +372,16 @@ resource "google_monitoring_alert_policy" "secret_pruner_scheduler_failure" {
   severity     = "WARNING"
   combiner     = "OR"
 
-  depends_on = [time_sleep.wait_for_scheduler_log_metrics]
-
   conditions {
     display_name = "Scheduler execution failed before reaching the function"
 
-    condition_threshold {
-      filter          = "resource.type = \"cloud_scheduler_job\" AND metric.type = \"logging.googleapis.com/user/${google_logging_metric.secret_pruner_scheduler_failure.name}\""
-      comparison      = "COMPARISON_GT"
-      threshold_value = 0
-      duration        = "0s"
-
-      aggregations {
-        alignment_period     = "3600s"
-        per_series_aligner   = "ALIGN_COUNT"
-        cross_series_reducer = "REDUCE_SUM"
-      }
-
-      trigger {
-        count = 1
-      }
+    condition_matched_log {
+      filter = <<-EOT
+        resource.type="cloud_scheduler_job"
+        resource.labels.job_id="${google_cloud_scheduler_job.secret_pruner.name}"
+        jsonPayload."@type"="type.googleapis.com/google.cloud.scheduler.logging.AttemptFinished"
+        severity="ERROR"
+      EOT
     }
   }
 
@@ -447,10 +406,9 @@ resource "google_monitoring_alert_policy" "secret_pruner_scheduler_failure" {
       itself failing to deploy.
 
       This alert does NOT cover a job that is silently paused/disabled
-      (zero attempts of any kind, so this metric never sees a failure to
-      count either) — see the comment above
-      google_logging_metric.secret_pruner_scheduler_failure for why no
-      Cloud Monitoring condition can express "no execution in over a week"
+      (zero attempts of any kind, so no ERROR log entry is ever written to
+      match either) — see the comment above this resource for why no Cloud
+      Monitoring condition can express "no execution in over a week"
       against a weekly-cadence log-based metric. If pruning seems to have
       stopped entirely and neither this alert nor the other two have fired,
       check manually: `gcloud scheduler jobs describe

@@ -1156,7 +1156,7 @@ API response body. Measured live, right before secret-pruner's own first
 deploy (`gcloud functions describe secret-pruner` still 404s as of this
 writing):
 
-| Repository | Reported size | 
+| Repository | Reported size |
 |---|---|
 | `mfs` | 339.343 MB |
 | `gcf-artifacts` | 149.411 MB |
@@ -1177,39 +1177,49 @@ separate reasons.
   bounds `mfs` by image *count*, not by size; a future backend image could
   grow larger than today's and still pass the same "≤5 tagged" policy).
   Every image budget-killer and budget-resetter have ever built is still
-  sitting there: 15 versioned images (7 + cache, 6 + cache) spanning
+  sitting there: **16** versioned artifacts (8 budget-killer + 6
+  budget-resetter images, plus one ~25.4 MB build-cache image for *each*
+  function — every Gen2 build pushes both a deployable image and a separate
+  `.../cache` image, confirmed live for both existing functions) spanning
   `2026-06-16` to `2026-08-27`, none ever removed. Adding secret-pruner as a
   third function redeploying on the same never-cleaned repository adds a
-  third unbounded growth source, not just one more image.
-- **But "how much each new image actually adds" is smaller than it looks,
-  and not knowable precisely in advance.** `gcloud artifacts docker images
-  list --format=json` reports each image's own `metadata.imageSizeBytes` —
-  summed across all 15 images in `gcf-artifacts` today, that's **≈386 MB**.
+  third unbounded growth source, not just one more image — and its first
+  deploy alone adds *two* new artifacts (its own image, plus its own cache),
+  the same as every deploy before it.
+- **But "how much each new artifact actually adds" is smaller than it
+  looks, and not knowable precisely in advance.** `gcloud artifacts docker
+  images list --format=json` reports each artifact's own
+  `metadata.imageSizeBytes` — summed across all 16 artifacts in
+  `gcf-artifacts` today, that's **≈411 MB** (411,410,515 bytes exactly).
   The repository's actual measured size is **149.411 MB** — barely a third
   of that sum, because Artifact Registry deduplicates shared layers (the
   Python 3.12 buildpack base, the interpreter, common `pip` packages) across
-  every image in the repository. `metadata.imageSizeBytes` is each image's
-  *full logical size*, not its marginal contribution to the repository's
-  billed total, and there's no API field that reports the latter directly —
-  it can only be observed as a before/after delta on the repository itself.
+  every artifact in the repository. `metadata.imageSizeBytes` is each
+  artifact's *full logical size*, not its marginal contribution to the
+  repository's billed total, and there's no API field that reports the
+  latter directly — it can only be observed as a before/after delta on the
+  repository itself.
 
-That cuts both ways for secret-pruner's first deploy:
+That cuts both ways for secret-pruner's first deploy, which adds **two**
+new artifacts (image + cache), not one:
 
-| Scenario | Basis | New image's real contribution | Combined after deploy | Crosses 0.5 GiB? |
+| Scenario | Basis | Two new artifacts' real contribution | Combined after deploy | Crosses 0.5 GiB (536.871 MB)? |
 |---|---|---|---|---|
-| Worst case — shares nothing | Full reported image size, same order as budget-killer/-resetter's own (~25-27 MB) | ~25-27 MB | ~514-516 MB | No — ~21-23 MB headroom left |
-| Observed-average case — shares layers like the existing two functions do | 149.411 MB ÷ 15 images already in the repo | ~10 MB | ~499 MB | No — ~38 MB headroom left |
+| Worst case — shares nothing | Image, full reported size same order as budget-killer/-resetter's own (~25-27 MB) + cache (~25.4 MB, consistently observed for both existing functions) | ~50-52 MB | ~539-541 MB | **Yes** — over by ~2-4 MB (≈$0.0002-0.0004/month at $0.10/GiB-month over the free tier — real, but a fraction of a cent) |
+| Observed-average case — shares layers like the existing two functions do | 149.411 MB ÷ 16 artifacts already in the repo ≈ 9.3 MB/artifact × 2 new artifacts | ~19 MB | ~507 MB | No — ~30 MB headroom left |
 
-Either way, secret-pruner's own first deploy does not cross the allowance.
-What it does do is leave somewhere between ~21 and ~38 MB of headroom behind
-it, shared across three functions' worth of future redeploys with nothing
-ever cleaning up after any of them. At the worst-case ~25-27 MB/image rate,
-that's roughly **one more redeploy of any of the three functions** before
-the next one crosses 0.5 GiB; at the observed-average ~10 MB/image rate,
-it's closer to **three or four**. Both are "soon," on a project where any of
-budget-killer, budget-resetter, or secret-pruner could plausibly redeploy
-again within weeks (a dependency bump, a bug fix). This is why the fix below
-is written as a prerequisite, not a suggestion to revisit later.
+The worst case and the observed-average case now disagree on whether this
+crosses the allowance — the earlier version of this doc concluded "either
+way, no," which held only when a single new artifact was priced in. With
+the second artifact (the cache image every deploy also creates) counted,
+the worst case is a real possibility, not one ruled out by the math, even
+though it amounts to a fraction of a cent if it happens. What it does do
+either way is leave thin headroom behind it — 0 to ~30 MB, shared across
+three functions' worth of future redeploys with nothing ever cleaning up
+after any of them, on a project where any of budget-killer, budget-resetter,
+or secret-pruner could plausibly redeploy again within weeks (a dependency
+bump, a bug fix). This is why the fix below is written as a prerequisite,
+not a suggestion to revisit later.
 
 **Rollout prerequisite — pick one before running `terraform apply` for this
 story:**
@@ -1273,15 +1283,17 @@ story:**
      --policy=/tmp/gcf-artifacts-cleanup.json
    ```
 
-2. **Or: proceed without it, but as an explicit decision, not a default.**
-   If the operator chooses to deploy secret-pruner before applying the
-   cleanup policy above, that's a deliberate acceptance of the growth path
-   documented in this section — normal usage stays free (headroom is
-   positive today, per the table above), a spike (several redeploys close
-   together) is the scenario that turns paid, at $0.10/GiB-month past the
-   free tier, i.e. cents/month even somewhat over. Record that decision
-   here rather than leaving it implicit: _(operator: note the date and
-   choice once made)_.
+2. **Or: proceed without it, but as an explicit decision, not a default —
+   and not on the premise that the first deploy is guaranteed free.** Per
+   the table above, the worst case for secret-pruner's own first deploy
+   already crosses the allowance by a few MB on its own, before any future
+   redeploy of anything. If the operator chooses to deploy before applying
+   the cleanup policy, that's a deliberate acceptance of two things: a
+   small chance of a small immediate overage (a fraction of a cent, if the
+   new artifacts don't dedup as well as the observed-average case suggests),
+   and the larger, near-certain overage from any redeploy after that with
+   nothing ever cleaned up. Record that decision here rather than leaving
+   it implicit: _(operator: note the date and choice once made)_.
 
 Either path, this is a live mutation to a resource outside Terraform's
 management — not something this story applies unilaterally alongside an
