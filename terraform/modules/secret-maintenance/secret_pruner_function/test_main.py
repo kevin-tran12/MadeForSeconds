@@ -27,6 +27,7 @@ docs/DEPLOYMENT.md is what catches the rest.
 
 import importlib
 import sys
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -36,11 +37,30 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 
+def _random_id(prefix: str = "secret") -> str:
+    """A fresh, non-hardcoded identifier for test fixtures — the pruner treats
+    secret_id as an opaque string throughout, so nothing below depends on its
+    exact value, only that the same one is used consistently within a test."""
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+# The two secrets SECRET_IDS is configured with for every test in this file.
+# Module-level (not per-test) so every test sees the same pair without each
+# one having to thread them through as fixture arguments.
+SECRET_A = _random_id()
+SECRET_B = _random_id()
+
+# A generic secret_id for process_secret-level tests that don't care about
+# SECRET_IDS/the entry point at all — only that the same id is used
+# consistently between the mocked client and the assertions in one test.
+TEST_SECRET_ID = _random_id()
+
+
 @pytest.fixture
 def pruner(monkeypatch):
     """Import main.py with env set. Module-level os.environ reads need this first."""
     monkeypatch.setenv("GCP_PROJECT_ID", "test-project")
-    monkeypatch.setenv("SECRET_IDS", "admin-emails,stripe-secret-key")
+    monkeypatch.setenv("SECRET_IDS", f"{SECRET_A},{SECRET_B}")
     monkeypatch.setenv("WRITE_ENABLED_SECRET_IDS", "")
 
     import main
@@ -65,10 +85,13 @@ def secret_manager_client(pruner):
         yield client
 
 
-def _version(pruner, number: int, state: str, etag: str = "etag", secret_id: str = "test-secret", pending_destroy: bool = False):
+def _version(pruner, number: int, state: str, etag: str = None, secret_id: str = None, pending_destroy: bool = False):
     import datetime
 
     from google.cloud.secretmanager_v1.types import SecretVersion
+
+    etag = etag or _random_id("etag")
+    secret_id = secret_id or _random_id()
 
     v = SecretVersion()
     v.name = f"projects/test-project/secrets/{secret_id}/versions/{number}"
@@ -79,13 +102,13 @@ def _version(pruner, number: int, state: str, etag: str = "etag", secret_id: str
     return v
 
 
-def _info(pruner, number, state, etag="etag", pending_destroy=False):
+def _info(pruner, number, state, etag=None, pending_destroy=False):
     """A plain dict shaped like _version_info's output — for plan_destructions,
     which is pure and never touches a proto."""
     return {
         "number": number,
         "state": state,
-        "etag": etag,
+        "etag": etag or _random_id("etag"),
         "name": f"v{number}",
         "pending_destroy": pending_destroy,
     }
@@ -259,9 +282,9 @@ def test_version_info_reads_pending_destroy_from_the_real_proto(pruner):
 # ─── process_secret ───────────────────────────────────────────────────────────
 
 
-def _client_listing(pruner, versions, secret_path="projects/test-project/secrets/foo"):
+def _client_listing(pruner, versions, secret_path=None):
     client = MagicMock()
-    client.secret_path.return_value = secret_path
+    client.secret_path.return_value = secret_path or f"projects/test-project/secrets/{TEST_SECRET_ID}"
     client.list_secret_versions.return_value = versions
     return client
 
@@ -270,7 +293,7 @@ def test_process_secret_dry_run_reports_without_destroying(pruner):
     versions = [_version(pruner, n, "ENABLED") for n in (1, 2, 3)]
     client = _client_listing(pruner, versions)
 
-    result = pruner.process_secret(client, "foo", write_enabled=False)
+    result = pruner.process_secret(client, TEST_SECRET_ID, write_enabled=False)
 
     client.destroy_secret_version.assert_not_called()
     assert result["dry_run_would_destroy"] == [1]
@@ -280,7 +303,7 @@ def test_process_secret_write_enabled_destroys_candidates(pruner):
     versions = [_version(pruner, n, "ENABLED") for n in (1, 2, 3)]
     client = _client_listing(pruner, versions)
 
-    result = pruner.process_secret(client, "foo", write_enabled=True)
+    result = pruner.process_secret(client, TEST_SECRET_ID, write_enabled=True)
 
     client.destroy_secret_version.assert_called_once()
     assert result["destroyed"] == [1]
@@ -291,7 +314,7 @@ def test_process_secret_passes_the_versions_own_etag_on_destroy(pruner):
     versions = [_version(pruner, n, "ENABLED", etag=f"etag-{n}") for n in (1, 2, 3)]
     client = _client_listing(pruner, versions)
 
-    pruner.process_secret(client, "foo", write_enabled=True)
+    pruner.process_secret(client, TEST_SECRET_ID, write_enabled=True)
 
     request = client.destroy_secret_version.call_args.kwargs["request"]
     assert request.etag == "etag-1"
@@ -305,7 +328,7 @@ def test_process_secret_isolates_one_destroy_failure_from_the_rest(pruner):
     client = _client_listing(pruner, versions)
     client.destroy_secret_version.side_effect = [Exception("etag mismatch"), None]
 
-    result = pruner.process_secret(client, "foo", write_enabled=True)
+    result = pruner.process_secret(client, TEST_SECRET_ID, write_enabled=True)
 
     assert result["destroyed"] == [2]
     assert result["errored"] == [{"version": 1, "error": "etag mismatch"}]
@@ -315,7 +338,7 @@ def test_process_secret_anomaly_never_calls_destroy(pruner):
     versions = [_version(pruner, 2, "DISABLED"), _version(pruner, 1, "ENABLED")]
     client = _client_listing(pruner, versions)
 
-    result = pruner.process_secret(client, "foo", write_enabled=True)
+    result = pruner.process_secret(client, TEST_SECRET_ID, write_enabled=True)
 
     client.destroy_secret_version.assert_not_called()
     assert "anomaly" in result
@@ -328,12 +351,13 @@ def test_process_secret_missing_secret_raises_it_is_not_a_benign_skip(pruner):
     other listing failure, not be swallowed as a normal outcome."""
     from google.api_core.exceptions import NotFound
 
+    missing_secret_id = _random_id()
     client = MagicMock()
-    client.secret_path.return_value = "projects/test-project/secrets/gone"
+    client.secret_path.return_value = f"projects/test-project/secrets/{missing_secret_id}"
     client.list_secret_versions.side_effect = NotFound("no such secret")
 
     with pytest.raises(NotFound):
-        pruner.process_secret(client, "gone", write_enabled=True)
+        pruner.process_secret(client, missing_secret_id, write_enabled=True)
 
 
 def test_entry_point_treats_a_deleted_configured_secret_as_a_hard_failure(pruner, monkeypatch, capsys):
@@ -343,10 +367,10 @@ def test_entry_point_treats_a_deleted_configured_secret_as_a_hard_failure(pruner
     from google.api_core.exceptions import NotFound
 
     client = MagicMock()
-    client.secret_path.return_value = "projects/test-project/secrets/admin-emails"
+    client.secret_path.return_value = f"projects/test-project/secrets/{SECRET_A}"
 
     def _list(parent):
-        if "admin-emails" in parent:
+        if SECRET_A in parent:
             raise NotFound("no such secret")
         return []
 
@@ -356,10 +380,10 @@ def test_entry_point_treats_a_deleted_configured_secret_as_a_hard_failure(pruner
     body, status = pruner.prune_secret_versions(MagicMock())
 
     assert status == 500
-    assert "error" in body["admin-emails"]
+    assert "error" in body[SECRET_A]
     out = capsys.readouterr().out
     assert "SECRET_PRUNE_ERROR" in out
-    assert "admin-emails" in out
+    assert SECRET_A in out
 
 
 def test_entry_point_logs_the_error_marker_for_a_failure_outside_the_per_secret_loop(pruner, monkeypatch, capsys):
@@ -390,11 +414,11 @@ def test_process_secret_logs_the_error_marker_on_a_destroy_failure(pruner, capsy
     client = _client_listing(pruner, versions)
     client.destroy_secret_version.side_effect = Exception("etag mismatch")
 
-    pruner.process_secret(client, "foo", write_enabled=True)
+    pruner.process_secret(client, TEST_SECRET_ID, write_enabled=True)
 
     out = capsys.readouterr().out
     assert "SECRET_PRUNE_ERROR" in out
-    assert "foo" in out
+    assert TEST_SECRET_ID in out
 
 
 # ─── prune_secret_versions (entry point) ──────────────────────────────────────
@@ -406,7 +430,7 @@ def test_entry_point_all_secrets_succeed_returns_200(pruner, monkeypatch):
     body, status = pruner.prune_secret_versions(MagicMock())
 
     assert status == 200
-    assert set(body.keys()) == {"admin-emails", "stripe-secret-key"}
+    assert set(body.keys()) == {SECRET_A, SECRET_B}
 
 
 def test_entry_point_all_secrets_erroring_returns_500(pruner, monkeypatch):
@@ -427,7 +451,7 @@ def test_entry_point_partial_hard_error_still_returns_500(pruner, monkeypatch):
     the rest of the run succeeding, silently and forever."""
 
     def _mixed(client, sid, write_enabled):
-        if sid == "admin-emails":
+        if sid == SECRET_A:
             raise RuntimeError("boom")
         return {"dry_run_would_destroy": []}
 
@@ -436,8 +460,8 @@ def test_entry_point_partial_hard_error_still_returns_500(pruner, monkeypatch):
     body, status = pruner.prune_secret_versions(MagicMock())
 
     assert status == 500
-    assert "error" in body["admin-emails"]
-    assert body["stripe-secret-key"] == {"dry_run_would_destroy": []}
+    assert "error" in body[SECRET_A]
+    assert body[SECRET_B] == {"dry_run_would_destroy": []}
 
 
 def test_entry_point_a_destroy_error_without_a_raised_exception_still_returns_500(pruner, monkeypatch):
@@ -447,7 +471,7 @@ def test_entry_point_a_destroy_error_without_a_raised_exception_still_returns_50
     inspecting the result, not from a try/except around process_secret."""
 
     def _one_errored(client, sid, write_enabled):
-        if sid == "admin-emails":
+        if sid == SECRET_A:
             return {"destroyed": [], "errored": [{"version": 1, "error": "etag mismatch"}]}
         return {"dry_run_would_destroy": []}
 
@@ -456,7 +480,7 @@ def test_entry_point_a_destroy_error_without_a_raised_exception_still_returns_50
     body, status = pruner.prune_secret_versions(MagicMock())
 
     assert status == 500
-    assert body["admin-emails"]["errored"]
+    assert body[SECRET_A]["errored"]
 
 
 def test_entry_point_logs_the_error_marker_for_a_hard_failure(pruner, monkeypatch, capsys):
@@ -481,7 +505,7 @@ def test_entry_point_no_secrets_configured_returns_200(pruner, monkeypatch):
 
 
 def test_entry_point_passes_write_enabled_flag_per_secret(pruner, monkeypatch):
-    monkeypatch.setenv("WRITE_ENABLED_SECRET_IDS", "stripe-secret-key")
+    monkeypatch.setenv("WRITE_ENABLED_SECRET_IDS", SECRET_B)
     reloaded = importlib.reload(pruner)
 
     seen = {}
@@ -493,4 +517,4 @@ def test_entry_point_passes_write_enabled_flag_per_secret(pruner, monkeypatch):
     monkeypatch.setattr(reloaded, "process_secret", _record)
     reloaded.prune_secret_versions(MagicMock())
 
-    assert seen == {"admin-emails": False, "stripe-secret-key": True}
+    assert seen == {SECRET_A: False, SECRET_B: True}

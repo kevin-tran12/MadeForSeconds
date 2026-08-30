@@ -16,12 +16,20 @@ logic a live run can't cheaply prove wasn't a fluke:
 import argparse
 import datetime
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "terraform" / "modules" / "secret-maintenance" / "secret_pruner_function"))
+
+
+def _random_id(prefix: str = "secret") -> str:
+    """A fresh, non-hardcoded identifier for filler test data — used wherever
+    a test needs *some* secret_id distinct from the canary, but doesn't care
+    what it actually is."""
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
 @pytest.fixture
@@ -303,18 +311,19 @@ def test_cleanup_with_nothing_prunable_is_a_healthy_noop(smoke, pruner_main):
 
 
 def test_single_secret_value_uses_the_alternate_delimiter(smoke):
-    flag = smoke._write_enabled_env_flag("admin-emails")
-    assert flag == "--update-env-vars=^:^WRITE_ENABLED_SECRET_IDS=admin-emails"
+    secret_id = _random_id()
+    flag = smoke._write_enabled_env_flag(secret_id)
+    assert flag == f"--update-env-vars=^:^WRITE_ENABLED_SECRET_IDS={secret_id}"
 
 
 def test_multi_secret_value_is_preserved_byte_for_byte_not_split_on_comma(smoke):
     """The regression this exists for: --update-env-vars is itself a
     comma-separated KEY=VALUE dict flag, and WRITE_ENABLED_SECRET_IDS's value
     is *also* comma-separated. Without the ^:^ alternate-delimiter prefix,
-    gcloud would parse "admin-emails,instagram-access-token" as two dict
-    entries — the second has no "=" and fails to parse, or worse silently
-    drops half the allowlist."""
-    value = "admin-emails,instagram-access-token,stripe-secret-key"
+    gcloud would parse a two-secret value as two dict entries — the second
+    has no "=" and fails to parse, or worse silently drops half the
+    allowlist."""
+    value = f"{_random_id()},{_random_id()},{_random_id()}"
     flag = smoke._write_enabled_env_flag(value)
     assert flag == f"--update-env-vars=^:^WRITE_ENABLED_SECRET_IDS={value}"
     # The full original value must appear verbatim after the final "=" —
@@ -494,17 +503,20 @@ def test_wait_for_scheduler_attempt_does_not_stop_early_just_because_time_advanc
 
 
 def test_response_with_an_anomaly_on_any_secret_is_rejected(smoke):
+    """_check_response_is_clean treats every secret in the response the same
+    way — no special-casing of the canary — so any two distinct secret_ids
+    exercise this, not specifically the real canary's."""
     with pytest.raises(smoke.SmokeTestFailure):
-        smoke._check_response_is_clean({"secret-pruner-canary": {"dry_run_would_destroy": []}, "admin-emails": {"anomaly": "latest version 6 is DISABLED"}})
+        smoke._check_response_is_clean({_random_id(): {"dry_run_would_destroy": []}, _random_id(): {"anomaly": "latest version 6 is DISABLED"}})
 
 
 def test_response_with_an_error_on_any_secret_is_rejected(smoke):
     with pytest.raises(smoke.SmokeTestFailure):
-        smoke._check_response_is_clean({"secret-pruner-canary": {"dry_run_would_destroy": []}, "redis-url": {"error": "boom"}})
+        smoke._check_response_is_clean({_random_id(): {"dry_run_would_destroy": []}, _random_id(): {"error": "boom"}})
 
 
 def test_clean_response_passes(smoke):
-    smoke._check_response_is_clean({"secret-pruner-canary": {"dry_run_would_destroy": [1]}, "admin-emails": {"dry_run_would_destroy": []}})  # must not raise
+    smoke._check_response_is_clean({_random_id(): {"dry_run_would_destroy": [1]}, _random_id(): {"dry_run_would_destroy": []}})  # must not raise
 
 
 # ─── run(): cleanup is guaranteed after a partial mutation, at every point ──
