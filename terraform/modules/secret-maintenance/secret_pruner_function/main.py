@@ -55,6 +55,16 @@ re-run, or next week's run landing before the 7-day version_destroy_ttl
 elapses would call destroy_secret_version on a version already mid-deletion —
 at best a wasted, failing API call, at worst resetting whatever destruction
 clock the API keeps for it.
+
+Every print() below logs secret_id (an identifier like "admin-emails") and
+version numbers — never a secret's actual value. access_secret_version,
+the only Secret Manager RPC that returns payload data, is never called
+anywhere in this file; only list_secret_versions and destroy_secret_version
+are, and neither returns the payload on success or failure. CodeQL's
+py/clear-text-logging-sensitive-data still flags these lines purely because
+the word "secret" appears in the variable/parameter names — a known false
+positive for infrastructure code that handles secrets by identifier, not by
+value. Suppressed inline at each site below with that same justification.
 """
 
 import os
@@ -159,12 +169,18 @@ def process_secret(client: secretmanager.SecretManagerServiceClient, secret_id: 
     candidates, anomaly = plan_destructions(versions)
 
     if anomaly:
+        # codeql[py/clear-text-logging-sensitive-data]
+        # False positive: secret_id is an identifier (e.g. "admin-emails"),
+        # not a secret value — see the module docstring.
         print(f"{ANOMALY_MARKER} secret={secret_id}: {anomaly}")
         return {"anomaly": anomaly}
 
     if not write_enabled:
         would_destroy = [v["number"] for v in candidates]
         if would_destroy:
+            # codeql[py/clear-text-logging-sensitive-data]
+            # False positive: secret_id is an identifier, not a secret value
+            # — see the module docstring.
             print(f"[dry-run] {secret_id}: would destroy versions {would_destroy}")
         return {"dry_run_would_destroy": would_destroy}
 
@@ -178,9 +194,17 @@ def process_secret(client: secretmanager.SecretManagerServiceClient, secret_id: 
             destroyed.append(v["number"])
         except Exception as exc:  # noqa: BLE001 - isolate one bad version from the rest of this secret
             errored.append({"version": v["number"], "error": str(exc)})
+            # codeql[py/clear-text-logging-sensitive-data]
+            # False positive: secret_id is an identifier, and exc is a
+            # Secret Manager API error — destroy_secret_version never
+            # returns payload data on success or failure. See the module
+            # docstring.
             print(f"{ERROR_MARKER} secret={secret_id} version={v['number']}: {exc}")
 
     if destroyed:
+        # codeql[py/clear-text-logging-sensitive-data]
+        # False positive: secret_id is an identifier, not a secret value —
+        # see the module docstring.
         print(f"{secret_id}: destroyed versions {destroyed}")
     return {"destroyed": destroyed, "errored": errored}
 
@@ -217,6 +241,9 @@ def prune_secret_versions(request):
             except Exception as exc:  # noqa: BLE001 - isolate one secret's failure from the others
                 any_errors = True
                 result = {"error": str(exc)}
+                # codeql[py/clear-text-logging-sensitive-data]
+                # False positive: secret_id is an identifier, not a secret
+                # value — see the module docstring.
                 print(f"{ERROR_MARKER} secret={secret_id}: {exc}")
             else:
                 if result.get("errored"):

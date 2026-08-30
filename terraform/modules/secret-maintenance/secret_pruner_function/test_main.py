@@ -28,7 +28,7 @@ docs/DEPLOYMENT.md is what catches the rest.
 import importlib
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -46,6 +46,23 @@ def pruner(monkeypatch):
     import main
 
     return importlib.reload(main)
+
+
+@pytest.fixture(autouse=True)
+def secret_manager_client(pruner):
+    """prune_secret_versions constructs a real secretmanager.SecretManagerServiceClient()
+    unconditionally, even in tests that only mock process_secret downstream of
+    it — without this, that construction needs real GCP credentials, which
+    don't exist in CI (only on a dev machine with `gcloud auth` cached),
+    mirroring billing_function/test_main.py's storage_client fixture for the
+    exact same reason. Patches the shared google.cloud.secretmanager module
+    object, so it survives a test's own `importlib.reload(pruner)`. autouse,
+    but a test can still override it with its own
+    `monkeypatch.setattr(pruner, "secretmanager", ...)` for specific client
+    behavior (e.g. the deleted-secret tests)."""
+    client = MagicMock()
+    with patch.object(pruner.secretmanager, "SecretManagerServiceClient", return_value=client):
+        yield client
 
 
 def _version(pruner, number: int, state: str, etag: str = "etag", secret_id: str = "test-secret", pending_destroy: bool = False):

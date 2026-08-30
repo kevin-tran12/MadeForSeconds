@@ -16,6 +16,17 @@ stripe-secret-key) would have written fake payloads as that secret's newest
 versions and then scheduled them for destruction — a real outage, not a test
 failure.
 
+CodeQL's py/clear-text-logging-sensitive-data flags several print() calls
+below purely because CANARY_SECRET_ID's name contains "secret" — every
+flagged line logs that constant (a fixed string, "secret-pruner-canary",
+not a credential) or a PASS/FAIL label, never a secret's actual value. This
+script does read the canary's real payload in a couple of places (the
+recovery-cycle assertions) to prove the destroy/recovery mechanism actually
+works, but that payload is always a disposable string this same run wrote
+moments earlier (f"smoke-test-{run_id}-{label}"), never a real credential —
+and CodeQL did not flag those two lines anyway. Suppressed inline at each
+flagged site with this same justification.
+
 Three parts:
 
   A. Authenticated boundary — mints a real OIDC identity token by
@@ -165,6 +176,9 @@ def _require_canary_secret(secret_path: str) -> None:
 
 def _check(label: str, condition: bool, detail: str = "") -> None:
     status = "PASS" if condition else "FAIL"
+    # codeql[py/clear-text-logging-sensitive-data]
+    # False positive: label/detail are PASS/FAIL diagnostics, not secret
+    # values — see the module docstring.
     print(f"  [{status}] {label}" + (f" — {detail}" if detail and not condition else ""))
     if not condition:
         raise SmokeTestFailure(f"{label}: {detail}")
@@ -376,12 +390,25 @@ def _cleanup_and_verify_healthy(pruner_main, operator_client, secret_path: str) 
     _, anomaly_after = pruner_main.plan_destructions(versions_after)
     if anomaly_after is not None:
         print(f"  WARNING: canary left anomalous after cleanup: {anomaly_after}")
+        # codeql[py/clear-text-logging-sensitive-data]
+        # False positive: CANARY_SECRET_ID is the fixed string
+        # "secret-pruner-canary", not a secret value — see the module
+        # docstring.
         print(f"  Remediation: gcloud secrets versions list {CANARY_SECRET_ID}, then either")
+        # codeql[py/clear-text-logging-sensitive-data]
+        # False positive: CANARY_SECRET_ID is an identifier, not a secret
+        # value — see the module docstring.
         print(f"    gcloud secrets versions enable <version> --secret={CANARY_SECRET_ID}   (if its value is fine)")
+        # codeql[py/clear-text-logging-sensitive-data]
+        # False positive: CANARY_SECRET_ID is an identifier, not a secret
+        # value — see the module docstring.
         print(f"    gcloud secrets versions add {CANARY_SECRET_ID} --data-file=-           (to rotate a fresh one on top)")
         ok = False
 
     if ok:
+        # codeql[py/clear-text-logging-sensitive-data]
+        # False positive: CANARY_SECRET_ID is an identifier, not a secret
+        # value — see the module docstring.
         print(f"  cleanup left {CANARY_SECRET_ID} in a healthy state (latest version ENABLED, no anomaly)")
     return ok
 
@@ -474,6 +501,9 @@ def _test_real_write_path(args, pruner_main, operator_client, pruner_base_creds,
 
     flipped = False
     try:
+        # codeql[py/clear-text-logging-sensitive-data]
+        # False positive: CANARY_SECRET_ID is an identifier, not a secret
+        # value — see the module docstring.
         print(f"  Deploying with WRITE_ENABLED_SECRET_IDS={CANARY_SECRET_ID} (env var only, no source change)")
         _set_write_enabled_env(args.project, args.region, args.function_name, CANARY_SECRET_ID)
         flipped = True
@@ -528,6 +558,9 @@ def run(args: argparse.Namespace) -> int:
     run_id = uuid.uuid4().hex[:8]
     pruner_main = _import_pruner_main(args.project)
 
+    # codeql[py/clear-text-logging-sensitive-data]
+    # False positive: CANARY_SECRET_ID is an identifier, not a secret value —
+    # see the module docstring.
     print(f"Target: project={args.project} pruner_sa={pruner_sa_email} secret={CANARY_SECRET_ID}")
 
     operator_creds, _ = google.auth.default()
@@ -582,6 +615,9 @@ def run(args: argparse.Namespace) -> int:
         print("\nCleaning up test versions...")
         cleanup_ok = _cleanup_and_verify_healthy(pruner_main, operator_client, secret_path)
         if not cleanup_ok:
+            # codeql[py/clear-text-logging-sensitive-data]
+            # False positive: CANARY_SECRET_ID is an identifier, not a
+            # secret value — see the module docstring.
             print(f"  WARNING: cleanup could not confirm {CANARY_SECRET_ID} was left healthy — see remediation above")
 
     if not cleanup_ok:
