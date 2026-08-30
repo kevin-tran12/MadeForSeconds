@@ -18,6 +18,11 @@ output "secret_ids" {
   value       = local.created_secrets
 }
 
+output "backend_secret_accessor_roles" {
+  description = "Distinct roles mfs-backend holds across every per-secret binding. Checked by terraform/tests/secret_pruner_iam.tftest.hcl to be exactly {roles/secretmanager.secretAccessor} — mfs-backend must never hold anything with versions.destroy on it (that permission is isolated to module.secret-maintenance's own identity, see secret_pruner.tf)."
+  value       = toset([for binding in google_secret_manager_secret_iam_member.backend_secret_access : binding.role])
+}
+
 output "granted_secret_accessors" {
   description = "secret_id of every secret the backend runtime SA can read. Checked against module.backend-service.referenced_secret_ids by terraform/tests/secret_access.tftest.hcl — a secret Cloud Run injects but that is missing here fails revision creation. Read off the IAM resources themselves, not off the map that builds them, so the assertion tests what Terraform will actually create."
   value       = toset([for binding in google_secret_manager_secret_iam_member.backend_secret_access : binding.secret_id])

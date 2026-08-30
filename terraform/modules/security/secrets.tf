@@ -7,10 +7,22 @@
 #
 # Cloud Run always reads "latest", so it picks up new versions automatically
 # on the next deployment or manual revision update.
+#
+# version_destroy_ttl (Epic 2, story 2.3): every "destroy" call — whether from
+# module.secret-maintenance's automated pruner or a manual
+# `gcloud secrets versions destroy` — only disables the version immediately;
+# permanent, unrecoverable deletion happens 7 days later. Recovery in that
+# window is `gcloud secrets versions enable VERSION --secret=ID`, which is
+# deliberately a permission the pruner's own role does not hold (see
+# modules/secret-maintenance/secret_pruner.tf) — a bug in the thing that
+# destroys versions must not also be able to compromise the thing that undoes
+# its mistakes.
 
 resource "google_secret_manager_secret" "admin_emails" {
   project   = var.gcp_project_id
   secret_id = "admin-emails"
+
+  version_destroy_ttl = "604800s" # 7 days
 
   replication {
     auto {}
@@ -34,6 +46,8 @@ resource "google_secret_manager_secret" "redis_url" {
   project   = var.gcp_project_id
   secret_id = "redis-url"
 
+  version_destroy_ttl = "604800s" # 7 days — see the comment above admin_emails
+
   replication {
     auto {}
   }
@@ -54,6 +68,8 @@ resource "google_secret_manager_secret" "stripe_secret_key" {
   count     = var.stripe_secret_key != "" ? 1 : 0
   project   = var.gcp_project_id
   secret_id = "stripe-secret-key"
+
+  version_destroy_ttl = "604800s" # 7 days — see the comment above admin_emails
 
   replication {
     auto {}
@@ -76,6 +92,8 @@ resource "google_secret_manager_secret" "stripe_webhook_secret" {
   project   = var.gcp_project_id
   secret_id = "stripe-webhook-secret"
 
+  version_destroy_ttl = "604800s" # 7 days — see the comment above admin_emails
+
   replication {
     auto {}
   }
@@ -97,6 +115,8 @@ resource "google_secret_manager_secret" "subscriber_jwt_secret" {
   project   = var.gcp_project_id
   secret_id = "subscriber-jwt-secret"
 
+  version_destroy_ttl = "604800s" # 7 days — see the comment above admin_emails
+
   replication {
     auto {}
   }
@@ -117,6 +137,8 @@ resource "google_secret_manager_secret" "resend_api_key" {
   count     = var.resend_api_key != "" ? 1 : 0
   project   = var.gcp_project_id
   secret_id = "resend-api-key"
+
+  version_destroy_ttl = "604800s" # 7 days — see the comment above admin_emails
 
   replication {
     auto {}
@@ -140,6 +162,8 @@ resource "google_secret_manager_secret" "instagram_access_token" {
   count     = var.instagram_access_token != "" ? 1 : 0
   project   = var.gcp_project_id
   secret_id = "instagram-access-token"
+
+  version_destroy_ttl = "604800s" # 7 days — see the comment above admin_emails
 
   replication {
     auto {}

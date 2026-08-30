@@ -54,8 +54,8 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `billing_account` | GCP billing account ID, for the budget alert |
 | `monthly_budget_amount` | Budget cap in USD (default `15`) — see [Cost circuit breaker](#cost-circuit-breaker) |
 | `alert_email` | Address that receives budget and uptime alerts |
-| `instagram_user_id` | Instagram Creator account numeric ID (optional — leave blank to skip) |
-| `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy) |
+| `instagram_user_id` | Instagram Creator account numeric ID (deprecated for now — leave blank; see [MCP server § Instagram publishing](#mcp-server-recipeexpense-automation)) |
+| `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy, if ever re-enabled — currently left blank) |
 | `environment` | `production` or `development` — only these two are meaningful, injected as `ENVIRONMENT`. Defaults to `production`; leave unset unless you know why you're changing it |
 | `state_admin_email` | Google account of whoever runs `terraform apply` — granted `objectAdmin` on the state bucket. Must match the casing already in state if you're picking up an existing deployment; IAM preserves case and a mismatch forces the binding to be replaced |
 
@@ -90,11 +90,15 @@ This provisions, across five modules (`modules/security`, `modules/storage`,
   held under a 7-year retention policy; staging — private and ephemeral)
 - Identity Platform (Firebase Auth) for admin login
 - Cloud Build CI/CD trigger
-- GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, Instagram token)
-- Cloud Scheduler jobs (weekly Instagram token rotation when
-  `instagram_access_token` is set, weekly usage report, monthly budget-breaker
-  reset)
+- GCP Secret Manager secrets (Stripe keys, JWT secret, API keys, and
+  Instagram's token if that feature is ever re-enabled — see
+  [MCP server § Instagram publishing](#mcp-server-recipeexpense-automation),
+  currently deprecated)
+- Cloud Scheduler jobs (weekly usage report, weekly Secret Manager version
+  pruning, monthly budget-breaker reset; a 4th weekly Instagram token
+  rotation job only if `instagram_access_token` is set)
 - Budget alerting and the auto-kill Cloud Functions
+- Secret Manager version pruning Cloud Function (`secret-pruner`)
 - Uptime and error-rate monitoring
 - All required GCP APIs and IAM service accounts
 
@@ -697,6 +701,238 @@ All secrets are stored in GCP Secret Manager. To rotate (e.g. Stripe keys):
    gcloud run services update mfs-backend --region us-central1 --project made-for-seconds
    ```
 
+Stripe, Resend, and the subscriber JWT secret stay manual — there is no
+rotation API for the first two, and the JWT secret is self-issued but
+`subscriber_auth.py` verifies against a single key with no multi-key support,
+so rotating it invalidates every outstanding subscriber session (a real future
+improvement, not attempted here). Recommended cadence: Stripe/Resend keys
+opportunistically (a suspected leak, an offboarded team member), the JWT
+secret only when you're prepared for every subscriber to need a fresh
+cancellation link.
+
+### Secret version pruning
+
+Every `echo -n ... | gcloud secrets versions add` above leaves the old version
+in place — nothing before this story ever removed one. Secret Manager bills
+per active (non-destroyed) version above a 6-version free allowance **shared
+across the whole billing account**, not per secret, so an unbounded count on
+even one secret (`admin-emails` alone once reached 5 from a single day of
+testing) eats into every other secret's free allowance too.
+
+**Mechanism.** A dedicated Cloud Function (`secret-pruner`, its own service
+account, no relation to `mfs-backend`) runs weekly via Cloud Scheduler
+(`secret-version-pruner`, 05:00 UTC Monday — no functional dependency on
+anything else, just spaced away from `weekly-usage-report`'s Monday 13:00 UTC
+slot and `budget-breaker-reset`'s monthly one). For every
+configured secret it keeps the newest 2 `ENABLED` versions — and anything at
+or above that "floor," even a `DISABLED` version — and destroys everything
+older. `secretmanager.versions.destroy` is deliberately never reachable from
+`mfs-backend`; only `secret-pruner` holds it, and only on the application
+secrets (`terraform/modules/secret-maintenance/secret_pruner.tf`).
+
+**Dry-run by default.** A secret is only actually pruned if its `secret_id`
+appears in the `secret_pruner_write_enabled_ids` tfvar (empty list by
+default). Every other configured secret still runs the full selection logic
+and logs exactly what it *would* destroy — check Cloud Logging for the
+`secret-pruner` Cloud Run revision after a scheduled run, or invoke it by hand:
+```bash
+gcloud scheduler jobs run secret-version-pruner --location us-central1 --project made-for-seconds
+```
+
+**Recovery — do this before allowlisting any real secret.** Every destroy
+sets `version_destroy_ttl = 604800s` (7 days) on the secret first
+(`modules/security/secrets.tf`), so a "destroy" call only disables the version
+immediately; permanent deletion happens a week later. A dedicated canary
+secret (`secret-pruner-canary`, `terraform output secret_pruner_canary_id`)
+exists solely to prove this end-to-end without ever risking a real secret.
+
+Step 0 (automated, do this first):
+
+```bash
+cd backend
+python scripts/smoke_test_secret_pruner.py --project made-for-seconds
+```
+
+This invokes the real deployed function through a real OIDC-authenticated
+call (impersonating `secret-pruner`, the same identity Cloud Scheduler uses)
+and, directly against the Secret Manager API, adds its own throw-away
+canary versions, destroys one as `secret-pruner`, confirms the pruning
+algorithm doesn't re-select it, restores it as the operator, and cleans up
+after itself. It proves the IAM grant, the OIDC audience, the deployed
+function's packaging, and the delayed-destroy/re-selection-avoidance logic
+all work against the real API — everything test_main.py's mocked suite
+structurally can't. It does **not** touch `secret_pruner_write_enabled_ids`
+or run `terraform apply` — see the script's own docstring for why. Only after
+this passes does the manual write-path drill below make sense to run.
+
+Steps 1-5 (manual, exercises the actual deployed *write* path via the real
+allowlist):
+
+1. Add a couple of extra versions the normal out-of-band way:
+   `echo -n "v2" | gcloud secrets versions add secret-pruner-canary --data-file=-`
+   (repeat for a v3).
+2. Add `"secret-pruner-canary"` to `secret_pruner_write_enabled_ids` and
+   `terraform apply`.
+3. Run the function (command above), then confirm the oldest version moved to
+   `DISABLED` with a `scheduled_destroy_time`:
+   `gcloud secrets versions list secret-pruner-canary`
+4. Restore it: `gcloud secrets versions enable VERSION --secret=secret-pruner-canary`
+   — this cancels the scheduled destruction. `secret-pruner`'s own role does
+   **not** grant `.enable`, by design: a bug in the thing that destroys
+   versions must not also compromise the thing that undoes its mistakes.
+   Confirm the value is still readable:
+   `gcloud secrets versions access VERSION --secret=secret-pruner-canary`
+5. Remove `"secret-pruner-canary"` from `secret_pruner_write_enabled_ids` and
+   `terraform apply` again. Skipping this step leaves the canary allowlisted
+   for real, so next week's scheduled run destroys the very version you just
+   restored — `gcloud functions describe secret-pruner --region us-central1
+   --gen2 --format="value(serviceConfig.environmentVariables.WRITE_ENABLED_SECRET_IDS)"`
+   should come back empty (or list only whatever real secrets you've since
+   allowlisted) before you consider the drill done.
+
+Only once that full cycle succeeds should a real secret's id go into
+`secret_pruner_write_enabled_ids`.
+
+**If pruning stops, or a destroy fails.** Three separate alert policies, not
+one policy with several conditions — Cloud Monitoring requires a
+`condition_matched_log` ("LogMatch") condition to be the *only* condition in
+its policy, confirmed against the Monitoring alerting API docs, so the two
+log-based conditions below each get their own policy, plus a third for the
+Scheduler-level failure:
+
+- **Anomaly** (`Secret pruner: non-ENABLED latest version`) — `secret-pruner`
+  skips a secret entirely, rather than guessing, whenever that secret's
+  numerically latest version is not `ENABLED` — usually a rotation that added
+  a version and never enabled it. `gcloud secrets versions list <secret-id>`
+  to see why. Version numbers never change, so the fix has to be one of:
+  enable that *exact* version if its value is actually good (`gcloud secrets
+  versions enable <version> --secret=<id>`), or add a fresh version on top of
+  it if it's bad (`gcloud secrets versions add <id> --data-file=-`) so a
+  newer enabled version becomes the latest — disabling the stray version
+  again, or enabling some *other*, older version, does nothing: neither
+  changes which version is numerically newest. Pruning resumes for that
+  secret once its latest version is `ENABLED` again.
+- **Error** (`Secret pruner: list/destroy failure`) — a secret couldn't be
+  listed, or a specific version failed to destroy (e.g. an etag conflict
+  from a concurrent change). This also makes the function return a non-2xx
+  response, so Cloud Scheduler's own `retry_config` gets a few immediate
+  attempts to recover before the alert really means something's stuck.
+  Check the `secret-pruner` Cloud Run revision's logs for the
+  `SECRET_PRUNE_ERROR` line naming the secret and the underlying error.
+- **Scheduler execution failed** (`Secret pruner: Scheduler execution
+  failed`) — the triggered HTTP call itself never reached the function's
+  code at all (OIDC token minting, IAM, routing, a cold-start timeout), so
+  neither marker above had a chance to fire. Backed directly by Cloud
+  Scheduler's own `AttemptFinished` log records (`condition_matched_log`,
+  no metric involved), filtered to exclude `debugInfo:"UNREACHABLE_5xx"` —
+  that specific code means the function *was* reached and ran, just
+  returned a 500, which is the **Error** alert's job above, not this one.
+  Confirmed live: a `SECRET_PRUNE_ERROR` failure makes Cloud Scheduler log
+  its own `severity=ERROR` entry for the same request with
+  `debugInfo = "URL_UNREACHABLE-UNREACHABLE_5xx..."`, so without this
+  exclusion every application failure would raise both alerts and this
+  one's "never reached the function" framing would be actively wrong for
+  that case. Check `gcloud logging read 'resource.type="cloud_scheduler_job"
+  resource.labels.job_id="secret-version-pruner"'` for the failing attempt's
+  `status`/`debugInfo`.
+
+  **Known gap, accepted rather than worked around:** none of these three
+  detect a Scheduler job that's silently paused or disabled (zero attempts
+  of any kind — no success, no failure, nothing for any metric to see).
+  Verified against the live Monitoring API that every mechanism capable of
+  expressing "no data for N days" — `condition_absent`, MQL's `absent_for`,
+  and PromQL's `absent_over_time` — rejects windows longer than ~25 hours
+  for a log-based metric, and this job only legitimately produces data once
+  a week. Closing that gap would mean standing up a second, more-frequent
+  heartbeat job — real new infrastructure for a failure mode that only a
+  manual `gcloud scheduler jobs pause` or console action can trigger in the
+  first place. If pruning seems to have silently stopped and none of the
+  three alerts above have fired, check manually: `gcloud scheduler jobs
+  describe secret-version-pruner --location us-central1` (state should read
+  `ENABLED`).
+
+All three notify the same email channel.
+
+**Cost.** Measured against the live project (`gcloud secrets versions list`
+for all 5 pruner-managed secrets, `admin-emails` through
+`subscriber-jwt-secret`, plus the 2 unrelated Cloud Build OAuth secrets that
+share the same free allowance). Secret Manager bills $0.06 per active
+(non-destroyed) version-month above the shared 6-version allowance.
+
+Instagram publishing is deprecated for now (incomplete feature, and its
+`instagram-token-refresh` scheduler job was failing) — `instagram_access_token`
+is blanked in tfvars, which destroys that secret, its bindings, and that
+scheduler job entirely, in the same apply that creates secret-pruner's own
+job. Net effect on Cloud Scheduler: **one job removed, one added, still 3
+jobs total** — the free allowance, not a 4th paid job. This story's Scheduler
+line is therefore **$0/month**, not the $0.10/month estimated in earlier
+drafts of this doc, written when Instagram's job was still going to coexist
+with secret-pruner's.
+
+| Scenario | Active versions | Secret Manager (over free 6) | + Scheduler | Total |
+|---|---|---|---|---|
+| Today, before this merges | 15 (13 across the original 6 managed secrets, including instagram-access-token, + 2 OAuth) | $0.54/mo | — | $0.54/mo |
+| Immediately after merge/apply | 15 (instagram-access-token's secret+version gone, +1 canary seed version — nets to no change) | $0.54/mo | $0/mo (3 jobs, still free) | $0.54/mo |
+| Steady-state (Step 0 has run at least once, drill done, real secrets allowlisted) | 14 (5 secrets × 2 kept + 2 OAuth + 2 canary) | $0.48/mo | $0/mo | $0.48/mo |
+| Spike (all 5 managed secrets rotate the same week) | ~19 (5 × [2 kept + 1 aging out over its 7-day `version_destroy_ttl`] + 2 OAuth + 2 canary) | ~$0.78/mo | $0/mo | **~$0.78/mo** |
+
+None of the 5 remaining managed secrets auto-rotate — they only grow when a
+human manually rotates one, which the "spike" row already treats as the
+worst case (all five in the same week). Without Instagram's independent
+weekly schedule in the mix, every row above is otherwise a clean, static
+number except for one remaining source of overhead:
+
+The canary secret carries **two different kinds of overhead, not one**, and
+the transient half is bigger than it first looks. `_cleanup_and_verify_healthy`
+(`backend/scripts/smoke_test_secret_pruner.py`) converges the canary to 2
+enabled versions — the same floor the real algorithm protects everywhere
+else — and since Step 0 is the mandatory first move before the drill, that
+2nd enabled version is a **permanent** addition from the first time anyone
+runs it (already priced into the steady-state row above). On top of that
+permanent 2, every run also *destroys* some number of disposable versions,
+each of which then sits disabled-but-active for its own 7-day
+`version_destroy_ttl` — and that number isn't a flat "+1":
+
+- The canary's very **first** ever cleanup starts from just the Terraform
+  seed version, adds 3 test versions, and settles to 2 enabled by destroying
+  **2** (the seed plus the oldest test version) — both go active-but-pending
+  for 7 days.
+- **Every run after that** starts from an already-2-enabled canary, adds 3
+  more, and destroys **3** to get back to 2 — one more than the first run,
+  because there's no seed version left to also sweep up.
+- Because that pending window is 7 days, running the smoke test **more than
+  once within a week** doesn't reset anything — each run's pending versions
+  stack on top of whatever's still pending from the runs before it.
+
+| Scenario | Canary active versions | Total active | Billable | Total |
+|---|---|---|---|---|
+| Baseline (7+ days since any run) | 2 | 14 | $0.48/mo | $0.48/mo |
+| Normal (one run, within its own 7-day window) | 4 (2 enabled + 2 pending) | 16 | $0.60/mo | $0.60/mo |
+| Repeated (3 runs inside one week, e.g. iterating on a fix) | 10 (2 enabled + 2 + 3 + 3 pending) | 22 | $0.96/mo | $0.96/mo |
+| Worst-reasonable concurrent (repeated runs *and* all 5 managed secrets rotating the same week) | 10 | 27 | $1.26/mo | **$1.26/mo** |
+
+All four rows are transient peaks, not standing costs — every one clears back
+to the $0.48/mo baseline once 7 days pass since the last contributing event
+(the last smoke-test run, or the last rotation), and each bills a full-month
+rate as a conservative ceiling rather than the lower prorated amount an
+actual 7-day window would cost.
+
+All of this is small next to the project's real backstop for its dominant
+cost driver: the $15/month budget breaker (see
+[Cost circuit breaker](#cost-circuit-breaker)) — but that breaker only stops
+public Cloud Run request traffic, same as it always has; it does not cap
+Secret Manager, Scheduler, or anything else this story touches. There is no
+mechanism in this project that puts a hard ceiling on the numbers in this
+table — they're bounded by the modeled scenarios above and by the operator
+noticing the alert email, not by anything automatic.
+
+**If Instagram publishing is re-enabled later:** setting `instagram_access_token`
+back in tfvars recreates the secret and its weekly-rotating scheduler job,
+which also makes secret-pruner a genuine 4th (paid, ~$0.10/month) Scheduler
+job again, and reintroduces the "never settles at a clean 2" per-secret
+overhead this doc used to describe for it — re-derive the numbers above
+rather than assuming they still hold.
+
 ### Removing an optional secret
 
 This applies to `redis_url`, `stripe_secret_key`, `stripe_webhook_secret`,
@@ -864,7 +1100,14 @@ require the `iamcredentials` API and the backend SA's
 `terraform apply` once after upgrading). `upload_image_from_url` copies an
 already-hosted https image instead.
 
-**Instagram publishing**: `publish_recipe_to_instagram(slug)` posts the
+**Instagram publishing** (currently deprecated — not a complete feature, and
+its token-refresh scheduler job was failing; `instagram_access_token` is
+blanked in tfvars, which tears down the secret and that job entirely — see
+[Secret version pruning § Cost](#secret-version-pruning) for what re-enabling
+it would change). The tools and code below still exist and work; they're
+just unreachable without a token configured:
+
+`publish_recipe_to_instagram(slug)` posts the
 recipe's GCS image to Instagram and auto-builds a caption from the title,
 description, link, and hashtags (pass `caption=` to override).
 `publish_instagram_post(image_url, caption)` is the generic primitive for any
@@ -894,9 +1137,190 @@ then required.
 |---------|---------------|----------------|
 | Cloud Run | 2M req/mo · 360K GB-sec · 180K vCPU-sec | Well under for personal use |
 | Firestore | 50K reads/day · 20K writes/day · 1 GiB storage | Well under |
-| Cloud Storage | 5 GiB storage · 1 GiB/mo egress (US) | Minimal for images + receipts |
-| Artifact Registry | 0.5 GiB storage | Cleanup policy deletes untagged images after 1 day and any tagged image beyond the 5 most recent |
+| Cloud Storage | 5 GB-months storage (US regions) · 100 GB/mo egress from North America | Minimal for images + receipts |
+| Artifact Registry | 0.5 GiB storage-month, aggregated per billing account across every repository (confirmed via the live Cloud Billing Catalog API: SKU 8502-299A-ABAF prices in `GiBy.mo`, first tier free up to `startUsageAmount: 0.5`) | Two repositories share this allowance: `mfs` (the backend's own image, cleanup-policy-managed to ≤ 5 tagged) and `gcf-artifacts` (auto-created build output for every Gen2 Cloud Function). See below — this predates secret-pruner's own deploy, doesn't cross the allowance once measured correctly in GiB, but leaves thin headroom, and `gcf-artifacts` has no cleanup policy at all. |
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
-| Secret Manager | 6 active secrets free · 10K access/mo | Within limits |
+| Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded |
+| Cloud Scheduler | 3 free jobs per billing account | 3 jobs in use (weekly usage report, secret pruning, budget-breaker reset) — all free. Instagram's token-refresh job would have been a genuine 4th (~$0.10/month) had it stayed; see [Secret version pruning § Cost](#secret-version-pruning) for what re-enabling Instagram would change |
+
+### Artifact Registry: gcf-artifacts has no cleanup policy
+
+**The free allowance is 0.5 GiB (536,870,912 bytes), not 0.5 GB.** Confirmed
+against the live Cloud Billing Catalog API (`services/149C-F9EC-3994/skus/
+8502-299A-ABAF`, "Artifact Registry Storage"): `pricingExpression.usageUnit`
+is `GiBy.mo` ("gibibyte month"), and the first tier is `$0` up to
+`startUsageAmount: 0.5`. An earlier version of this doc treated that as 0.5
+decimal GB (500,000,000 bytes) and concluded a single new image would cross
+it on day one — wrong, by exactly the GB/GiB gap (536.87 vs. 500 decimal MB,
+a ~7% difference that happened to matter here because the real number was
+this close to the edge either way).
+
+`gcloud artifacts repositories describe` prints "Repository Size" as decimal
+MB (bytes ÷ 1e6), confirmed by comparing its human-readable output against
+the underlying byte math below — that display is not itself part of the
+API response body. Measured live, right before secret-pruner's own first
+deploy (`gcloud functions describe secret-pruner` still 404s as of this
+writing):
+
+| Repository | Reported size |
+|---|---|
+| `mfs` | 339.343 MB |
+| `gcf-artifacts` | 149.411 MB |
+| **Combined** | **488.754 MB** ≈ 0.4552 GiB |
+| Free allowance | 536.871 MB ≈ **0.5 GiB** |
+| **Headroom today** | **≈ 48 MB** |
+
+So today, pre-deploy, this project is **under** the allowance with room to
+spare — not already over it as an earlier draft claimed. That doesn't make
+this a non-issue; it makes it a "how much longer" question instead of an
+"already broken" one, and the honest answer is: not much longer, for two
+separate reasons.
+
+- **`gcf-artifacts` carries no cleanup policy at all** — confirmed via
+  `gcloud artifacts repositories describe gcf-artifacts`, no
+  `cleanupPolicies` field, unlike `mfs`'s three (keep 5 tagged, delete
+  untagged after 1 day, delete anything else tagged — and even that only
+  bounds `mfs` by image *count*, not by size; a future backend image could
+  grow larger than today's and still pass the same "≤5 tagged" policy).
+  Every image budget-killer and budget-resetter have ever built is still
+  sitting there: **16** versioned artifacts (8 budget-killer + 6
+  budget-resetter images, plus one ~25.4 MB build-cache image for *each*
+  function — every Gen2 build pushes both a deployable image and a separate
+  `.../cache` image, confirmed live for both existing functions) spanning
+  `2026-06-16` to `2026-08-27`, none ever removed. Adding secret-pruner as a
+  third function redeploying on the same never-cleaned repository adds a
+  third unbounded growth source, not just one more image — and its first
+  deploy alone adds *two* new artifacts (its own image, plus its own cache),
+  the same as every deploy before it.
+- **But "how much each new artifact actually adds" is smaller than it
+  looks, and not knowable precisely in advance.** `gcloud artifacts docker
+  images list --format=json` reports each artifact's own
+  `metadata.imageSizeBytes` — summed across all 16 artifacts in
+  `gcf-artifacts` today, that's **≈411 MB** (411,410,515 bytes exactly).
+  The repository's actual measured size is **149.411 MB** — barely a third
+  of that sum, because Artifact Registry deduplicates shared layers (the
+  Python 3.12 buildpack base, the interpreter, common `pip` packages) across
+  every artifact in the repository. `metadata.imageSizeBytes` is each
+  artifact's *full logical size*, not its marginal contribution to the
+  repository's billed total, and there's no API field that reports the
+  latter directly — it can only be observed as a before/after delta on the
+  repository itself.
+
+That cuts both ways for secret-pruner's first deploy, which adds **two**
+new artifacts (image + cache), not one:
+
+| Scenario | Basis | Two new artifacts' real contribution | Combined after deploy | Crosses 0.5 GiB (536.871 MB)? |
+|---|---|---|---|---|
+| Worst case — shares nothing | Image, full reported size same order as budget-killer/-resetter's own (~25-27 MB) + cache (~25.4 MB, consistently observed for both existing functions) | ~50-52 MB | ~539-541 MB | **Yes** — over by ~2-4 MB (≈$0.0002-0.0004/month at $0.10/GiB-month over the free tier — real, but a fraction of a cent) |
+| Observed-average case — shares layers like the existing two functions do | 149.411 MB ÷ 16 artifacts already in the repo ≈ 9.3 MB/artifact × 2 new artifacts | ~19 MB | ~507 MB | No — ~30 MB headroom left |
+
+The worst case and the observed-average case now disagree on whether this
+crosses the allowance — the earlier version of this doc concluded "either
+way, no," which held only when a single new artifact was priced in. With
+the second artifact (the cache image every deploy also creates) counted,
+the worst case is a real possibility, not one ruled out by the math, even
+though it amounts to a fraction of a cent if it happens. What it does do
+either way is leave thin headroom behind it — 0 to ~30 MB, shared across
+three functions' worth of future redeploys with nothing ever cleaning up
+after any of them, on a project where any of budget-killer, budget-resetter,
+or secret-pruner could plausibly redeploy again within weeks (a dependency
+bump, a bug fix). This is why the fix below is written as a prerequisite,
+not a suggestion to revisit later.
+
+**Rollout prerequisite — pick one before running `terraform apply` for this
+story:**
+
+1. **Apply the cleanup policy first (recommended).** `gcf-artifacts` is a
+   platform-auto-managed repository (labeled `goog-managed-by:
+   cloudfunctions`, never declared as a `google_artifact_registry_repository`
+   resource anywhere in this codebase), so importing it into Terraform state
+   carries real risk of a subsequent `terraform apply` fighting Cloud
+   Functions' own management of it. `gcloud artifacts repositories
+   set-cleanup-policies` sets a cleanup policy on an existing repository
+   without requiring Terraform to own it:
+
+   ```bash
+   cat > /tmp/gcf-artifacts-cleanup.json <<'EOF'
+   [
+     {
+       "name": "keep-3-most-recent-per-function",
+       "action": {"type": "Keep"},
+       "mostRecentVersions": {"keepCount": 3}
+     },
+     {
+       "name": "delete-older-than-30-days",
+       "action": {"type": "Delete"},
+       "condition": {"olderThan": "30d"}
+     }
+   ]
+   EOF
+
+   gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
+     --location=us-central1 --project=made-for-seconds --dry-run \
+     --policy=/tmp/gcf-artifacts-cleanup.json
+   ```
+
+   `--dry-run` does **not** show results in `gcloud artifacts docker images
+   list` — dry runs execute asynchronously on a background job and Google
+   documents results taking approximately a day to appear, surfaced only
+   through Data Access audit logs with `validateOnly=true`, not through the
+   image listing (confirmed against Artifact Registry's own cleanup-policy
+   docs). To actually see what a dry run marked for deletion:
+
+   ```bash
+   # One-time: Data Access audit logs are off by default for this service.
+   # Console: IAM & Admin > Audit Logs > Artifact Registry > enable "Data Write".
+
+   # Wait ~1 day after the --dry-run call above, then:
+   gcloud logging read \
+     'protoPayload.serviceName="artifactregistry.googleapis.com" AND
+      protoPayload.request.parent="projects/made-for-seconds/locations/us-central1/repositories/gcf-artifacts/packages/-" AND
+      protoPayload.request.validateOnly=true' \
+     --project=made-for-seconds
+   ```
+
+   Confirm the `names` field on those entries keeps each function's active
+   image plus its intended rollback versions before removing `--dry-run` and
+   applying for real:
+
+   ```bash
+   gcloud artifacts repositories set-cleanup-policies gcf-artifacts \
+     --location=us-central1 --project=made-for-seconds \
+     --policy=/tmp/gcf-artifacts-cleanup.json
+   ```
+
+2. **Or: proceed without it, but as an explicit decision, not a default —
+   and not on the premise that the first deploy is guaranteed free.** Per
+   the table above, the worst case for secret-pruner's own first deploy
+   already crosses the allowance by a few MB on its own, before any future
+   redeploy of anything. If the operator chooses to deploy before applying
+   the cleanup policy, that's a deliberate acceptance of two things: a
+   small chance of a small immediate overage (a fraction of a cent, if the
+   new artifacts don't dedup as well as the observed-average case suggests),
+   and the larger, near-certain overage from any redeploy after that with
+   nothing ever cleaned up. Record that decision here rather than leaving
+   it implicit: _(operator: note the date and choice once made)_.
+
+Either path, this is a live mutation to a resource outside Terraform's
+management — not something this story applies unilaterally alongside an
+unrelated Terraform-driven PR.
+
+**Rollout acceptance check — run after every future deploy of any of the
+three functions, not just secret-pruner's first one**, since this repo has
+no automated size alerting (Artifact Registry doesn't export a storage-size
+metric to Cloud Monitoring at all — confirmed live: querying
+`metricDescriptors` for `artifactregistry.googleapis.com/*` on this project
+returns nothing — so there's no free way to alert on this the way the other
+cost lines in this doc do; a manual check after each deploy is the only
+option that doesn't mean standing up new paid infrastructure to guard a few
+cents of exposure):
+
+```bash
+gcloud artifacts repositories describe mfs --location=us-central1 --project=made-for-seconds
+gcloud artifacts repositories describe gcf-artifacts --location=us-central1 --project=made-for-seconds
+```
+
+(Read the printed "Repository Size" line — decimal MB — and compare the sum
+against 536.87 MB, not 500 MB.)

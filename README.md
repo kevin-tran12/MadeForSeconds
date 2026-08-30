@@ -1,6 +1,6 @@
 # MadeForSeconds
 
-A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger, and a remote MCP server that lets Claude author and publish recipes over OAuth 2.1 — built to run entirely on GCP's free tier.
+A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger, and a remote MCP server that lets Claude author and publish recipes over OAuth 2.1 — built to run almost entirely on GCP's free tier, with a small, monitored, budget-capped spend for cost-safety and secret-hygiene automation.
 
 [![CI](https://github.com/kevin-tran12/MadeForSeconds/actions/workflows/ci.yml/badge.svg)](https://github.com/kevin-tran12/MadeForSeconds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -25,7 +25,7 @@ A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger
 | Infrastructure | Terraform |
 | Observability | Cloud Monitoring alert policies (uptime, error rate, 5xx) + weekly usage email, budget-capped infra |
 
-All GCP services stay within the always-free tier for personal/low-traffic use.
+Every GCP service stays within, or just barely above, the always-free tier for personal/low-traffic use. Public request traffic — the dominant cost driver — is auto-cut off if actual spend crosses $15/month; a handful of small always-on lines (storage, Firestore, egress) are not capped by that mechanism but run to cents at this scale (see [docs/DEPLOYMENT.md § Cost circuit breaker](docs/DEPLOYMENT.md#cost-circuit-breaker) and [§ GCP free tier summary](docs/DEPLOYMENT.md#gcp-free-tier-summary)).
 
 > **First-time production setup?** See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 

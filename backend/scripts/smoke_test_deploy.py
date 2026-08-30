@@ -27,7 +27,7 @@ class SmokeTestFailure(Exception):
 
 def _get(url: str, timeout: float = 15.0) -> tuple[int, bytes]:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 (fixed https URL, GET only)
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310 - url is always this script's own --url/base argument (a Cloud Run revision URL Cloud Build constructs), never external input
             return resp.status, resp.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
