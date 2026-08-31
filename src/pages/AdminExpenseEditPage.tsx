@@ -122,22 +122,15 @@ export function AdminExpenseEditPage() {
         merchant_id: merchantId.trim(),
         recipe_ids: linkedRecipeIds,
         recipe_names: linkedRecipes.map((r) => r.title),
+        receipt_url: receiptUrl,
+        receipt_filename: receiptFilename,
+        receipt_content_type: receiptContentType,
       }
 
-      let saved
       if (isNew) {
-        saved = await adminExpenseApi.create(data)
+        await adminExpenseApi.create(data)
       } else {
-        saved = await adminExpenseApi.update(id!, data)
-      }
-
-      // Attach receipt if uploaded but not yet linked
-      if (receiptUrl && saved.receipt_url !== receiptUrl) {
-        await adminExpenseApi.update(saved.id, {
-          receipt_url: receiptUrl,
-          receipt_filename: receiptFilename,
-          receipt_content_type: receiptContentType,
-        } as never)
+        await adminExpenseApi.update(id!, data)
       }
 
       navigate('/admin/expenses/')

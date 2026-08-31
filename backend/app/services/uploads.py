@@ -94,6 +94,51 @@ def sanitize_filename(name: str) -> str:
     return cleaned or "upload"
 
 
+# ── Receipts ───────────────────────────────────────────────────────────────────
+
+def resolve_receipt_url(receipt_url: str) -> dict:
+    """Validate a receipt_url produced by POST /upload-receipt or
+    request_image_upload(kind='receipt'), confirming it names a real object
+    inside the receipts bucket rather than trusting a client-supplied string.
+
+    Returns receipt metadata for the expense document, or raises ValueError.
+
+    Shared by the MCP create_expense tool and the HTTP expense routes so
+    there is one validator, not two — a second, divergent implementation is
+    how this exact bug (an unvalidated receipt_url reaching Firestore) would
+    come back.
+    """
+    if receipt_url.startswith("dev://"):
+        if not settings.is_dev:
+            raise ValueError("dev:// receipt URLs are only valid in development")
+        base = receipt_url.rsplit("/", 1)[-1]
+        return {
+            "receipt_url": receipt_url,
+            "receipt_filename": base[37:] if len(base) > 37 else base,
+            "receipt_content_type": None,
+        }
+
+    bucket = settings.gcs_receipts_bucket_name
+    prefix = f"gs://{bucket}/" if bucket else None
+    if not prefix or not receipt_url.startswith(prefix):
+        raise ValueError(
+            "receipt_url must be a gs:// URL in the receipts bucket. "
+            "Upload the file first, then pass its returned receipt_url."
+        )
+    blob_name = receipt_url[len(prefix):]
+
+    blob = storage.Client().bucket(bucket).get_blob(blob_name)
+    if blob is None:
+        raise ValueError("Receipt not found in storage — did the upload succeed?")
+
+    base = blob_name.rsplit("/", 1)[-1]
+    return {
+        "receipt_url": receipt_url,
+        "receipt_filename": base[37:] if len(base) > 37 else base,  # strip "{uuid4}-" prefix
+        "receipt_content_type": blob.content_type,
+    }
+
+
 # ── Content sniffing ──────────────────────────────────────────────────────────
 
 # HEIC/HEIF brands that may appear at bytes 8..12 of an ISO-BMFF container.

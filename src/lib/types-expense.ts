@@ -33,6 +33,9 @@ export interface ExpenseCreate {
   merchant_id: string
   recipe_ids: string[]
   recipe_names: string[]
+  receipt_url: string | null
+  receipt_filename: string | null
+  receipt_content_type: string | null
 }
 
 export interface Expense {
