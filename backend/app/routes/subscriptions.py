@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..config import settings
 from ..firestore import get_db
+from ..log_redaction import keyed_hash
 from ..rate_limit import rate_limit
 from ..services import donation_ledger
 from ..services.email import send_email
@@ -80,7 +81,7 @@ def _read_existing_doc(transaction, db, event_type: str, data: dict):
     return None
 
 
-def _apply_subscription_checkout(transaction, db, data: dict, existing_doc, now) -> str:
+def _apply_subscription_checkout(transaction, db, data: dict, existing_doc, now, event_id=None) -> str:
     customer_id = data.get("customer")
     subscription_id = data.get("subscription")
     email = (data.get("customer_details") or {}).get("email", "").lower()
@@ -98,58 +99,60 @@ def _apply_subscription_checkout(transaction, db, data: dict, existing_doc, now)
         "updated_at": now,
     }
 
+    # Logged by event_id, not email/customer/subscription id — Cloud Logging
+    # is this project's log sink, and log access shouldn't double as
+    # supporter-list access. event_id is what an operator actually needs to
+    # correlate this line with Stripe's own dashboard.
     if existing_doc:
         subscriber_data["total_donated_cents"] = Increment(amount_total)
         transaction.update(existing_doc.reference, subscriber_data)
-        logger.info(f"Updated subscriber: {email}")
+        logger.info("Updated subscriber (event=%s)", event_id)
     else:
         subscriber_data["created_at"] = now
         new_ref = db.collection("subscribers").document()
         transaction.set(new_ref, subscriber_data)
-        logger.info(f"Created subscriber: {email}")
+        logger.info("Created subscriber (event=%s)", event_id)
     return "processed"
 
 
-def _apply_subscription_updated(transaction, data: dict, existing_doc, now) -> str:
-    subscription_id = data.get("id")
+def _apply_subscription_updated(transaction, data: dict, existing_doc, now, event_id=None) -> str:
     status = data.get("status")
     current_period_end = data.get("current_period_end")
 
     if existing_doc is None:
-        raise WebhookProcessingError(f"Subscription updated but no subscriber found: {subscription_id}")
+        raise WebhookProcessingError(f"Subscription updated but no subscriber found (event={event_id})")
 
     update_data: dict = {"status": status, "updated_at": now}
     if current_period_end:
         update_data["current_period_end"] = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
 
     transaction.update(existing_doc.reference, update_data)
-    logger.info(f"Subscription {subscription_id} updated to status: {status}")
+    logger.info("Subscription updated to status %s (event=%s)", status, event_id)
     return "processed"
 
 
-def _apply_subscription_deleted(transaction, data: dict, existing_doc, now) -> str:
-    subscription_id = data.get("id")
+def _apply_subscription_deleted(transaction, data: dict, existing_doc, now, event_id=None) -> str:
     if existing_doc is None:
-        raise WebhookProcessingError(f"Subscription deleted but no subscriber found: {subscription_id}")
+        raise WebhookProcessingError(f"Subscription deleted but no subscriber found (event={event_id})")
 
     transaction.update(existing_doc.reference, {"status": "canceled", "updated_at": now})
-    logger.info(f"Subscription canceled: {subscription_id}")
+    logger.info("Subscription canceled (event=%s)", event_id)
     return "processed"
 
 
-def _apply_payment_failed(transaction, data: dict, existing_doc, now) -> str:
+def _apply_payment_failed(transaction, data: dict, existing_doc, now, event_id=None) -> str:
     subscription_id = data.get("subscription")
     if not subscription_id:
         return "ignored"
     if existing_doc is None:
-        raise WebhookProcessingError(f"Payment failed but no subscriber found: {subscription_id}")
+        raise WebhookProcessingError(f"Payment failed but no subscriber found (event={event_id})")
 
     transaction.update(existing_doc.reference, {"status": "past_due", "updated_at": now})
-    logger.info(f"Payment failed for subscription: {subscription_id}")
+    logger.info("Payment failed (event=%s)", event_id)
     return "processed"
 
 
-def _apply_payment_succeeded(transaction, data: dict, existing_doc, now) -> str:
+def _apply_payment_succeeded(transaction, data: dict, existing_doc, now, event_id=None) -> str:
     """Handle invoice.payment_succeeded — increment total_donated_cents for recurring payments.
 
     Skips the initial subscription invoice (billing_reason=subscription_create) because
@@ -162,21 +165,21 @@ def _apply_payment_succeeded(transaction, data: dict, existing_doc, now) -> str:
     if not subscription_id or not amount_paid:
         return "ignored"
     if billing_reason == "subscription_create":
-        logger.info(f"Skipping initial invoice for subscription {subscription_id} (already counted at checkout)")
+        logger.info("Skipping initial invoice, already counted at checkout (event=%s)", event_id)
         return "ignored"
     if existing_doc is None:
-        raise WebhookProcessingError(f"Payment succeeded but no subscriber found: {subscription_id}")
+        raise WebhookProcessingError(f"Payment succeeded but no subscriber found (event={event_id})")
 
     transaction.update(existing_doc.reference, {
         "total_donated_cents": Increment(amount_paid),
         "updated_at": now,
     })
-    logger.info(f"Payment succeeded for subscription {subscription_id}: +{amount_paid} cents")
+    logger.info("Payment succeeded: +%d cents (event=%s)", amount_paid, event_id)
     return "processed"
 
 
 def _apply_donation_checkout(
-    transaction, db, data: dict, existing_doc, now, fee_cents=None, net_cents=None
+    transaction, db, data: dict, existing_doc, now, fee_cents=None, net_cents=None, event_id=None
 ) -> str:
     """Handle checkout.session.completed for one-time donation payments.
 
@@ -213,7 +216,7 @@ def _apply_donation_checkout(
             "last_donated_at": now,
             "updated_at": now,
         })
-        logger.info(f"Repeat donation: +{amount_total} cents from {email}")
+        logger.info("Repeat donation: +%d cents (event=%s)", amount_total, event_id)
         return "processed"
 
     new_ref = db.collection("donations").document()
@@ -224,12 +227,12 @@ def _apply_donation_checkout(
         "stripe_session_id": session_id,
         "created_at": now,
     })
-    logger.info(f"New donation recorded: {amount_total} cents from {email or 'anonymous'}")
+    logger.info("New donation recorded: %d cents (event=%s)", amount_total, event_id)
     return "processed"
 
 
 def _apply_mutation(
-    transaction, db, event_type: str, data: dict, existing_doc, now, fee_cents=None, net_cents=None
+    transaction, db, event_type: str, data: dict, existing_doc, now, fee_cents=None, net_cents=None, event_id=None
 ) -> str:
     """Write phase: the actual business mutation for a given event type,
     dispatched the same way the old per-event _handle_* functions were,
@@ -237,22 +240,22 @@ def _apply_mutation(
     if event_type == "checkout.session.completed":
         mode = data.get("mode")
         if mode == "subscription":
-            return _apply_subscription_checkout(transaction, db, data, existing_doc, now)
+            return _apply_subscription_checkout(transaction, db, data, existing_doc, now, event_id)
         if mode == "payment":
-            return _apply_donation_checkout(transaction, db, data, existing_doc, now, fee_cents, net_cents)
+            return _apply_donation_checkout(transaction, db, data, existing_doc, now, fee_cents, net_cents, event_id)
         return "ignored"
 
     if event_type == "customer.subscription.updated":
-        return _apply_subscription_updated(transaction, data, existing_doc, now)
+        return _apply_subscription_updated(transaction, data, existing_doc, now, event_id)
 
     if event_type == "customer.subscription.deleted":
-        return _apply_subscription_deleted(transaction, data, existing_doc, now)
+        return _apply_subscription_deleted(transaction, data, existing_doc, now, event_id)
 
     if event_type == "invoice.payment_failed":
-        return _apply_payment_failed(transaction, data, existing_doc, now)
+        return _apply_payment_failed(transaction, data, existing_doc, now, event_id)
 
     if event_type == "invoice.payment_succeeded":
-        return _apply_payment_succeeded(transaction, data, existing_doc, now)
+        return _apply_payment_succeeded(transaction, data, existing_doc, now, event_id)
 
     return "ignored"
 
@@ -300,7 +303,7 @@ def _process_event_logic(
         "created_at": now,
         "ttl": now + timedelta(days=_PROCESSED_EVENTS_TTL_DAYS),
     })
-    outcome = _apply_mutation(transaction, db, event_type, data, existing_doc, now, fee_cents, net_cents)
+    outcome = _apply_mutation(transaction, db, event_type, data, existing_doc, now, fee_cents, net_cents, ref.id)
     transaction.update(ref, {"status": "completed", "processed_at": now, "outcome": outcome})
     return outcome
 
@@ -771,14 +774,17 @@ async def cancel_confirm(body: CancelConfirmRequest):
         try:
             stripe.Subscription.cancel(subscription_id)
         except stripe.InvalidRequestError:
-            logger.warning(f"Stripe subscription already canceled: {subscription_id}")
+            logger.warning("Stripe subscription already canceled (doc=%s)", doc.id)
 
     db.collection("subscribers").document(doc.id).update({
         "status": "canceled",
         "updated_at": datetime.now(timezone.utc),
     })
 
-    logger.info(f"Subscription canceled via email confirmation: {email}")
+    # No Stripe event_id in this flow — it's a direct user action (a link
+    # click), not webhook processing. keyed_hash lets repeated log lines
+    # about the same person still correlate without logging their email.
+    logger.info("Subscription canceled via email confirmation (donor=%s)", keyed_hash(email))
     return {"message": "Your subscription has been canceled. Thank you for your support!"}
 
 

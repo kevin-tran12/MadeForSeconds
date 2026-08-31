@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import logging as cloud_logging
 
 from .config import settings, validate_production_settings
+from .log_redaction import RedactionFilter
 
 validate_production_settings(settings)
 
@@ -19,6 +20,14 @@ if not settings.is_dev:
     client.setup_logging()
 else:
     logging.basicConfig(level=logging.INFO)
+
+# On the root logger's HANDLERS, not the root Logger itself — a record from
+# any of this app's named loggers (logging.getLogger(__name__) in every
+# module) propagates straight to these handlers without passing through the
+# root Logger's own .filter(), so a filter attached there would silently
+# never run. See RedactionFilter's own docstring.
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(RedactionFilter())
 
 logger = logging.getLogger(__name__)
 
