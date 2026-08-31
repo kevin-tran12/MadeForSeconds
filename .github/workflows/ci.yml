@@ -111,11 +111,16 @@ jobs:
 
       - name: Run pytest
         working-directory: backend
-        run: pytest --cov=app --cov-report=term-missing
+        # tee: keep the human-readable log AND capture it for the inventory
+        # check below, without running pytest a second time just to count.
+        run: pytest --cov=app --cov-report=term-missing | tee /tmp/pytest-output.txt
         env:
           PYTHONPATH: .
           ENVIRONMENT: development
           SUBSCRIBER_JWT_SECRET: ci-test-secret-placeholder-value-32ch
+
+      - name: Verify backend test-count inventory
+        run: python3 scripts/check_inventory.py backend-count --output /tmp/pytest-output.txt
 
   test-frontend:
     name: Frontend Tests
@@ -133,7 +138,17 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
-        run: npm run test:unit
+        # tee: keep the human-readable log AND capture it for the inventory
+        # check below, without running vitest a second time just to count.
+        run: npm run test:unit | tee /tmp/vitest-output.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Verify frontend test-count inventory
+        run: python3 scripts/check_inventory.py frontend-count --output /tmp/vitest-output.txt
 
   test-e2e:
     name: E2E Tests
@@ -256,9 +271,36 @@ jobs:
           pip install -r requirements.txt pytest
           python -m pytest -q
 
+  inventory-check:
+    name: Inventory Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # No test execution here — file counts (ls-based) and toolchain
+      # versions (regex over manifests) only. The live test-COUNT checks run
+      # as steps inside test-backend/test-frontend instead, right after
+      # those jobs' own test runs, so nothing here duplicates a test suite
+      # just to count it. See scripts/check_inventory.py's own docstring.
+      - name: Verify README.md against manifests
+        run: python3 scripts/check_inventory.py static
+
   build:
     name: Build Check
-    needs: [security-scan, test-backend, test-frontend, test-e2e, terraform-check]
+    needs:
+      [
+        security-scan,
+        test-backend,
+        test-frontend,
+        test-e2e,
+        terraform-check,
+        inventory-check,
+      ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
