@@ -74,7 +74,9 @@ else:
     _auth = AuthSettings(
         issuer_url=settings.workos_issuer_url,
         resource_server_url=settings.mcp_resource_url,
-        required_scopes=None,
+        # Blank (the default) keeps prior behaviour — no scope beyond a
+        # valid, owned token (see mcp_auth.WorkOSTokenVerifier) is required.
+        required_scopes=settings.mcp_required_scopes_list or None,
     )
     _token_verifier = WorkOSTokenVerifier()
     _resource_host = urlparse(settings.mcp_resource_url).netloc
