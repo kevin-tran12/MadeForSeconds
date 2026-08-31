@@ -9,7 +9,7 @@ A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 19 + Vite 6 + TypeScript + Tailwind CSS v4 |
+| Frontend | React 19 + Vite 8 + TypeScript + Tailwind CSS v4 |
 | Backend | FastAPI (Python 3.12) |
 | Database | Cloud Firestore |
 | Auth | Google Identity Platform (Firebase) |
@@ -178,7 +178,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (296 tests across 20 files)
+│   ├── tests/                  Pytest suite (454 tests across 24 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -281,7 +281,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (296 tests)
+npm run test:backend                    # Pytest (454 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -397,14 +397,14 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (296 tests, 20 files)
+### Backend — pytest (454 tests, 24 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
 ```
 Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes.
 
-### Frontend unit — vitest (49 tests, 8 files)
+### Frontend unit — vitest (95 tests, 13 files)
 ```bash
 npm run test:unit
 ```
@@ -428,12 +428,28 @@ Covers: home page, public recipe browsing, recipe detail, admin recipe CRUD, nav
 | **Security Scan** | gitleaks over full git history · bandit SAST · pip-audit · `npm audit` on production deps |
 | **Backend Tests** | pytest with coverage |
 | **Frontend Tests** | vitest |
-| **Terraform Validate** | `terraform fmt -check` and `terraform validate` |
-| **Build Check** | `tsc -b && vite build` — gated on all four jobs above |
+| **E2E Tests** | Playwright (chromium) against a real Firestore emulator + backend, via `docker compose` |
+| **Terraform Validate** | `terraform fmt -check`, `terraform validate`, `terraform test` (mocked providers), plus pytest for both Cloud Functions (budget breaker, secret pruner) |
+| **Inventory Check** | `scripts/check_inventory.py` — README's test counts, file counts, and toolchain versions cross-checked against the actual manifests and test runs; fails the build on drift |
+| **Build Check** | `tsc -b && vite build` — gated on all six jobs above |
 
 `main` is protected: a PR cannot merge until every one of these passes and the branch is up to date with `main`. Force pushes and branch deletion are blocked.
 
 Python dependencies carry upper version bounds on purpose. Because CI gates merges, an upstream major release must never be able to turn the build red on its own.
+
+### Toolchain versions
+
+Kept in sync with the actual manifests by `scripts/check_inventory.py`, run in CI on every push —
+a mismatch fails the build rather than drifting silently (which is how the test counts above went
+stale for months). Regenerate this table with the same script (`--fix`) rather than hand-editing it.
+
+| Component | Version | Source of truth |
+|---|---|---|
+| Terraform CLI | 1.15.9 | `terraform/main.tf` (`required_version`) |
+| `google` / `google-beta` provider | 6.50.0 | `terraform/.terraform.lock.hcl` |
+| Playwright | 1.62.1 | `package.json` |
+| Backend base image | `python:3.12-slim` | `backend/Dockerfile` |
+| GitHub Actions | `actions/checkout@v7`, `actions/setup-node@v7`, `actions/setup-python@v7`, `actions/upload-artifact@v4`, `hashicorp/setup-terraform@v4` | `.github/workflows/ci.yml` |
 
 ---
 
