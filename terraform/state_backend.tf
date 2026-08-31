@@ -24,10 +24,14 @@ terraform {
 }
 
 # One physical bucket backs BOTH environments' remote state (different
-# `prefix` per environment — see terraform/environments/*/backend.hcl),
-# so only one of the two applies may manage its creation/lifecycle. Staging's
-# own apply references the same bucket name in its backend config without
-# ever declaring this resource.
+# `prefix` per environment — this file's own hardcoded prefix above for
+# production, terraform/environments/staging/main.tf's own backend block for
+# staging), so only one of the two applies may manage its creation/lifecycle.
+# Staging's own apply references the same bucket name in its own backend
+# block without ever declaring this resource — this directory's terraform{}
+# block is inert there anyway, since Terraform only honors backend
+# configuration in the actual root module (staging includes this directory
+# as module.app, not as its own root).
 resource "google_storage_bucket" "tf_state" {
   count = var.deployment_target == "production" ? 1 : 0
 

@@ -398,3 +398,11 @@ moved {
   from = google_storage_bucket_iam_member.tf_state_admin
   to   = google_storage_bucket_iam_member.tf_state_admin[0]
 }
+
+# Found and gated while actually bootstrapping staging (not anticipated when
+# the rest of this second wave was written) — see the comment on the
+# resource itself in modules/backend-service/cloudbuild.tf.
+moved {
+  from = module.backend-service.google_cloudbuild_trigger.backend_deploy
+  to   = module.backend-service.google_cloudbuild_trigger.backend_deploy[0]
+}

@@ -103,6 +103,39 @@ This provisions, across five modules (`modules/security`, `modules/storage`,
 - Uptime and error-rate monitoring
 - All required GCP APIs and IAM service accounts
 
+**Staging environment.** `terraform/environments/staging/` is a separate,
+lean root module (its own `terraform.tfvars`, own `.terraform.lock.hcl`,
+same state bucket at a different prefix) that wraps the directory above as
+`module "app"`, with the production-only resources listed there (Cloud
+Scheduler jobs, backups, the budget breaker, the secret pruner, the state
+bucket itself) gated off via `deployment_target = "staging"`. Bootstrap it
+the same way:
+
+```bash
+cd terraform/environments/staging
+cp terraform.tfvars.example terraform.tfvars   # fill in real values
+terraform init
+terraform apply
+```
+
+A brand-new GCP project needs `cloudresourcemanager.googleapis.com` enabled
+*before* the first `terraform init`/`apply` — Terraform's own
+`data "google_project"` read (and its own API-enabling resource) both need
+it already on:
+
+```bash
+gcloud services enable cloudresourcemanager.googleapis.com --project=<staging-project-id>
+```
+
+`backend_image` in the example tfvars points at Google's public Cloud Run
+sample image, not production's real image — staging's Cloud Run service
+agent has no read access to production's Artifact Registry repo (a
+different project) until the merge-to-main promotion pipeline grants it as
+part of building the real cross-project build-once/promote-by-digest flow.
+Full staging setup (Cloudflare Pages, Stripe test-mode webhook, the
+promotion pipeline itself) lands in later hardening-pass PRs; this step
+only gets the infrastructure itself standing.
+
 ### Step 3 — Connect GitHub to Cloud Build (one-time)
 
 Cloud Build needs permission to read your repository before the trigger works.

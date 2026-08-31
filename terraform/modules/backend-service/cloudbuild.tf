@@ -19,8 +19,23 @@
 # showed 8 consecutive SUCCESS runs under this trigger before they were
 # removed (Epic 2, story 2.1) — confirmed dead, not just presumed dead.
 
-# Cloud Build trigger (2nd Gen) — fires on push to main branch
+# Cloud Build trigger (2nd Gen) — fires on push to main branch.
+#
+# Production only. Two independent reasons, discovered together while
+# bootstrapping staging (Epic 8, PR 6):
+#   1. A Cloud Build 2nd-gen trigger needs a google_cloudbuild_v2_connection
+#      wired to a GitHub App installation, which requires an interactive
+#      OAuth consent step Terraform cannot perform — there is no
+#      declarative path to create one from scratch per project.
+#   2. It would be redundant even if it could be created: once the
+#      merge-to-main promotion pipeline exists (PR 10), GitHub Actions is
+#      what builds the image and deploys it to both environments — a
+#      second, independent push-triggered deploy path racing against that
+#      pipeline is a bug waiting to happen, not a feature. Production keeps
+#      this trigger only because retiring it is PR 10's job, not this one's.
 resource "google_cloudbuild_trigger" "backend_deploy" {
+  count = var.deployment_target == "production" ? 1 : 0
+
   project  = var.gcp_project_id
   name     = "mfs-backend-deploy"
   location = var.gcp_region
