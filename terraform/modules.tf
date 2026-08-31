@@ -6,9 +6,13 @@
 module "security" {
   source = "./modules/security"
 
-  gcp_project_id    = var.gcp_project_id
-  admin_emails      = var.admin_emails
-  state_admin_email = var.state_admin_email
+  gcp_project_id         = var.gcp_project_id
+  admin_emails           = var.admin_emails
+  state_admin_email      = var.state_admin_email
+  deployment_target      = var.deployment_target
+  github_owner           = var.github_owner
+  github_repo            = var.github_repo
+  staging_gcp_project_id = var.staging_gcp_project_id
 
   redis_url              = var.redis_url
   stripe_secret_key      = var.stripe_secret_key

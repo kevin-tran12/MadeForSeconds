@@ -164,6 +164,12 @@ variable "deployment_target" {
   }
 }
 
+variable "staging_gcp_project_id" {
+  description = "The staging GCP project id, once it exists — mfs-terraform (created only when deployment_target is \"production\") is granted the same roles on this project too, so one Workload Identity Federation pool/SA can apply Terraform against both environments without a second pool. Blank skips those cross-project grants."
+  type        = string
+  default     = ""
+}
+
 # ─── Terraform state ────────────────────────────────────────────────────────
 
 variable "state_admin_email" {

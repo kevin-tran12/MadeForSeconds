@@ -58,6 +58,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy, if ever re-enabled — currently left blank) |
 | `environment` | `production` or `development` — only these two are meaningful, injected as `ENVIRONMENT`. Defaults to `production`; leave unset unless you know why you're changing it |
 | `deployment_target` | `production` or `staging` — which GCP project's infra topology this apply is for. Distinct from `environment` above: staging still runs the app in `production` mode (real auth, TOTP, Stripe test-mode webhooks), this only gates which infra exists (Cloud Scheduler jobs, Firestore backups, the budget breaker, the secret pruner, the state bucket resource). Defaults to `production` |
+| `staging_gcp_project_id` | The staging project id, once it exists — `mfs-terraform`'s Workload Identity Federation grants extend to this project too, so one WIF pool/SA applies Terraform against both environments. Blank skips those cross-project grants |
 | `state_admin_email` | Google account of whoever runs `terraform apply` — granted `objectAdmin` on the state bucket. Must match the casing already in state if you're picking up an existing deployment; IAM preserves case and a mismatch forces the binding to be replaced |
 
 > `terraform.tfvars` is gitignored — never commit it. It holds live Stripe keys
@@ -135,6 +136,28 @@ part of building the real cross-project build-once/promote-by-digest flow.
 Full staging setup (Cloudflare Pages, Stripe test-mode webhook, the
 promotion pipeline itself) lands in later hardening-pass PRs; this step
 only gets the infrastructure itself standing.
+
+**Workload Identity Federation (GitHub Actions).** Applying the root
+`terraform/` config (production) also creates a WIF pool/provider trusting
+only `kevin-tran12/MadeForSeconds`, and an `mfs-terraform` service account
+GitHub Actions impersonates — no service-account key anywhere. Deliberately
+a separate identity from `mfs-deploy` (Cloud Build's own, narrowly scoped to
+push-and-deploy): Terraform needs to manage IAM, service accounts, buckets,
+secrets, Firestore, and monitoring across the whole project, which is a
+fundamentally broader surface. After applying, read the two values GitHub
+Actions needs and set them as repo variables (Settings → Secrets and
+variables → Actions → Variables) — `WIF_PROVIDER` and
+`WIF_SERVICE_ACCOUNT`:
+
+```bash
+cd terraform
+terraform output -raw workload_identity_provider
+terraform output -raw terraform_service_account_email
+```
+
+Nothing consumes these yet — a GitHub Actions workflow authenticating via
+WIF is a later hardening-pass PR. This step only creates the trust
+relationship and the identity.
 
 ### Step 3 — Connect GitHub to Cloud Build (one-time)
 

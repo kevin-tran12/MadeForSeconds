@@ -56,3 +56,26 @@ variable "instagram_access_token" {
   sensitive   = true
   default     = ""
 }
+
+# ─── Workload Identity Federation (Epic 8, PR 7) ────────────────────────────
+
+variable "deployment_target" {
+  description = "Which GCP project's infrastructure topology this apply targets — \"production\" or \"staging\". Gates the WIF pool/provider/mfs-terraform SA, which are created once, in production, only."
+  type        = string
+}
+
+variable "github_owner" {
+  description = "GitHub username or organization that owns the repo — restricts the Workload Identity Federation trust relationship to this repository specifically."
+  type        = string
+}
+
+variable "github_repo" {
+  description = "GitHub repository name — see github_owner."
+  type        = string
+}
+
+variable "staging_gcp_project_id" {
+  description = "The staging GCP project id, if it exists — mfs-terraform (created here, in the production project) is also granted the same roles on this project, so one WIF-backed identity can apply Terraform against both environments without a second WIF pool. Blank skips the cross-project grants (e.g. a from-scratch production-only apply, before staging exists)."
+  type        = string
+  default     = ""
+}
