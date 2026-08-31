@@ -144,10 +144,12 @@ GitHub Actions impersonates — no service-account key anywhere. Deliberately
 a separate identity from `mfs-deploy` (Cloud Build's own, narrowly scoped to
 push-and-deploy): Terraform needs to manage IAM, service accounts, buckets,
 secrets, Firestore, and monitoring across the whole project, which is a
-fundamentally broader surface. After applying, read the two values GitHub
-Actions needs and set them as repo variables (Settings → Secrets and
-variables → Actions → Variables) — `WIF_PROVIDER` and
-`WIF_SERVICE_ACCOUNT`:
+fundamentally broader surface — `roles/editor` +
+`roles/resourcemanager.projectIamAdmin` + `roles/iam.serviceAccountAdmin` +
+`roles/secretmanager.admin` + `roles/pubsub.admin` on both the production
+and staging projects. Read the two values GitHub Actions needs and set them
+as repo variables (Settings → Secrets and variables → Actions →
+Variables) — `WIF_PROVIDER` and `WIF_SERVICE_ACCOUNT`:
 
 ```bash
 cd terraform
@@ -155,9 +157,24 @@ terraform output -raw workload_identity_provider
 terraform output -raw terraform_service_account_email
 ```
 
-Nothing consumes these yet — a GitHub Actions workflow authenticating via
-WIF is a later hardening-pass PR. This step only creates the trust
-relationship and the identity.
+**One manual, one-time step Terraform can't do for itself:** `mfs-terraform`
+also needs `roles/billing.viewer` on the billing account — a separate IAM
+surface from any project's own policy, and granting it requires permission
+on the billing account that `mfs-terraform` doesn't have yet (the same
+bootstrap chicken-and-egg as `cloudresourcemanager.googleapis.com` on a
+fresh project, above). Without it, `terraform plan` fails reading
+`data "google_billing_account" "account"` (`modules/cost-controls/billing.tf`,
+used for the budget filter's project number):
+
+```bash
+gcloud billing accounts add-iam-policy-binding <billing-account-id> \
+  --member="serviceAccount:mfs-terraform@<project-id>.iam.gserviceaccount.com" \
+  --role="roles/billing.viewer"
+```
+
+`mfs-terraform` is what `terraform-check` and `terraform-drift.yml` (CI)
+authenticate as for plan visibility on every PR/push and a nightly drift
+check — see their own workflow files for what they actually do with it.
 
 ### Step 3 — Connect GitHub to Cloud Build (one-time)
 

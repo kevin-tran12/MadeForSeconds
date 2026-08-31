@@ -97,6 +97,16 @@ resource "google_service_account_iam_member" "terraform_workload_identity_user" 
 # that this replaces for automated applies, project-scoped rather than
 # organization-scoped, and reachable only via WIF from this one repository —
 # no static key exists to leak.
+#
+# Editor's IAM-policy exclusion turned out narrower than assumed, found by
+# actually running a plan under this identity (PR 8), not by more code
+# review: it doesn't cover getIamPolicy/setIamPolicy on individual Pub/Sub
+# topics either (google_pubsub_topic_iam_member, billing.tf) or on
+# individual Secret Manager secrets in the way needed to READ a version's
+# current value during Terraform's routine pre-plan refresh (distinct from
+# the resourcemanager.projectIamAdmin grant below, which only covers
+# project-level IAM, not resource-level IAM on things Editor doesn't already
+# reach) — secretmanager.admin and pubsub.admin below close both gaps.
 resource "google_project_iam_member" "terraform_editor" {
   count   = var.deployment_target == "production" ? 1 : 0
   project = var.gcp_project_id
@@ -115,6 +125,20 @@ resource "google_project_iam_member" "terraform_service_account_admin" {
   count   = var.deployment_target == "production" ? 1 : 0
   project = var.gcp_project_id
   role    = "roles/iam.serviceAccountAdmin"
+  member  = "serviceAccount:${google_service_account.terraform[0].email}"
+}
+
+resource "google_project_iam_member" "terraform_secretmanager_admin" {
+  count   = var.deployment_target == "production" ? 1 : 0
+  project = var.gcp_project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:${google_service_account.terraform[0].email}"
+}
+
+resource "google_project_iam_member" "terraform_pubsub_admin" {
+  count   = var.deployment_target == "production" ? 1 : 0
+  project = var.gcp_project_id
+  role    = "roles/pubsub.admin"
   member  = "serviceAccount:${google_service_account.terraform[0].email}"
 }
 
@@ -143,5 +167,19 @@ resource "google_project_iam_member" "terraform_service_account_admin_staging" {
   count   = var.deployment_target == "production" && var.staging_gcp_project_id != "" ? 1 : 0
   project = var.staging_gcp_project_id
   role    = "roles/iam.serviceAccountAdmin"
+  member  = "serviceAccount:${google_service_account.terraform[0].email}"
+}
+
+resource "google_project_iam_member" "terraform_secretmanager_admin_staging" {
+  count   = var.deployment_target == "production" && var.staging_gcp_project_id != "" ? 1 : 0
+  project = var.staging_gcp_project_id
+  role    = "roles/secretmanager.admin"
+  member  = "serviceAccount:${google_service_account.terraform[0].email}"
+}
+
+resource "google_project_iam_member" "terraform_pubsub_admin_staging" {
+  count   = var.deployment_target == "production" && var.staging_gcp_project_id != "" ? 1 : 0
+  project = var.staging_gcp_project_id
+  role    = "roles/pubsub.admin"
   member  = "serviceAccount:${google_service_account.terraform[0].email}"
 }
