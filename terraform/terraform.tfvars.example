@@ -40,6 +40,16 @@ gcp_region = "us-central1"
 # is_dev as environment == "development" and everything else as production.
 environment = "production"
 
+# Which GCP project's infra topology this apply targets — "production" or
+# "staging". Distinct from `environment` above: staging still runs the app in
+# "production" mode (real auth, real TOTP, real Stripe test-mode webhooks) —
+# this only gates which infra exists (Cloud Scheduler jobs, Firestore
+# backups, the budget breaker, the secret pruner, the state bucket). Set via
+# -var or the per-environment tfvars under terraform/environments/ once that
+# layout exists (PR 6); "production" here is correct for a single-environment
+# apply in the meantime.
+deployment_target = "production"
+
 monthly_budget_amount = 15
 frontend_url          = "https://madeforseconds.pages.dev"
 

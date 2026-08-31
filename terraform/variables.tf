@@ -110,21 +110,37 @@ variable "instagram_access_token" {
 
 # ─── Environment ─────────────────────────────────────────────────────────────
 #
-# There is deliberately no staging environment, and no Terraform workspaces.
+# Two DISTINCT concerns, deliberately kept as two variables rather than
+# overloaded onto one:
 #
-# Cloudflare Pages already previews every branch at <branch>.madeforseconds.pages.dev,
-# which covers the frontend — and those previews point at the production backend,
-# so the integration they exercise is the real one.
+#   var.environment       — the backend app's runtime mode (dev-bypass vs not).
+#                            Always "production" for both deployment targets
+#                            below, including staging — staging exists to
+#                            exercise real auth, real TOTP enforcement, and
+#                            real Stripe test-mode webhooks, none of which the
+#                            dev bypass would test.
+#   var.deployment_target — which GCP project's infrastructure topology this
+#                            apply is for. Gates resources that must exist
+#                            exactly once across both environments (the shared
+#                            Terraform state bucket) or that only make sense
+#                            for the always-on production system (Cloud
+#                            Scheduler jobs, Firestore backup schedules, the
+#                            budget breaker, the secret pruner) — see the
+#                            `count` expressions on those resources.
 #
-# A genuine second environment could not live in this project anyway: Firestore's
-# "(default)" database and google_identity_platform_config are both per-project
-# singletons, so staging would need a second GCP project. That is buildable, but
-# the free tier would not stretch to cover it — Cloud Scheduler's 3-job limit is
-# per *billing account*, not per project, so a second environment does not come
-# with a second allowance.
-#
-# This variable exists so ENVIRONMENT is not hardcoded in cloud_run.tf, not
-# because a second environment is expected.
+# Originally there was deliberately no second environment at all (story 1.2):
+# Cloudflare Pages previews already covered the frontend, pointed at
+# production — and a second environment needs a second GCP project, since
+# Firestore's "(default)" database and google_identity_platform_config are
+# both per-project singletons. That reasoning held until the operator asked
+# for a real `terraform apply` + E2E gate ahead of every production change —
+# reversed for the hardening pass's staging + promotion pipeline (Epic 8).
+# The free-tier consequence is real and accepted, not free: Cloud Scheduler's
+# 3-job limit and Secret Manager's 6-version limit are per *billing account*,
+# not per project, and production already consumes both — staging is
+# deliberately lean (backend + Firestore + GCS + Identity Platform only, no
+# scheduler jobs, no backups, no breaker, no pruner) to keep the added cost to
+# a few dollars a month. See docs/adr/ once story 6.2 records this in full.
 
 variable "environment" {
   description = "Value of the backend's ENVIRONMENT env var. Only \"production\" and \"development\" are meaningful — app/config.py treats is_dev as environment == \"development\" and everything else as production, so a typo would silently ship production behaviour."
@@ -134,6 +150,17 @@ variable "environment" {
   validation {
     condition     = contains(["production", "development"], var.environment)
     error_message = "environment must be \"production\" or \"development\"."
+  }
+}
+
+variable "deployment_target" {
+  description = "Which GCP project's infrastructure topology this apply targets — \"production\" or \"staging\". Gates resources that must exist exactly once (the shared Terraform state bucket) or that only belong in the always-on production system (Cloud Scheduler jobs, Firestore backups, the budget breaker, the secret pruner). Distinct from var.environment, which controls the backend app's own runtime mode and stays \"production\" for both targets — see the comment above."
+  type        = string
+  default     = "production"
+
+  validation {
+    condition     = contains(["production", "staging"], var.deployment_target)
+    error_message = "deployment_target must be \"production\" or \"staging\"."
   }
 }
 

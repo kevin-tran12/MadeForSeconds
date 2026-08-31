@@ -13,6 +13,8 @@ resource "google_firestore_database" "default" {
 # the database to an accidental wipe must be recoverable. Restore via:
 #   gcloud firestore databases restore --source-backup=<backup> --destination-database=<name>
 resource "google_firestore_backup_schedule" "daily" {
+  count = var.deployment_target == "production" ? 1 : 0
+
   project   = var.gcp_project_id
   database  = google_firestore_database.default.name
   retention = "604800s" # 7 days
@@ -48,6 +50,8 @@ resource "google_firestore_backup_schedule" "daily" {
 # association record of their own, re-evaluate this rather than keeping it out
 # of habit.
 resource "google_firestore_backup_schedule" "weekly" {
+  count = var.deployment_target == "production" ? 1 : 0
+
   project   = var.gcp_project_id
   database  = google_firestore_database.default.name
   retention = "8467200s" # 14 weeks — the Firestore maximum

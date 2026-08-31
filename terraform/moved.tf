@@ -351,3 +351,50 @@ moved {
   from = google_cloud_scheduler_job.budget_breaker_reset
   to   = module.cost-controls.google_cloud_scheduler_job.budget_breaker_reset
 }
+
+# ─── Second wave: staging conditional-resource gating (Epic 8, PR 5) ─────────
+#
+# Adding `count` to already-applied resources/modules shifts their state
+# address (e.g. `module.storage.google_firestore_backup_schedule.daily` ->
+# `...daily[0]`). Terraform's automatic index-compatibility only covered some
+# of these for free (confirmed empirically per resource, not assumed) — a
+# whole-module `count` addition never gets it, and even two structurally
+# identical sibling resources (the daily and weekly backup schedules) split:
+# weekly moved for free, daily didn't. Explicit `moved` blocks for all of
+# them, rather than relying on which ones happened to be free, so this stays
+# correct if Terraform's heuristic ever changes.
+#
+# module.secret-maintenance has no entry here: every one of its resources was
+# still pending its first-ever apply (from PR #63) when this ran, so there
+# was no existing address to move *from* — it's simply created at the
+# indexed address `module.secret-maintenance[0].*` directly.
+
+moved {
+  from = module.cost-controls
+  to   = module.cost-controls[0]
+}
+
+moved {
+  from = module.storage.google_firestore_backup_schedule.daily
+  to   = module.storage.google_firestore_backup_schedule.daily[0]
+}
+
+moved {
+  from = module.storage.google_firestore_backup_schedule.weekly
+  to   = module.storage.google_firestore_backup_schedule.weekly[0]
+}
+
+moved {
+  from = module.backend-service.google_cloud_scheduler_job.weekly_usage_report
+  to   = module.backend-service.google_cloud_scheduler_job.weekly_usage_report[0]
+}
+
+moved {
+  from = google_storage_bucket.tf_state
+  to   = google_storage_bucket.tf_state[0]
+}
+
+moved {
+  from = google_storage_bucket_iam_member.tf_state_admin
+  to   = google_storage_bucket_iam_member.tf_state_admin[0]
+}

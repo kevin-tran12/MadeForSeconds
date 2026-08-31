@@ -58,6 +58,6 @@ output "secrets_missing_accessor" {
 }
 
 output "secret_pruner_canary_id" {
-  description = "secret_id of the disposable canary secret used to validate secret-pruner's recovery drill (docs/DEPLOYMENT.md § Secret version pruning) without touching a real application secret"
-  value       = module.secret-maintenance.canary_secret_id
+  description = "secret_id of the disposable canary secret used to validate secret-pruner's recovery drill (docs/DEPLOYMENT.md § Secret version pruning) without touching a real application secret. null in staging, where module.secret-maintenance doesn't exist."
+  value       = try(module.secret-maintenance[0].canary_secret_id, null)
 }

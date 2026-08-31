@@ -23,7 +23,14 @@ terraform {
   }
 }
 
+# One physical bucket backs BOTH environments' remote state (different
+# `prefix` per environment — see terraform/environments/*/backend.hcl),
+# so only one of the two applies may manage its creation/lifecycle. Staging's
+# own apply references the same bucket name in its backend config without
+# ever declaring this resource.
 resource "google_storage_bucket" "tf_state" {
+  count = var.deployment_target == "production" ? 1 : 0
+
   project  = var.gcp_project_id
   name     = "${var.gcp_project_id}-tf-state"
   location = "US"
@@ -61,7 +68,9 @@ resource "google_storage_bucket" "tf_state" {
 # diff. The email must match the casing recorded there exactly — IAM preserves
 # the case it was given, and a difference forces replacement of the binding.
 resource "google_storage_bucket_iam_member" "tf_state_admin" {
-  bucket = google_storage_bucket.tf_state.name
+  count = var.deployment_target == "production" ? 1 : 0
+
+  bucket = google_storage_bucket.tf_state[0].name
   role   = "roles/storage.objectAdmin"
   member = "user:${var.state_admin_email}"
 }

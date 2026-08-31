@@ -43,7 +43,7 @@ run "pruner_role_is_exactly_list_and_destroy_with_all_features_enabled" {
   # fail their own real-provider format validation, breaking runs that have
   # nothing to do with secret-maintenance.
   override_resource {
-    target          = module.secret-maintenance.google_project_iam_custom_role.secret_pruner
+    target          = module.secret-maintenance[0].google_project_iam_custom_role.secret_pruner
     override_during = plan
     values = {
       id = "projects/mfs-test/roles/mfsSecretPruner"
@@ -65,18 +65,18 @@ run "pruner_role_is_exactly_list_and_destroy_with_all_features_enabled" {
   # Exact equality, not "contains" — this fails just as loudly if the role
   # ever gains .enable/.disable/.add as it would if it lost .list or .destroy.
   assert {
-    condition = toset(module.secret-maintenance.pruner_role_permissions) == toset([
+    condition = toset(module.secret-maintenance[0].pruner_role_permissions) == toset([
       "secretmanager.versions.destroy",
       "secretmanager.versions.list",
     ])
-    error_message = "secret-pruner's custom role must be exactly versions.list + versions.destroy — got: ${join(", ", module.secret-maintenance.pruner_role_permissions)}"
+    error_message = "secret-pruner's custom role must be exactly versions.list + versions.destroy — got: ${join(", ", module.secret-maintenance[0].pruner_role_permissions)}"
   }
 
   # Every pruner binding uses the custom list+destroy role — never a broader
   # predefined one that would smuggle in .enable/.disable through a different
   # resource.
   assert {
-    condition     = module.secret-maintenance.pruner_bound_roles == toset([module.secret-maintenance.pruner_role_id])
+    condition     = module.secret-maintenance[0].pruner_bound_roles == toset([module.secret-maintenance[0].pruner_role_id])
     error_message = "Every secret-pruner binding must use the custom mfsSecretPruner role, not a predefined one."
   }
 
@@ -92,7 +92,7 @@ run "pruner_role_is_exactly_list_and_destroy_with_all_features_enabled" {
   # canary — never on the two unrelated Cloud Build OAuth secrets, which never
   # appear in module.security.secret_ids to begin with.
   assert {
-    condition = module.secret-maintenance.pruner_bound_secret_ids == toset([
+    condition = module.secret-maintenance[0].pruner_bound_secret_ids == toset([
       "admin-emails",
       "redis-url",
       "stripe-secret-key",
@@ -122,7 +122,7 @@ run "pruner_binds_only_admin_emails_and_canary_with_no_optional_secrets" {
   }
 
   assert {
-    condition = module.secret-maintenance.pruner_bound_secret_ids == toset([
+    condition = module.secret-maintenance[0].pruner_bound_secret_ids == toset([
       "admin-emails",
       "secret-pruner-canary",
     ])
