@@ -460,7 +460,10 @@ class TestCreateExpenseReceiptUrl:
         assert result["error"] == "invalid_request"
 
     def test_non_gcs_receipt_url_rejected(self, db):
-        with patch("app.mcp_server.settings") as mock_settings:
+        # resolve_receipt_url now lives in services/uploads.py (shared with
+        # the HTTP route), so its own `settings` binding is what needs
+        # patching — app.mcp_server.settings would no longer reach it.
+        with patch("app.services.uploads.settings") as mock_settings:
             mock_settings.is_dev = False
             mock_settings.gcs_receipts_bucket_name = "receipts-bucket"
 
@@ -469,13 +472,13 @@ class TestCreateExpenseReceiptUrl:
             )
 
         assert result["error"] == "invalid_request"
-        assert "request_image_upload" in result["message"]
+        assert "receipt_url" in result["message"]
         db.set.assert_not_called()
         db.transaction.return_value.set.assert_not_called()
 
     def test_missing_blob_rejected(self, db):
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.services.uploads.settings") as mock_settings,
             patch("google.cloud.storage.Client") as mock_client,
         ):
             mock_settings.is_dev = False
@@ -487,14 +490,14 @@ class TestCreateExpenseReceiptUrl:
             )
 
         assert result["error"] == "invalid_request"
-        assert "PUT" in result["message"]
+        assert "upload" in result["message"]
 
     def test_valid_receipt_url_attached(self, db):
         blob = MagicMock()
         blob.content_type = "application/pdf"
         uuid_name = "receipts/123e4567-e89b-42d3-a456-426614174000-receipt.pdf"
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.services.uploads.settings") as mock_settings,
             patch("google.cloud.storage.Client") as mock_client,
         ):
             mock_settings.is_dev = False

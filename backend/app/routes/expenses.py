@@ -47,6 +47,21 @@ def _doc_to_summary(doc) -> ExpenseSummary:
     return ExpenseSummary(**data)
 
 
+def _validate_receipt_url(receipt_url: str) -> dict:
+    """Re-validate a client-supplied receipt_url before it reaches a write,
+    translating uploads.resolve_receipt_url's outcomes into HTTP responses:
+    a bad or unresolvable URL is the caller's mistake (400); anything else
+    (a GCS outage, a transient auth failure) is ours, logged and reported
+    generically like every other GCS call in this router."""
+    try:
+        return uploads.resolve_receipt_url(receipt_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("Receipt URL validation failed for %s", receipt_url)
+        raise HTTPException(status_code=500, detail="Failed to validate receipt")
+
+
 def _write_revision_in_transaction(
     transaction, db, expense_id: str, revision: int, snapshot: dict, changed_by: str, summary: str
 ) -> None:
@@ -115,10 +130,15 @@ async def create_expense(body: ExpenseCreate, request: Request):
     data["revision"] = 1
     data["ai_parsed"] = False
 
-    # Receipt fields (set later via upload-receipt + update)
-    data["receipt_url"] = None
-    data["receipt_filename"] = None
-    data["receipt_content_type"] = None
+    # Receipt: re-validate against the receipts bucket rather than trusting
+    # the client-supplied filename/content-type — same validator the MCP
+    # create_expense tool uses, so there is one implementation, not two.
+    if body.receipt_url:
+        data.update(_validate_receipt_url(body.receipt_url))
+    else:
+        data["receipt_url"] = None
+        data["receipt_filename"] = None
+        data["receipt_content_type"] = None
 
     doc_ref = db.collection("expenses").document()
     admin_email = request.state.admin_email  # always set by require_admin
@@ -235,6 +255,12 @@ async def update_expense(expense_id: str, body: ExpenseUpdate, request: Request)
     doc_ref = db.collection("expenses").document(expense_id)
     updates = body.model_dump(exclude_none=True)
     admin_email = request.state.admin_email  # always set by require_admin
+
+    # Re-validate before the transaction starts: this is a GCS call, and a
+    # Firestore transaction can retry its body on contention, which must
+    # never re-trigger an external network call.
+    if "receipt_url" in updates:
+        updates.update(_validate_receipt_url(updates["receipt_url"]))
 
     merged = _update_expense_transaction(db.transaction(), db, doc_ref, updates, admin_email)
     merged["id"] = expense_id
@@ -354,8 +380,12 @@ async def get_receipt(expense_id: str):
         raise HTTPException(status_code=500, detail="Invalid receipt storage path")
 
     parts = receipt_url[5:].split("/", 1)
-    bucket_name = parts[0]
-    blob_path = parts[1]
+    if len(parts) != 2 or not parts[1]:
+        raise HTTPException(status_code=500, detail="Invalid receipt storage path")
+    bucket_name, blob_path = parts
+
+    if bucket_name != settings.gcs_receipts_bucket_name:
+        raise HTTPException(status_code=500, detail="Invalid receipt storage path")
 
     try:
         # Routed through IAM signBlob so it works on Cloud Run, where the

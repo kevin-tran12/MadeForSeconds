@@ -51,6 +51,12 @@ class ExpenseCreate(BaseModel):
     recipe_ids: list[str] = Field(default_factory=list)
     recipe_names: list[str] = Field(default_factory=list)
 
+    # Receipt file — always re-validated server-side against the receipts
+    # bucket (services/uploads.resolve_receipt_url), never trusted as-is.
+    receipt_url: str | None = None
+    receipt_filename: str | None = None
+    receipt_content_type: str | None = None
+
 
 class ExpenseUpdate(BaseModel):
     """Input model for updating an expense. All fields optional."""
@@ -68,6 +74,9 @@ class ExpenseUpdate(BaseModel):
     merchant_id: str | None = None
     recipe_ids: list[str] | None = None
     recipe_names: list[str] | None = None
+    receipt_url: str | None = None
+    receipt_filename: str | None = None
+    receipt_content_type: str | None = None
 
 
 class Expense(BaseModel):

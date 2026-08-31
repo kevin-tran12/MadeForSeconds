@@ -630,44 +630,6 @@ def _resolve_recipe_slugs(slugs: list[str]) -> dict[str, tuple[str, str]]:
     return result
 
 
-def _resolve_receipt_url(receipt_url: str) -> dict:
-    """Validate a receipt_url produced by request_image_upload(kind='receipt').
-
-    Returns receipt metadata for the expense document, or raises ValueError.
-    """
-    if receipt_url.startswith("dev://"):
-        if not settings.is_dev:
-            raise ValueError("dev:// receipt URLs are only valid in development")
-        base = receipt_url.rsplit("/", 1)[-1]
-        return {
-            "receipt_url": receipt_url,
-            "receipt_filename": base[37:] if len(base) > 37 else base,
-            "receipt_content_type": None,
-        }
-
-    bucket = settings.gcs_receipts_bucket_name
-    prefix = f"gs://{bucket}/" if bucket else None
-    if not prefix or not receipt_url.startswith(prefix):
-        raise ValueError(
-            "receipt_url must be a gs:// URL in the receipts bucket. "
-            "Call request_image_upload(kind='receipt'), PUT the file, then pass its final_url."
-        )
-    blob_name = receipt_url[len(prefix):]
-
-    from google.cloud import storage
-
-    blob = storage.Client().bucket(bucket).get_blob(blob_name)
-    if blob is None:
-        raise ValueError("Receipt not found in storage — did the PUT upload succeed?")
-
-    base = blob_name.rsplit("/", 1)[-1]
-    return {
-        "receipt_url": receipt_url,
-        "receipt_filename": base[37:] if len(base) > 37 else base,  # strip "{uuid4}-" prefix
-        "receipt_content_type": blob.content_type,
-    }
-
-
 def _mcp_create_expense_logic(transaction, db, doc_ref, data: dict) -> None:
     """Commits the expense document and its first revision atomically —
     reuses routes/expenses.py's _write_revision_in_transaction rather than a
@@ -772,7 +734,7 @@ def create_expense(
         "receipt_content_type": None,
     }
     if receipt_url:
-        receipt_data = _resolve_receipt_url(receipt_url)
+        receipt_data = uploads.resolve_receipt_url(receipt_url)
 
     # Build Firestore document
     now = datetime.now(timezone.utc)

@@ -138,6 +138,91 @@ def test_create_expense_commits_via_one_transaction_call(totp_authenticated_clie
     mock_expense_transactions["create"].assert_called_once()
 
 
+def test_create_expense_receipt_url_validated_and_normalized(
+    totp_authenticated_client, mock_db, mock_expense_transactions
+):
+    """A receipt_url in the create payload is re-validated against the
+    receipts bucket, and the validator's filename/content-type — not the
+    client's — end up in the document written inside the transaction."""
+    mock_db.collection.return_value.document.return_value.id = "exp_123"
+
+    payload = {
+        "date": "2024-01-01T00:00:00Z",
+        "vendor": "AWS",
+        "category": "software",
+        "items": [],
+        "receipt_url": "gs://receipts-bucket/receipts/uuid-invoice.pdf",
+        "receipt_filename": "client-supplied-name.pdf",
+        "receipt_content_type": "text/plain",
+    }
+
+    with patch(
+        "app.routes.expenses.uploads.resolve_receipt_url",
+        return_value={
+            "receipt_url": "gs://receipts-bucket/receipts/uuid-invoice.pdf",
+            "receipt_filename": "invoice.pdf",
+            "receipt_content_type": "application/pdf",
+        },
+    ) as resolver:
+        response = totp_authenticated_client.post("/api/admin/expenses", json=payload)
+
+    assert response.status_code == 201
+    resolver.assert_called_once_with("gs://receipts-bucket/receipts/uuid-invoice.pdf")
+    call_args = mock_expense_transactions["create"].call_args[0]
+    # (transaction, db, doc_ref, data, admin_email)
+    written = call_args[3]
+    assert written["receipt_filename"] == "invoice.pdf"
+    assert written["receipt_content_type"] == "application/pdf"
+
+
+def test_create_expense_invalid_receipt_url_rejected(
+    totp_authenticated_client, mock_db, mock_expense_transactions
+):
+    """An unresolvable receipt_url is rejected before the transaction ever
+    starts — no expense document is written pointing at an object that
+    isn't actually there."""
+    payload = {
+        "date": "2024-01-01T00:00:00Z",
+        "vendor": "AWS",
+        "category": "software",
+        "items": [],
+        "receipt_url": "https://evil.example/r.pdf",
+    }
+
+    with patch(
+        "app.routes.expenses.uploads.resolve_receipt_url",
+        side_effect=ValueError("receipt_url must be a gs:// URL in the receipts bucket."),
+    ):
+        response = totp_authenticated_client.post("/api/admin/expenses", json=payload)
+
+    assert response.status_code == 400
+    mock_expense_transactions["create"].assert_not_called()
+
+
+def test_create_expense_receipt_validation_outage_returns_clean_500(
+    totp_authenticated_client, mock_db, mock_expense_transactions
+):
+    """An unexpected failure validating the receipt (e.g. a GCS outage) is
+    logged and reported as a generic 500 — same convention as every other
+    GCS call in this router — rather than an unhandled exception."""
+    payload = {
+        "date": "2024-01-01T00:00:00Z",
+        "vendor": "AWS",
+        "category": "software",
+        "items": [],
+        "receipt_url": "gs://receipts-bucket/receipts/uuid-invoice.pdf",
+    }
+
+    with patch(
+        "app.routes.expenses.uploads.resolve_receipt_url",
+        side_effect=RuntimeError("GCS unavailable"),
+    ):
+        response = totp_authenticated_client.post("/api/admin/expenses", json=payload)
+
+    assert response.status_code == 500
+    mock_expense_transactions["create"].assert_not_called()
+
+
 def test_list_expenses_by_year(totp_authenticated_client, mock_db):
     """Filters by date range."""
     # Mocking stream to return one doc
@@ -205,6 +290,75 @@ def test_update_expense(totp_authenticated_client, mock_db, mock_expense_transac
     assert call_args[3] == {"vendor": "New"}
 
 
+def test_update_expense_receipt_url_validated_and_normalized(
+    totp_authenticated_client, mock_db, mock_expense_transactions
+):
+    """A receipt_url in the update payload is re-validated before the
+    transaction starts (a GCS call must never live inside a function
+    Firestore may retry), and the validator's fields — not the client's —
+    are what reach the transaction."""
+    mock_expense_transactions["update"].return_value = {
+        "vendor": "AWS",
+        "date": "2024-01-01T00:00:00Z",
+        "category": "software",
+        "description": "",
+        "raw_subtotal": 10000,
+        "raw_tax": 500,
+        "raw_total": 10500,
+        "project_subtotal": 10000,
+        "project_tax": 500,
+        "project_total": 10500,
+        "items": [],
+        "status": "active",
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-02T00:00:00Z",
+        "revision": 2,
+        "receipt_url": "gs://receipts-bucket/receipts/uuid-invoice.pdf",
+        "receipt_filename": "invoice.pdf",
+        "receipt_content_type": "application/pdf",
+    }
+
+    payload = {
+        "receipt_url": "gs://receipts-bucket/receipts/uuid-invoice.pdf",
+        "receipt_filename": "client-supplied-name.pdf",
+        "receipt_content_type": "text/plain",
+    }
+
+    with patch(
+        "app.routes.expenses.uploads.resolve_receipt_url",
+        return_value={
+            "receipt_url": "gs://receipts-bucket/receipts/uuid-invoice.pdf",
+            "receipt_filename": "invoice.pdf",
+            "receipt_content_type": "application/pdf",
+        },
+    ) as resolver:
+        response = totp_authenticated_client.put("/api/admin/expenses/exp_123", json=payload)
+
+    assert response.status_code == 200
+    resolver.assert_called_once_with("gs://receipts-bucket/receipts/uuid-invoice.pdf")
+    call_args = mock_expense_transactions["update"].call_args[0]
+    updates = call_args[3]
+    assert updates["receipt_filename"] == "invoice.pdf"
+    assert updates["receipt_content_type"] == "application/pdf"
+
+
+def test_update_expense_invalid_receipt_url_rejected(
+    totp_authenticated_client, mock_db, mock_expense_transactions
+):
+    """An unresolvable receipt_url is rejected before the update transaction
+    runs — no revision gets written over a bogus association."""
+    payload = {"receipt_url": "https://evil.example/r.pdf"}
+
+    with patch(
+        "app.routes.expenses.uploads.resolve_receipt_url",
+        side_effect=ValueError("receipt_url must be a gs:// URL in the receipts bucket."),
+    ):
+        response = totp_authenticated_client.put("/api/admin/expenses/exp_123", json=payload)
+
+    assert response.status_code == 400
+    mock_expense_transactions["update"].assert_not_called()
+
+
 def test_void_expense(totp_authenticated_client, mock_db, mock_expense_transactions):
     """Sets status=voided via the transactional function; route returns the
     fixed acknowledgement shape regardless of the transaction's internals."""
@@ -265,13 +419,43 @@ def test_get_receipt_gcs_uses_cloud_run_safe_signing(totp_authenticated_client, 
     )
     mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
 
-    with patch("app.services.uploads.signed_get_url", return_value="https://signed.example/r") as signer:
-        response = totp_authenticated_client.get("/api/admin/expenses/exp_123/receipt")
+    with patch("app.routes.expenses.settings") as mock_settings:
+        mock_settings.gcs_receipts_bucket_name = "my-receipts"
+        with patch("app.services.uploads.signed_get_url", return_value="https://signed.example/r") as signer:
+            response = totp_authenticated_client.get("/api/admin/expenses/exp_123/receipt")
 
     assert response.status_code == 200
     assert response.json()["url"] == "https://signed.example/r"
     assert response.json()["filename"] == "r.pdf"
     signer.assert_called_once_with("my-receipts", "receipts/uuid-r.pdf")
+
+
+def test_get_receipt_wrong_bucket_rejected(totp_authenticated_client, mock_db, sample_expense_doc):
+    """A receipt_url naming a bucket other than the configured receipts
+    bucket is rejected rather than signed — defends persisted data that
+    predates validation, or was written by a path other than this app's own
+    (validated) writers."""
+    mock_doc = sample_expense_doc(id="exp_123", receipt_url="gs://some-other-bucket/receipts/r.pdf")
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    with patch("app.routes.expenses.settings") as mock_settings:
+        mock_settings.gcs_receipts_bucket_name = "my-receipts"
+        response = totp_authenticated_client.get("/api/admin/expenses/exp_123/receipt")
+
+    assert response.status_code == 500
+
+
+def test_get_receipt_pathless_gs_url_rejected(totp_authenticated_client, mock_db, sample_expense_doc):
+    """A gs://bucket URL with no object path must not raise an unhandled
+    IndexError."""
+    mock_doc = sample_expense_doc(id="exp_123", receipt_url="gs://my-receipts")
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    with patch("app.routes.expenses.settings") as mock_settings:
+        mock_settings.gcs_receipts_bucket_name = "my-receipts"
+        response = totp_authenticated_client.get("/api/admin/expenses/exp_123/receipt")
+
+    assert response.status_code == 500
 
 
 # ── _create_expense_logic (atomic doc + first revision) ─────────────────────
