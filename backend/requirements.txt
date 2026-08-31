@@ -13,7 +13,7 @@ python-multipart>=0.0.32,<1.0.0
 redis>=8.1.0,<9.0.0
 stripe>=8.0.0,<16.0.0
 PyJWT[crypto]>=2.13.0,<3.0.0
-reportlab>=4.0.0,<6.0.0
+reportlab>=5.0.1,<6.0.0
 pyotp>=2.9.0,<3.0.0
 qrcode[pil]>=8.2,<9.0.0
 # Used directly by services/uploads.py's metadata stripper and its tests
