@@ -211,3 +211,67 @@ def test_admin_upload_receipt_rejects_oversize(authenticated_client):
             "/api/admin/upload-receipt", files={"file": ("big.pdf", big, "application/pdf")}
         )
     assert response.status_code == 413
+
+
+# ── Supporter moderation: toggle-name / public_listing ──────────────────────
+
+def test_toggle_name_invalid_collection_rejected(authenticated_client):
+    response = authenticated_client.post("/api/admin/supporters/recipes/doc1/toggle-name")
+    assert response.status_code == 400
+
+
+def test_toggle_name_not_found(authenticated_client, mock_db):
+    mock_doc = MagicMock()
+    mock_doc.exists = False
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    response = authenticated_client.post("/api/admin/supporters/subscribers/doc1/toggle-name")
+    assert response.status_code == 404
+
+
+def test_toggle_name_off_sets_public_listing_false(authenticated_client, mock_db):
+    """A supporter with a display name currently listed (name_enabled
+    defaults True) gets hidden: name_enabled flips off, and public_listing
+    — the denormalised query gate — flips with it in the same write."""
+    mock_doc = MagicMock()
+    mock_doc.exists = True
+    mock_doc.to_dict.return_value = {"display_name": "Alex", "name_enabled": True}
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    response = authenticated_client.post("/api/admin/supporters/subscribers/doc1/toggle-name")
+    assert response.status_code == 200
+    assert response.json()["name_enabled"] is False
+
+    update_call = mock_db.collection.return_value.document.return_value.update.call_args[0][0]
+    assert update_call["name_enabled"] is False
+    assert update_call["public_listing"] is False
+
+
+def test_toggle_name_on_with_display_name_sets_public_listing_true(authenticated_client, mock_db):
+    mock_doc = MagicMock()
+    mock_doc.exists = True
+    mock_doc.to_dict.return_value = {"display_name": "Alex", "name_enabled": False}
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    response = authenticated_client.post("/api/admin/supporters/donations/doc2/toggle-name")
+    assert response.status_code == 200
+    assert response.json()["name_enabled"] is True
+
+    update_call = mock_db.collection.return_value.document.return_value.update.call_args[0][0]
+    assert update_call["public_listing"] is True
+
+
+def test_toggle_name_on_without_display_name_keeps_public_listing_false(authenticated_client, mock_db):
+    """Flipping name_enabled back on doesn't fabricate a listing for a
+    supporter who never set a display name in the first place."""
+    mock_doc = MagicMock()
+    mock_doc.exists = True
+    mock_doc.to_dict.return_value = {"display_name": None, "name_enabled": False}
+    mock_db.collection.return_value.document.return_value.get.return_value = mock_doc
+
+    response = authenticated_client.post("/api/admin/supporters/subscribers/doc3/toggle-name")
+    assert response.status_code == 200
+    assert response.json()["name_enabled"] is True
+
+    update_call = mock_db.collection.return_value.document.return_value.update.call_args[0][0]
+    assert update_call["public_listing"] is False

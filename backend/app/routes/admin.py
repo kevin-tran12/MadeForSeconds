@@ -11,6 +11,7 @@ from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
 from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
+from ..routes.subscriptions import compute_public_listing
 from ..services import receipt_ledger
 from ..services import recipes as recipe_service
 from ..services import uploads
@@ -373,9 +374,12 @@ async def toggle_name(collection: str, doc_id: str):
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Supporter not found")
 
-    current = doc.to_dict().get("name_enabled", True)
+    data = doc.to_dict()
+    current = data.get("name_enabled", True)
+    new_name_enabled = not current
     doc_ref.update({
-        "name_enabled": not current,
+        "name_enabled": new_name_enabled,
+        "public_listing": compute_public_listing(data.get("display_name"), new_name_enabled),
         "updated_at": datetime.now(timezone.utc),
     })
-    return {"name_enabled": not current}
+    return {"name_enabled": new_name_enabled}

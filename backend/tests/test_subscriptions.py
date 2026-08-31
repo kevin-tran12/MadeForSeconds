@@ -133,6 +133,52 @@ def test_setup_profile(client, mock_stripe, mock_db):
     args = mock_db.collection.return_value.document.return_value.update.call_args[0][0]
     assert args["display_name"] == "New Name"
     assert args["note_pending"] == "New Note"
+    assert args["public_listing"] is True
+
+
+def test_setup_profile_existing_doc_with_name_disabled_stays_unlisted(client, mock_stripe, mock_db):
+    """A supporter who previously had their name hidden by an admin
+    (name_enabled=False) doesn't get silently re-listed just by setting a
+    new display name — public_listing has to fold in the existing
+    name_enabled value, not assume it's on."""
+    mock_session = MagicMock()
+    mock_session.payment_status = "paid"
+    mock_session.mode = "subscription"
+    mock_session.customer_details.email = "test@example.com"
+    mock_session.id = "sess_456"
+    mock_stripe.checkout.Session.retrieve.return_value = mock_session
+
+    mock_doc = MagicMock()
+    mock_doc.id = "sub_doc_123"
+    mock_doc.to_dict.return_value = {"setup_session_id": "other_sess", "name_enabled": False}
+    mock_db.collection.return_value.where.return_value.limit.return_value.stream.return_value = iter([mock_doc])
+
+    payload = {"session_id": "sess_456", "display_name": "New Name", "note": "", "note_is_public": False}
+    response = client.post("/api/subscribe/setup-profile", json=payload)
+    assert response.status_code == 200
+
+    args = mock_db.collection.return_value.document.return_value.update.call_args[0][0]
+    assert args["public_listing"] is False
+
+
+def test_setup_profile_new_donation_doc_sets_public_listing(client, mock_stripe, mock_db):
+    mock_session = MagicMock()
+    mock_session.payment_status = "paid"
+    mock_session.mode = "payment"
+    mock_session.customer_details.email = "donor@example.com"
+    mock_session.id = "sess_789"
+    mock_session.amount_total = 500
+    mock_stripe.checkout.Session.retrieve.return_value = mock_session
+
+    mock_db.collection.return_value.where.return_value.limit.return_value.stream.return_value = iter([])
+
+    payload = {"session_id": "sess_789", "display_name": "Donor Name", "note": "", "note_is_public": False}
+    response = client.post("/api/subscribe/setup-profile", json=payload)
+    assert response.status_code == 200
+
+    args = mock_db.collection.return_value.add.call_args[0][0]
+    assert args["public_listing"] is True
+
 
 def test_cancel_request_sends_email(client, mock_db):
     """Verifies that cancel request finds subscriber and 'sends' email."""
@@ -382,6 +428,7 @@ def test_apply_subscription_checkout_new_subscriber_sets_plain_total():
     _, payload = txn.set_calls[0]
     assert payload["email"] == "a@b.com"
     assert payload["total_donated_cents"] == 1000  # plain int on create — nothing to increment yet
+    assert payload["public_listing"] is False  # no display_name yet
 
 
 def test_apply_subscription_checkout_existing_subscriber_uses_increment():
@@ -398,6 +445,10 @@ def test_apply_subscription_checkout_existing_subscriber_uses_increment():
     ref, payload = txn.update_calls[0]
     assert ref is existing.reference
     assert isinstance(payload["total_donated_cents"], Increment)
+    # public_listing isn't touched on an update — this write never changes
+    # display_name/name_enabled, so Firestore's partial-merge .update()
+    # must leave whatever value is already there alone.
+    assert "public_listing" not in payload
 
 
 def test_apply_subscription_updated_not_found_raises():
@@ -496,6 +547,7 @@ def test_apply_donation_checkout_anonymous_creates_new_doc():
     # set_calls[0] is the ledger row, set_calls[1] is the donations aggregate doc.
     assert len(txn.set_calls) == 2
     assert txn.set_calls[1][1]["email"] == "anonymous"
+    assert txn.set_calls[1][1]["public_listing"] is False
 
 
 # ── donation_transactions ledger ─────────────────────────────────────────────

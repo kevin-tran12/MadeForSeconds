@@ -45,6 +45,18 @@ class WebhookProcessingError(Exception):
     transaction so the caller re-raises and Stripe retries with backoff."""
 
 
+def compute_public_listing(display_name, name_enabled: bool) -> bool:
+    """The single definition of "does this supporter appear in the public
+    list" — mirrors list_supporters' own inclusion check exactly. Every
+    write site that can change display_name or name_enabled
+    (setup_profile, the webhook's two checkout-apply paths, admin.py's
+    toggle_name, and the one-time backfill script) computes the
+    denormalised public_listing field through this one function rather
+    than each re-deriving the rule — a second, divergent copy of it is
+    exactly how a stale or wrong listing would come back."""
+    return bool(display_name) and name_enabled
+
+
 def _read_existing_doc(transaction, db, event_type: str, data: dict):
     """Read phase: the one query a given event type needs, if any (pure
     read — part of the transaction's read set, must happen before any
@@ -109,6 +121,12 @@ def _apply_subscription_checkout(transaction, db, data: dict, existing_doc, now,
         logger.info("Updated subscriber (event=%s)", event_id)
     else:
         subscriber_data["created_at"] = now
+        # No display_name yet — always excluded from the public listing
+        # until setup_profile sets one. Not folded into the dict above:
+        # that dict is also used for the existing_doc update branch, where
+        # .update()'s partial-merge semantics must leave an already-set
+        # public_listing untouched rather than resetting it.
+        subscriber_data["public_listing"] = False
         new_ref = db.collection("subscribers").document()
         transaction.set(new_ref, subscriber_data)
         logger.info("Created subscriber (event=%s)", event_id)
@@ -226,6 +244,9 @@ def _apply_donation_checkout(
         "total_donated_cents": amount_total,
         "stripe_session_id": session_id,
         "created_at": now,
+        # No display_name yet — excluded from the public listing until
+        # setup_profile sets one.
+        "public_listing": False,
     })
     logger.info("New donation recorded: %d cents (event=%s)", amount_total, event_id)
     return "processed"
@@ -670,12 +691,19 @@ async def setup_profile(body: SetupProfileRequest):
             # Only block exact replay of the same session (prevent double-submit)
             if existing.get("setup_session_id") == body.session_id:
                 raise HTTPException(status_code=409, detail="This payment has already been set up")
+            # This write can change display_name but never touches
+            # name_enabled — an existing doc's current value (default True
+            # if never toggled) has to be read and folded in here.
+            update_data["public_listing"] = compute_public_listing(
+                display_name, existing.get("name_enabled", True)
+            )
             db.collection("subscribers").document(doc.id).update(update_data)
         else:
             # Webhook may not have fired yet — create the doc
             update_data["email"] = email
             update_data["status"] = "active"
             update_data["created_at"] = now
+            update_data["public_listing"] = compute_public_listing(display_name, True)  # unset -> defaults True
             db.collection("subscribers").add(update_data)
     else:
         # One-time donation — look up by email so repeat donors update their existing shoutout
@@ -686,6 +714,9 @@ async def setup_profile(body: SetupProfileRequest):
             # Only block exact replay of the same session (prevent double-submit)
             if existing.get("setup_session_id") == body.session_id:
                 raise HTTPException(status_code=409, detail="This payment has already been set up")
+            update_data["public_listing"] = compute_public_listing(
+                display_name, existing.get("name_enabled", True)
+            )
             db.collection("donations").document(doc.id).update(update_data)
         else:
             # Webhook may not have fired yet — create the doc
@@ -694,6 +725,7 @@ async def setup_profile(body: SetupProfileRequest):
             update_data["total_donated_cents"] = session.amount_total or 0
             update_data["stripe_session_id"] = session.id
             update_data["created_at"] = now
+            update_data["public_listing"] = compute_public_listing(display_name, True)  # unset -> defaults True
             db.collection("donations").add(update_data)
 
     return SetupProfileResponse(

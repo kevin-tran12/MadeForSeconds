@@ -115,6 +115,43 @@ resource "google_firestore_index" "recipes_slug_published" {
   depends_on  = [google_firestore_database.default]
 }
 
+# Public supporter list: public_listing == True ORDER BY total_donated_cents
+# DESC. `public_listing` (backend/app/routes/subscriptions.py, denormalised
+# at every write that can change display_name or name_enabled) replaces
+# streaming and filtering the whole collection in Python — the query itself
+# is now bounded by the requested page size. One index per collection: the
+# public list draws from both `subscribers` and `donations`, and Firestore
+# indexes are per-collection.
+resource "google_firestore_index" "subscribers_public_listing_total" {
+  project    = var.gcp_project_id
+  collection = "subscribers"
+  fields {
+    field_path = "public_listing"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "total_donated_cents"
+    order      = "DESCENDING"
+  }
+  query_scope = "COLLECTION"
+  depends_on  = [google_firestore_database.default]
+}
+
+resource "google_firestore_index" "donations_public_listing_total" {
+  project    = var.gcp_project_id
+  collection = "donations"
+  fields {
+    field_path = "public_listing"
+    order      = "ASCENDING"
+  }
+  fields {
+    field_path = "total_donated_cents"
+    order      = "DESCENDING"
+  }
+  query_scope = "COLLECTION"
+  depends_on  = [google_firestore_database.default]
+}
+
 # ─── Firestore TTL Policies ───────────────────────────────────────────────────
 
 # Stripe webhook idempotency records (backend/app/routes/subscriptions.py) — one
