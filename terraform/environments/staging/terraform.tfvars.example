@@ -1,0 +1,57 @@
+# Copy to terraform.tfvars in this same directory (gitignored — root
+# .gitignore's `terraform/**/terraform.tfvars` pattern covers it) and fill in
+# real values. Mirrors terraform/terraform.tfvars.example's shape; only the
+# differences from production are called out below.
+
+# ─── Required ──────────────────────────────────────────────────────────────
+
+gcp_project_id  = "made-for-seconds-staging" # a SEPARATE GCP project from production
+admin_emails    = "you@yourdomain.com"
+allowed_origins = "http://localhost:5173"                                                  # widened once the staging Cloudflare Pages URL exists (PR 9)
+# Google's public Cloud Run sample image — a real, always-pullable
+# placeholder so the bootstrap apply succeeds with something running.
+# staging's Cloud Run service agent has no read access to production's
+# Artifact Registry repo (a different project) until PR 10 grants it as
+# part of building the real cross-project build-once/promote-by-digest
+# pipeline — pointing at that path here, before that grant exists, is
+# exactly the mistake that broke the first bootstrap attempt. PR 10
+# replaces this value; nothing else needs to change when it does.
+backend_image = "us-docker.pkg.dev/cloudrun/container/hello"
+github_owner    = "kevin-tran12"
+github_repo     = "MadeForSeconds"
+
+billing_account = "XXXXXX-XXXXXX-XXXXXX" # the SAME billing account as production — see variables.tf's comment
+alert_email     = "you@yourdomain.com"
+
+state_admin_email = "you@yourdomain.com" # objectAdmin on this environment's state prefix
+
+# ─── Optional — defaults shown ─────────────────────────────────────────────
+
+gcp_region = "us-central1"
+
+# ─── Staging-specific ──────────────────────────────────────────────────────
+
+# A separate Upstash free-tier Redis database — do not reuse production's.
+redis_url = "rediss://default:TOKEN@a-different-host.upstash.io:6379"
+
+# Stripe TEST mode only. Never a live sk_live_/whsec_ pair here.
+stripe_secret_key     = "sk_test_..."
+stripe_webhook_secret = "whsec_..." # from the staging webhook endpoint created in PR 9
+
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+# A distinct value from production's — never share a JWT signing secret
+# across environments.
+subscriber_jwt_secret = "REPLACE_WITH_GENERATED_HEX"
+
+resend_api_key = "" # optional; leave blank to skip cancellation emails in staging
+
+frontend_url = "" # the staging Cloudflare Pages URL, once PR 9 creates it
+
+# Instagram publishing is deprecated even in production — leave blank.
+# instagram_user_id      = ""
+# instagram_access_token = ""
+
+# ─── WorkOS / MCP — leave blank until AuthKit has a staging environment ────
+
+# workos_authkit_domain = ""
+# mcp_resource_url      = ""

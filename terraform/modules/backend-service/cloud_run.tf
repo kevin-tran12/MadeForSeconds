@@ -40,7 +40,13 @@ resource "google_cloud_run_v2_service" "backend" {
   name     = "mfs-backend"
   location = var.gcp_region
 
-  deletion_protection = true
+  # Production must never lose this to an accidental destroy/replace.
+  # Staging has no such guarantee to give — it's a lean, frequently-recreated
+  # bootstrap environment that has never served real traffic, and blocking a
+  # legitimate recreate (e.g. of a resource left tainted by an earlier
+  # partial-apply failure, as happened bootstrapping this environment) trades
+  # a real safety win in production for pure friction in staging.
+  deletion_protection = var.deployment_target == "production"
 
   lifecycle {
     # The running image is owned by the deploy pipeline — `gcloud run services

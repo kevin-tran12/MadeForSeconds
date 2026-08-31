@@ -21,20 +21,26 @@ backend/.venv/
 htmlcov/
 
 # Terraform
-terraform/.terraform/
-terraform/*.tfstate
-terraform/*.tfstate.*
-terraform/*.tfstate.backup
+# Anchored with ** on every one of these so they also cover
+# terraform/environments/<env>/ (each is its own root module with its own
+# .terraform/ cache, state-adjacent files, and tfvars) — a plain
+# terraform/.terraform/-style pattern only matches that exact path and would
+# let the same class of file get committed once from a nested root, the same
+# mistake the .tmp/ pattern below was already written to avoid.
+terraform/**/.terraform/
+terraform/**/*.tfstate
+terraform/**/*.tfstate.*
+terraform/**/*.tfstate.backup
 # .terraform.lock.hcl is deliberately TRACKED — it pins provider versions so
 # every machine and CI resolve identically. HashiCorp's own guidance is to commit it.
-terraform/terraform.tfvars
+terraform/**/terraform.tfvars
 # Anchored with ** so it also catches .tmp/ inside module subdirectories
 # (e.g. terraform/modules/cost-controls/.tmp/) — a plain terraform/.tmp/ only
 # matches that exact path and let a generated archive get committed once.
 terraform/**/.tmp/
 # Plan files embed the fully resolved config, secrets included. Never commit one.
-terraform/tfplan
-terraform/*.tfplan
+terraform/**/tfplan
+terraform/**/*.tfplan
 # The gcloud SDK was once unpacked here and committed; never again.
 terraform/ls/
 
