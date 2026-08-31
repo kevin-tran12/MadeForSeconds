@@ -259,8 +259,8 @@ class FakeCollection:
     def where(self, *a, **kw):
         return FakeQuery(self._docs)
 
-    def document(self):
-        return FakeDocRef("new-doc")
+    def document(self, doc_id=None):
+        return FakeDocRef(doc_id or "new-doc")
 
 
 class FakeDb:
@@ -307,6 +307,21 @@ def _subscription_checkout_event(event_id="evt_1", email="test@example.com", amo
                 "subscription": "sub_123",
                 "customer_details": {"email": email} if email else {},
                 "amount_total": amount_total,
+            }
+        },
+    }
+
+
+def _donation_checkout_event(event_id="evt_don_1", email="donor@example.com", amount_total=1000, payment_intent="pi_123"):
+    return {
+        "id": event_id,
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "mode": "payment",
+                "customer_details": {"email": email} if email else {},
+                "amount_total": amount_total,
+                "payment_intent": payment_intent,
             }
         },
     }
@@ -462,6 +477,12 @@ def test_apply_donation_checkout_repeat_donor_uses_increment():
     outcome = _apply_donation_checkout(txn, FakeDb(), data, existing, _NOW)
     assert outcome == "processed"
     assert isinstance(txn.update_calls[0][1]["total_donated_cents"], Increment)
+    # A repeat donation still gets its own immutable ledger row — the
+    # aggregate increment above is not a substitute for it.
+    assert len(txn.set_calls) == 1
+    ledger_ref, ledger_payload = txn.set_calls[0]
+    assert ledger_ref.id == "sess_1"
+    assert ledger_payload["gross_cents"] == 300
 
 
 def test_apply_donation_checkout_anonymous_creates_new_doc():
@@ -471,7 +492,85 @@ def test_apply_donation_checkout_anonymous_creates_new_doc():
     data = {"customer_details": {}, "amount_total": 200, "id": "sess_2"}
     outcome = _apply_donation_checkout(txn, db, data, None, _NOW)
     assert outcome == "processed"
-    assert txn.set_calls[0][1]["email"] == "anonymous"
+    # set_calls[0] is the ledger row, set_calls[1] is the donations aggregate doc.
+    assert len(txn.set_calls) == 2
+    assert txn.set_calls[1][1]["email"] == "anonymous"
+
+
+# ── donation_transactions ledger ─────────────────────────────────────────────
+
+def test_apply_donation_checkout_writes_ledger_record_keyed_by_session_id():
+    from app.routes.subscriptions import _apply_donation_checkout
+    from app.services import donation_ledger
+    txn = FakeTransaction()
+    db = FakeDb(donations=FakeCollection())
+    data = {
+        "customer_details": {"email": "Donor@Example.com"},
+        "amount_total": 500,
+        "currency": "usd",
+        "id": "sess_ledger_1",
+        "payment_intent": "pi_123",
+        "created": 1_700_000_000,
+    }
+    _apply_donation_checkout(txn, db, data, None, _NOW, fee_cents=15, net_cents=485)
+
+    ledger_ref, ledger_payload = txn.set_calls[0]
+    assert ledger_ref.id == "sess_ledger_1"
+    assert ledger_payload["stripe_session_id"] == "sess_ledger_1"
+    assert ledger_payload["stripe_payment_intent_id"] == "pi_123"
+    assert ledger_payload["email_hash"] == donation_ledger.keyed_email_hash("Donor@Example.com")
+    assert ledger_payload["gross_cents"] == 500
+    assert ledger_payload["currency"] == "usd"
+    assert ledger_payload["fee_cents"] == 15
+    assert ledger_payload["net_cents"] == 485
+    assert ledger_payload["status"] == "succeeded"
+    assert ledger_payload["mode"] == "payment"
+    assert ledger_payload["created_at"] == _NOW
+
+
+def test_apply_donation_checkout_ledger_record_survives_missing_fee_data():
+    """fee_cents/net_cents default to None (not 0) when the caller couldn't
+    fetch them — the webhook must never fail or fabricate a fee just
+    because the best-effort Stripe lookup came back empty."""
+    from app.routes.subscriptions import _apply_donation_checkout
+    txn = FakeTransaction()
+    db = FakeDb(donations=FakeCollection())
+    data = {"customer_details": {}, "amount_total": 100, "id": "sess_ledger_2"}
+    _apply_donation_checkout(txn, db, data, None, _NOW)
+
+    _, ledger_payload = txn.set_calls[0]
+    assert ledger_payload["fee_cents"] is None
+    assert ledger_payload["net_cents"] is None
+
+
+def test_fetch_donation_fee_net_no_payment_intent_returns_none():
+    from app.routes.subscriptions import _fetch_donation_fee_net
+    assert _fetch_donation_fee_net(None) == (None, None)
+
+
+def test_fetch_donation_fee_net_success():
+    from app.routes.subscriptions import _fetch_donation_fee_net
+    fake_intent = {"latest_charge": {"balance_transaction": {"fee": 32, "net": 468}}}
+    with patch("app.routes.subscriptions.stripe.PaymentIntent.retrieve", return_value=fake_intent) as mock_retrieve:
+        result = _fetch_donation_fee_net("pi_abc")
+    assert result == (32, 468)
+    mock_retrieve.assert_called_once_with("pi_abc", expand=["latest_charge.balance_transaction"])
+
+
+def test_fetch_donation_fee_net_stripe_error_returns_none_without_raising():
+    from app.routes.subscriptions import _fetch_donation_fee_net
+    with patch(
+        "app.routes.subscriptions.stripe.PaymentIntent.retrieve",
+        side_effect=stripe.APIConnectionError("network down"),
+    ):
+        assert _fetch_donation_fee_net("pi_abc") == (None, None)
+
+
+def test_fetch_donation_fee_net_missing_balance_transaction_returns_none():
+    from app.routes.subscriptions import _fetch_donation_fee_net
+    fake_intent = {"latest_charge": None}
+    with patch("app.routes.subscriptions.stripe.PaymentIntent.retrieve", return_value=fake_intent):
+        assert _fetch_donation_fee_net("pi_abc") == (None, None)
 
 
 # ── _process_event_logic (full read+write phase, exactly-once processing) ───
@@ -647,6 +746,46 @@ def test_webhook_handles_real_stripe_event_object_not_just_a_dict(client, mock_d
         response = client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
         assert response.status_code == 200
         mock_alert.assert_not_called()
+
+
+def test_webhook_donation_checkout_fetches_fee_and_threads_to_process_event(client, mock_db, mock_process_event):
+    """The webhook route's donation-fee lookup runs before _process_event and
+    its result is passed through — verified at the route layer since that's
+    where the two are wired together (both are separately unit-tested on
+    their own: _fetch_donation_fee_net above, the ledger write in
+    _apply_donation_checkout's tests)."""
+    mock_process_event.return_value = "processed"
+    with (
+        patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct,
+        patch("app.routes.subscriptions._alert"),
+        patch(
+            "app.routes.subscriptions._fetch_donation_fee_net", return_value=(25, 975)
+        ) as mock_fetch_fee,
+    ):
+        mock_construct.return_value = _donation_checkout_event(payment_intent="pi_xyz")
+        response = client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
+
+    assert response.status_code == 200
+    mock_fetch_fee.assert_called_once_with("pi_xyz")
+    call_args = mock_process_event.call_args[0]
+    # (transaction, ref, db, event_type, data, now, fee_cents, net_cents)
+    assert call_args[-2:] == (25, 975)
+
+
+def test_webhook_subscription_checkout_skips_fee_lookup(client, mock_db, mock_process_event):
+    """The fee lookup is scoped to donation (mode=payment) checkouts only —
+    a subscription checkout must not trigger a pointless Stripe API call."""
+    mock_process_event.return_value = "processed"
+    with (
+        patch("app.routes.subscriptions.stripe.Webhook.construct_event") as mock_construct,
+        patch("app.routes.subscriptions._alert"),
+        patch("app.routes.subscriptions._fetch_donation_fee_net") as mock_fetch_fee,
+    ):
+        mock_construct.return_value = _subscription_checkout_event()
+        response = client.post("/api/subscribe/webhook", content=b"payload", headers={"stripe-signature": "sig"})
+
+    assert response.status_code == 200
+    mock_fetch_fee.assert_not_called()
 
 
 # ── Rate limiting on subscribe endpoints ─────────────────────────────────────

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from ..config import settings
 from ..firestore import get_db
 from ..rate_limit import rate_limit
+from ..services import donation_ledger
 from ..services.email import send_email
 from ..subscriber_auth import create_cancel_token, verify_cancel_token
 
@@ -174,14 +175,36 @@ def _apply_payment_succeeded(transaction, data: dict, existing_doc, now) -> str:
     return "processed"
 
 
-def _apply_donation_checkout(transaction, db, data: dict, existing_doc, now) -> str:
+def _apply_donation_checkout(
+    transaction, db, data: dict, existing_doc, now, fee_cents=None, net_cents=None
+) -> str:
     """Handle checkout.session.completed for one-time donation payments.
 
-    Consolidates by email — repeat donors get their total accumulated on one doc.
+    Consolidates by email on the `donations` aggregate — repeat donors get
+    their total accumulated on one doc — but every payment, repeat or not,
+    also gets its own immutable row in `donation_transactions` (the ledger
+    the aggregate alone can't reconstruct: currency, fee, net, status, a
+    durable Stripe reference). Both writes land in this same transaction, so
+    they commit together or not at all.
     """
     email = (data.get("customer_details") or {}).get("email", "").lower()
     amount_total = data.get("amount_total", 0)
     session_id = data.get("id")
+    created = data.get("created")
+
+    donation_ledger.write_donation_record(
+        transaction,
+        db,
+        session_id=session_id,
+        email=email or "anonymous",
+        gross_cents=amount_total,
+        currency=data.get("currency") or "usd",
+        fee_cents=fee_cents,
+        net_cents=net_cents,
+        payment_intent_id=data.get("payment_intent"),
+        stripe_created_at=datetime.fromtimestamp(created, tz=timezone.utc) if created else None,
+        now=now,
+    )
 
     if email and existing_doc:
         transaction.update(existing_doc.reference, {
@@ -205,7 +228,9 @@ def _apply_donation_checkout(transaction, db, data: dict, existing_doc, now) -> 
     return "processed"
 
 
-def _apply_mutation(transaction, db, event_type: str, data: dict, existing_doc, now) -> str:
+def _apply_mutation(
+    transaction, db, event_type: str, data: dict, existing_doc, now, fee_cents=None, net_cents=None
+) -> str:
     """Write phase: the actual business mutation for a given event type,
     dispatched the same way the old per-event _handle_* functions were,
     but writing through the shared transaction instead of directly."""
@@ -214,7 +239,7 @@ def _apply_mutation(transaction, db, event_type: str, data: dict, existing_doc, 
         if mode == "subscription":
             return _apply_subscription_checkout(transaction, db, data, existing_doc, now)
         if mode == "payment":
-            return _apply_donation_checkout(transaction, db, data, existing_doc, now)
+            return _apply_donation_checkout(transaction, db, data, existing_doc, now, fee_cents, net_cents)
         return "ignored"
 
     if event_type == "customer.subscription.updated":
@@ -232,7 +257,9 @@ def _apply_mutation(transaction, db, event_type: str, data: dict, existing_doc, 
     return "ignored"
 
 
-def _process_event_logic(transaction, ref, db, event_type: str, data: dict, now) -> str:
+def _process_event_logic(
+    transaction, ref, db, event_type: str, data: dict, now, fee_cents=None, net_cents=None
+) -> str:
     """One transaction covers both the event reservation AND the business
     mutation, so a crash between "apply the change" and "mark the event
     completed" can no longer let a reclaim double-apply it — either both
@@ -241,6 +268,11 @@ def _process_event_logic(transaction, ref, db, event_type: str, data: dict, now)
     Raising (e.g. WebhookProcessingError) aborts the WHOLE transaction:
     nothing is committed, not even the reservation, so a Stripe retry starts
     completely fresh with no cleanup needed.
+
+    fee_cents/net_cents are an already-fetched, best-effort donation-fee
+    lookup (see _fetch_donation_fee_net) — computed before this transaction
+    starts, never inside it, since it's a Stripe API call and this function
+    can be retried on contention.
 
     Returns an outcome string ("skip", "missing_email", "processed",
     "ignored") the caller uses to decide whether to alert.
@@ -268,7 +300,7 @@ def _process_event_logic(transaction, ref, db, event_type: str, data: dict, now)
         "created_at": now,
         "ttl": now + timedelta(days=_PROCESSED_EVENTS_TTL_DAYS),
     })
-    outcome = _apply_mutation(transaction, db, event_type, data, existing_doc, now)
+    outcome = _apply_mutation(transaction, db, event_type, data, existing_doc, now, fee_cents, net_cents)
     transaction.update(ref, {"status": "completed", "processed_at": now, "outcome": outcome})
     return outcome
 
@@ -278,6 +310,35 @@ def _process_event_logic(transaction, ref, db, event_type: str, data: dict, now)
 # automatically retried by the client library and will see the winner's
 # fresh state (completed, or a fresh "processing" reservation) on its retry.
 _process_event = transactional(_process_event_logic)
+
+
+def _fetch_donation_fee_net(payment_intent_id: str | None) -> tuple[int | None, int | None]:
+    """Best-effort fee/net lookup for a completed one-time donation, via the
+    PaymentIntent's balance transaction.
+
+    checkout.session.completed itself carries no fee data, and this is a
+    Stripe API call — it must run before _process_event's transaction
+    starts (a retried transaction body must never re-trigger it), and it
+    must never raise: a Stripe hiccup here must not fail the webhook or
+    block the ledger record's gross/currency/status, which are the part
+    that matters. (None, None) means "not available", not "zero fee".
+    """
+    if not payment_intent_id:
+        return None, None
+    try:
+        intent = stripe.PaymentIntent.retrieve(
+            payment_intent_id, expand=["latest_charge.balance_transaction"]
+        )
+        charge = intent.get("latest_charge")
+        balance_transaction = charge.get("balance_transaction") if charge else None
+        if not balance_transaction:
+            return None, None
+        return balance_transaction.get("fee"), balance_transaction.get("net")
+    except Exception:
+        logger.warning(
+            "Could not fetch fee/net for payment_intent %s", payment_intent_id, exc_info=True
+        )
+        return None, None
 
 
 async def _alert(subject: str, detail: str) -> None:
@@ -475,13 +536,21 @@ async def stripe_webhook(request: Request):
     ref = db.collection("processed_events").document(event_id)
     now = datetime.now(timezone.utc)
 
+    # Best-effort donation fee/net lookup — an extra Stripe API call, so it
+    # happens once here, before the transaction, never inside it (see
+    # _fetch_donation_fee_net's own docstring). Scoped to exactly the event
+    # shape _apply_donation_checkout will actually use it for.
+    fee_cents = net_cents = None
+    if event_type == "checkout.session.completed" and data.get("mode") == "payment":
+        fee_cents, net_cents = _fetch_donation_fee_net(data.get("payment_intent"))
+
     # The reservation and the business mutation both happen inside one
     # Firestore transaction (_process_event) — see its docstring for why
     # that's needed for exactly-once processing, not just a race-free
     # reservation. Raising aborts the whole transaction; nothing commits,
     # so a Stripe retry starts completely fresh with no cleanup needed here.
     try:
-        outcome = _process_event(db.transaction(), ref, db, event_type, data, now)
+        outcome = _process_event(db.transaction(), ref, db, event_type, data, now, fee_cents, net_cents)
     except Exception as exc:
         logger.exception(f"Webhook processing failed for event {event_id} ({event_type})")
         await _alert(
