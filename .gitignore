@@ -51,6 +51,7 @@ CLAUDE.md
 # Personal job-search notes — must never reach the public repo
 docs/RESUME_BULLETS.md
 docs/OPS_BACKLOG.md
+docs/HARDENING_PROGRESS.md
 
 # Ad-hoc scratch output (rendered PDFs, screenshots). Nothing in the build reads this.
 tmp/
