@@ -77,10 +77,14 @@ resource "google_secret_manager_secret_iam_member" "backend_instagram_token_adde
   member    = "serviceAccount:${google_service_account.backend.email}"
 }
 
-# ─── Service Account for Cloud Build ───────────────────────────────────────────
+# ─── Service Account for the build/deploy pipeline ─────────────────────────────
 #
-# The Cloud Build trigger (modules/backend-service/cloudbuild.tf) now runs as
-# this identity instead of mfs-backend. mfs-backend carried build permissions
+# .github/workflows/deploy.yml (PR 10) authenticates as this identity via WIF
+# to build, push, and promote the backend image — Cloud Build's own
+# push-triggered trigger (formerly modules/backend-service/cloudbuild.tf, also
+# run as this SA) is retired as of that PR, since a second independent
+# push-triggered deploy path racing the GitHub Actions pipeline would be a bug
+# waiting to happen, not a feature. mfs-backend carried build permissions
 # it had no business holding outside a build: a compromised dependency or a
 # merged build-script change inherited Firestore read/write, a role on the
 # receipts bucket, every secretAccessor grant above, and signBlob — none of

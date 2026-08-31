@@ -1,0 +1,420 @@
+name: Deploy
+
+# Merge-to-main promotion pipeline (hardening plan PR 10). Builds the backend
+# image once, proves it against staging with a real apply + deploy + seed +
+# full E2E run, and only then repeats apply + deploy against production with
+# the exact same image. Any failure stops before production is touched.
+#
+# PR-time validation (fmt/validate/test/plan) stays in ci.yml — this workflow
+# is the merge-time half of terraform/README.md's "Terraform lifecycle
+# coverage" table, and only runs for real pushes to main, never for PRs
+# (forks included — a forked PR can't reach this file at all, since it only
+# triggers on push).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Two merges in flight queue rather than race — the GCS state backend locks
+# regardless, but a queued run beats a failed one colliding mid-apply.
+concurrency:
+  group: promotion-pipeline
+  cancel-in-progress: false
+
+env:
+  REGION: us-central1
+
+jobs:
+  build:
+    name: Build & push backend image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      digest: ${{ steps.push-staging.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # mfs-deploy, not mfs-terraform — this identity only ever pushes an
+      # image and deploys it (modules/backend-service/deploy_iam.tf), the
+      # narrowest grant for what this job and the two deploy jobs below do.
+      # Authenticated per-project below since mfs-deploy is a separate
+      # identity in each project, not the one shared mfs-terraform is.
+      - name: Authenticate as mfs-deploy (staging)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: mfs-deploy@${{ vars.GCP_PROJECT_ID_STAGING }}.iam.gserviceaccount.com
+
+      - name: Configure Docker for staging Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Built once. Pushed to both projects' own `mfs` repos below rather
+      # than one shared repo with a cross-project pull grant — see
+      # docs/DEPLOYMENT.md's "Build once, promote by digest without a
+      # cross-project registry pull" for why. Same local image both times,
+      # so the digest each push reports must match — verified explicitly
+      # below rather than assumed.
+      - name: Build image
+        run: docker build --platform linux/amd64 -t backend:${{ github.sha }} ./backend
+
+      - name: Tag for staging registry
+        run: docker tag backend:${{ github.sha }} ${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_STAGING }}/mfs/backend:${{ github.sha }}
+
+      - name: Push to staging registry
+        id: push-staging
+        run: |
+          set -euo pipefail
+          ref="${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_STAGING }}/mfs/backend:${{ github.sha }}"
+          digest=$(docker push "$ref" | grep -oP 'digest: \Ksha256:[a-f0-9]+')
+          echo "Staging digest: $digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate as mfs-deploy (production)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: mfs-deploy@${{ vars.GCP_PROJECT_ID_PROD }}.iam.gserviceaccount.com
+
+      - name: Configure Docker for production Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Tag for production registry
+        run: docker tag backend:${{ github.sha }} ${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_PROD }}/mfs/backend:${{ github.sha }}
+
+      - name: Push to production registry and verify the digest matches staging's
+        run: |
+          set -euo pipefail
+          ref="${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_PROD }}/mfs/backend:${{ github.sha }}"
+          digest=$(docker push "$ref" | grep -oP 'digest: \Ksha256:[a-f0-9]+')
+          echo "Production digest: $digest"
+          if [ "$digest" != "${{ steps.push-staging.outputs.digest }}" ]; then
+            echo "::error::Production push digest ($digest) does not match staging's (${{ steps.push-staging.outputs.digest }}) — refusing to deploy an unverified image."
+            exit 1
+          fi
+
+  staging-apply:
+    name: Apply Terraform (staging)
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.9
+
+      - name: Authenticate as mfs-terraform
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      # stripe_secret_key / stripe_webhook_secret / subscriber_jwt_secret
+      # default to "" in terraform/variables.tf, and each secret's
+      # google_secret_manager_secret is gated `count = var.x != "" ? 1 : 0`.
+      # ci.yml's plan-only job can get away with fake placeholders for these
+      # (a plan is read-only, so a wrong plan is just misleading output) —
+      # this job actually applies, so a blank value here would DESTROY the
+      # real staging secret on a real apply, not just show a wrong diff.
+      # Fail loudly before terraform ever runs rather than let that happen.
+      - name: Verify required secrets are present before applying
+        run: |
+          missing=""
+          [ -z "${{ secrets.STRIPE_TEST_SECRET_KEY }}" ] && missing="$missing STRIPE_TEST_SECRET_KEY"
+          [ -z "${{ secrets.STRIPE_TEST_WEBHOOK_SECRET }}" ] && missing="$missing STRIPE_TEST_WEBHOOK_SECRET"
+          [ -z "${{ secrets.STAGING_SUBSCRIBER_JWT_SECRET }}" ] && missing="$missing STAGING_SUBSCRIBER_JWT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required GitHub secret(s):$missing — refusing to apply, this would destroy the real staging Secret Manager resource(s) rather than just fail to update them."
+            exit 1
+          fi
+
+      - name: Terraform init/plan/apply — staging
+        working-directory: terraform/environments/staging
+        env:
+          TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID_STAGING }}
+          TF_VAR_admin_emails: ${{ vars.ADMIN_EMAILS }}
+          TF_VAR_allowed_origins: ${{ vars.STAGING_ALLOWED_ORIGINS }}
+          TF_VAR_backend_image: ${{ vars.STAGING_BACKEND_IMAGE }}
+          TF_VAR_github_owner: ${{ github.repository_owner }}
+          TF_VAR_github_repo: ${{ github.event.repository.name }}
+          TF_VAR_state_admin_email: ${{ vars.STATE_ADMIN_EMAIL }}
+          TF_VAR_billing_account: ${{ vars.BILLING_ACCOUNT }}
+          TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+          TF_VAR_stripe_secret_key: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
+          TF_VAR_stripe_webhook_secret: ${{ secrets.STRIPE_TEST_WEBHOOK_SECRET }}
+          TF_VAR_subscriber_jwt_secret: ${{ secrets.STAGING_SUBSCRIBER_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ "${{ vars.STAGING_REDIS_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_redis_url="${{ secrets.STAGING_REDIS_URL }}"
+          fi
+          if [ "${{ vars.STAGING_RESEND_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_resend_api_key="${{ secrets.STAGING_RESEND_API_KEY }}"
+          fi
+          terraform init -input=false
+          terraform plan -lock-timeout=5m -input=false -no-color -out=tfplan
+          terraform apply -lock-timeout=5m -input=false -no-color -auto-approve tfplan
+
+  staging-deploy:
+    name: Deploy candidate to staging
+    needs: [build, staging-apply]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      url: ${{ steps.describe.outputs.url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Authenticate as mfs-deploy (staging)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: mfs-deploy@${{ vars.GCP_PROJECT_ID_STAGING }}.iam.gserviceaccount.com
+
+      - name: Deploy candidate revision (no traffic yet)
+        run: |
+          gcloud run deploy mfs-backend \
+            --project=${{ vars.GCP_PROJECT_ID_STAGING }} \
+            --region=${{ env.REGION }} \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_STAGING }}/mfs/backend@${{ needs.build.outputs.digest }} \
+            --no-traffic \
+            --tag=candidate-${{ github.sha }} \
+            --quiet
+
+      - name: Smoke test the candidate revision
+        run: |
+          set -euo pipefail
+          candidate_url=$(gcloud run services describe mfs-backend \
+            --project=${{ vars.GCP_PROJECT_ID_STAGING }} \
+            --region=${{ env.REGION }} \
+            --format=json \
+            | python3 -c "import json,sys; svc=json.load(sys.stdin); print(next(t['url'] for t in svc['status']['traffic'] if t.get('tag') == 'candidate-${{ github.sha }}'))")
+          echo "Candidate URL: $candidate_url"
+          python3 backend/scripts/smoke_test_deploy.py --url "$candidate_url"
+
+      - name: Promote candidate to serve all staging traffic
+        run: |
+          gcloud run services update-traffic mfs-backend \
+            --project=${{ vars.GCP_PROJECT_ID_STAGING }} \
+            --region=${{ env.REGION }} \
+            --to-tags=candidate-${{ github.sha }}=100 \
+            --quiet
+
+      - name: Read the service URL
+        id: describe
+        run: |
+          url=$(gcloud run services describe mfs-backend \
+            --project=${{ vars.GCP_PROJECT_ID_STAGING }} \
+            --region=${{ env.REGION }} \
+            --format='value(status.url)')
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+  staging-seed:
+    name: Seed staging sample data
+    needs: staging-deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.lock
+
+      # mfs-terraform, not mfs-deploy — seeding is a Firestore write, which
+      # mfs-deploy deliberately has no access to (it only ever pushes images
+      # and updates Cloud Run traffic). mfs-terraform's roles/editor already
+      # covers Firestore, so this reuses an existing grant rather than
+      # adding a third identity or widening mfs-deploy's narrow scope.
+      - name: Authenticate as mfs-terraform
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      # No --force: a no-op once staging already has sample data, so repeated
+      # merges never re-wipe it. See seed.py's own docstring.
+      - name: Seed staging Firestore
+        working-directory: backend
+        run: python seed.py --project=${{ vars.GCP_PROJECT_ID_STAGING }}
+
+  staging-e2e:
+    name: E2E against staging
+    needs: [staging-deploy, staging-seed]
+    runs-on: ubuntu-latest
+    # write, not read: this job fast-forwards the `staging` branch below so
+    # Cloudflare Pages' branch-tracked alias rebuilds against this commit.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright chromium
+        run: npx playwright install --with-deps chromium
+
+      # Cloudflare Pages' "staging" branch alias (staging.madeforseconds.pages.dev,
+      # docs/DEPLOYMENT.md § Cloudflare Pages) tracks a `staging` git branch,
+      # not `main` — fast-forwarding it here is what makes the frontend this
+      # step tests against reflect the commit actually being promoted.
+      - name: Fast-forward the staging branch to this commit
+        run: |
+          git push origin ${{ github.sha }}:refs/heads/staging --force
+
+      # Cloudflare's own build+deploy for the branch push above is not
+      # something this workflow has a token to poll (no Cloudflare API call
+      # here yet — CLOUDFLARE_API_TOKEN exists for the Pages *project*
+      # itself, set up in PR 9, but polling its Deployments API for build
+      # completion is a follow-up, not this PR's job). A fixed wait is a
+      # known rough edge, not a design intended to stay this way — Vite's
+      # build is small and Cloudflare Pages builds typically finish well
+      # under this, but a real run is what will actually prove the margin.
+      - name: Wait for Cloudflare Pages to rebuild the staging alias
+        run: sleep 90
+
+      - name: Run full Playwright E2E suite against staging
+        run: npx playwright test
+        env:
+          PLAYWRIGHT_TEST_BASE_URL: https://staging.madeforseconds.pages.dev
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-staging
+          path: playwright-report/
+          retention-days: 7
+
+  production-apply:
+    name: Apply Terraform (production)
+    needs: staging-e2e
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.9
+
+      - name: Authenticate as mfs-terraform
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      # See the identical guard on staging-apply for why this exists: these
+      # three vars default to "" and gate their Secret Manager resource's
+      # very existence — a blank value here would DESTROY production's real
+      # Stripe/JWT secrets on a real apply, not just fail to update them.
+      - name: Verify required secrets are present before applying
+        run: |
+          missing=""
+          [ -z "${{ secrets.PROD_STRIPE_SECRET_KEY }}" ] && missing="$missing PROD_STRIPE_SECRET_KEY"
+          [ -z "${{ secrets.PROD_STRIPE_WEBHOOK_SECRET }}" ] && missing="$missing PROD_STRIPE_WEBHOOK_SECRET"
+          [ -z "${{ secrets.PROD_SUBSCRIBER_JWT_SECRET }}" ] && missing="$missing PROD_SUBSCRIBER_JWT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required GitHub secret(s):$missing — refusing to apply, this would destroy the real production Secret Manager resource(s) rather than just fail to update them."
+            exit 1
+          fi
+
+      - name: Terraform init/plan/apply — production
+        working-directory: terraform
+        env:
+          TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID_PROD }}
+          TF_VAR_admin_emails: ${{ vars.ADMIN_EMAILS }}
+          TF_VAR_allowed_origins: ${{ vars.PROD_ALLOWED_ORIGINS }}
+          TF_VAR_backend_image: ${{ vars.PROD_BACKEND_IMAGE }}
+          TF_VAR_github_owner: ${{ github.repository_owner }}
+          TF_VAR_github_repo: ${{ github.event.repository.name }}
+          TF_VAR_state_admin_email: ${{ vars.STATE_ADMIN_EMAIL }}
+          TF_VAR_billing_account: ${{ vars.BILLING_ACCOUNT }}
+          TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+          TF_VAR_deployment_target: production
+          TF_VAR_staging_gcp_project_id: ${{ vars.GCP_PROJECT_ID_STAGING }}
+          TF_VAR_stripe_secret_key: ${{ secrets.PROD_STRIPE_SECRET_KEY }}
+          TF_VAR_stripe_webhook_secret: ${{ secrets.PROD_STRIPE_WEBHOOK_SECRET }}
+          TF_VAR_subscriber_jwt_secret: ${{ secrets.PROD_SUBSCRIBER_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ "${{ vars.PROD_REDIS_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_redis_url="${{ secrets.PROD_REDIS_URL }}"
+          fi
+          if [ "${{ vars.PROD_RESEND_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_resend_api_key="${{ secrets.PROD_RESEND_API_KEY }}"
+          fi
+          terraform init -input=false
+          terraform plan -lock-timeout=5m -input=false -no-color -out=tfplan
+          terraform apply -lock-timeout=5m -input=false -no-color -auto-approve tfplan
+
+  production-deploy:
+    name: Promote candidate to production
+    needs: [build, production-apply]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Authenticate as mfs-deploy (production)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: mfs-deploy@${{ vars.GCP_PROJECT_ID_PROD }}.iam.gserviceaccount.com
+
+      - name: Deploy candidate revision (no traffic yet)
+        run: |
+          gcloud run deploy mfs-backend \
+            --project=${{ vars.GCP_PROJECT_ID_PROD }} \
+            --region=${{ env.REGION }} \
+            --image=${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_PROD }}/mfs/backend@${{ needs.build.outputs.digest }} \
+            --no-traffic \
+            --tag=candidate-${{ github.sha }} \
+            --quiet
+
+      - name: Smoke test the candidate revision
+        run: |
+          set -euo pipefail
+          candidate_url=$(gcloud run services describe mfs-backend \
+            --project=${{ vars.GCP_PROJECT_ID_PROD }} \
+            --region=${{ env.REGION }} \
+            --format=json \
+            | python3 -c "import json,sys; svc=json.load(sys.stdin); print(next(t['url'] for t in svc['status']['traffic'] if t.get('tag') == 'candidate-${{ github.sha }}'))")
+          echo "Candidate URL: $candidate_url"
+          python3 backend/scripts/smoke_test_deploy.py --url "$candidate_url"
+
+      - name: Promote candidate to serve all production traffic
+        run: |
+          gcloud run services update-traffic mfs-backend \
+            --project=${{ vars.GCP_PROJECT_ID_PROD }} \
+            --region=${{ env.REGION }} \
+            --to-tags=candidate-${{ github.sha }}=100 \
+            --quiet

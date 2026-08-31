@@ -445,6 +445,8 @@ entirely (it would only ever bind to localhost, never the remote target).
 
 Python dependencies carry upper version bounds on purpose. Because CI gates merges, an upstream major release must never be able to turn the build red on its own.
 
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs after a merge lands on `main` — the actual promotion pipeline: build the backend image once, apply + deploy + seed + full-E2E it against staging, and only then apply + deploy the same image to production. See `docs/DEPLOYMENT.md` § Merge-to-main promotion pipeline for the required secrets and the full stage breakdown.
+
 ### Toolchain versions
 
 Kept in sync with the actual manifests by `scripts/check_inventory.py`, run in CI on every push —

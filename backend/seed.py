@@ -1,6 +1,13 @@
-"""Seed the Firestore emulator with sample recipes."""
+"""Seed sample recipes/supporters/expenses/pages into Firestore.
 
-import sys
+Defaults to the local emulator project (docker-compose's normal use — see
+docker-compose.yml / ci.yml's E2E job). Pass --project to target a real
+project instead — e.g. staging, seeded once by .github/workflows/deploy.yml
+so its Playwright run has real content to assert against. Safe to call on
+every merge: without --force this is a no-op once recipes already exist, so
+repeated pipeline runs never re-wipe staging's data."""
+
+import argparse
 from datetime import datetime, timezone
 
 from google.cloud.firestore import Client
@@ -449,8 +456,13 @@ ABOUT_PAGE = {
 
 
 def main():
-    force = "--force" in sys.argv
-    db = Client(project="madefor-seconds-local")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--project", default="madefor-seconds-local", help="GCP project id (default: the local emulator project)")
+    parser.add_argument("--force", action="store_true", help="Clear existing recipes/subscribers/expenses and reseed")
+    args = parser.parse_args()
+
+    force = args.force
+    db = Client(project=args.project)
     collection = db.collection("recipes")
 
     existing = list(collection.limit(1).stream())

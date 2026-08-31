@@ -1,12 +1,15 @@
 # ─── mfs-deploy: resource-scoped deploy access ─────────────────────────────────
 # Epic 2, story 2.2. roles/run.developer (the predefined role mfs-deploy held
 # until now) grants ~90 permissions — Jobs, WorkerPools, Executions, instance
-# SSH, IAM-policy read, Recommender insights — none of which cloudbuild.yaml's
-# three gcloud calls (`run deploy --no-traffic --tag=candidate`, `run services
-# describe`, `run services update-traffic`) touch. It was also bound at the
-# project level, so mfs-deploy could reach every Cloud Run service in the
-# project, including the budget-killer/resetter functions (Gen2 functions run
-# on Cloud Run infrastructure) — no legitimate reason to touch those.
+# SSH, IAM-policy read, Recommender insights — none of which the deploy
+# pipeline's three gcloud calls (`run deploy --no-traffic --tag=candidate`,
+# `run services describe`, `run services update-traffic` — originally
+# cloudbuild.yaml's, now .github/workflows/deploy.yml's as of PR 10, running
+# under this same mfs-deploy identity via WIF instead of Cloud Build's
+# built-in trigger identity) touch. It was also bound at the project level,
+# so mfs-deploy could reach every Cloud Run service in the project,
+# including the budget-killer/resetter functions (Gen2 functions run on
+# Cloud Run infrastructure) — no legitimate reason to touch those.
 #
 # Both bindings below are scoped to the one resource mfs-deploy actually
 # deploys, and the custom role starts from the documented minimum for
