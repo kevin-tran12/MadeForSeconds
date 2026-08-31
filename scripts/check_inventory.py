@@ -210,11 +210,17 @@ def _detect_toolchain_versions() -> dict:
         if m:
             result["docker_base"] = m.group(1)
 
-    ci_yml = ROOT / ".github" / "workflows" / "ci.yml"
-    if ci_yml.exists():
-        actions = sorted(set(re.findall(r"uses:\s*(\S+)", ci_yml.read_text(encoding="utf-8"))))
+    # Every workflow file, not just ci.yml -- terraform-drift.yml (Epic 8,
+    # PR 8) was the first to need this; more will follow (PR 9's staging
+    # target, PR 10's promotion pipeline), and a check scoped to one
+    # filename would silently stop covering the rest.
+    workflows_dir = ROOT / ".github" / "workflows"
+    if workflows_dir.exists():
+        actions: set[str] = set()
+        for workflow_file in sorted(workflows_dir.glob("*.yml")):
+            actions.update(re.findall(r"uses:\s*(\S+)", workflow_file.read_text(encoding="utf-8")))
         if actions:
-            result["actions"] = ", ".join("`" + a + "`" for a in actions)
+            result["actions"] = ", ".join("`" + a + "`" for a in sorted(actions))
 
     return result
 
