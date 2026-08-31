@@ -471,6 +471,7 @@ class TestCreateExpenseReceiptUrl:
         assert result["error"] == "invalid_request"
         assert "request_image_upload" in result["message"]
         db.set.assert_not_called()
+        db.transaction.return_value.set.assert_not_called()
 
     def test_missing_blob_rejected(self, db):
         with (
@@ -505,7 +506,15 @@ class TestCreateExpenseReceiptUrl:
             )
 
         assert result["receipt_uploaded"] is True
-        written = db.set.call_args_list[0][0][0]
+        # The expense doc + its first revision now commit inside one
+        # Firestore transaction (transaction.set(doc_ref, data), then the
+        # revision's own transaction.set(...) inside
+        # _write_revision_in_transaction) — db.transaction() is a fresh
+        # mock, distinct from db itself, so the write lands on
+        # db.transaction.return_value.set, not db.set. First call is the
+        # expense doc (transaction.set(doc_ref, data) — data is positional
+        # arg index 1); the revision write is the second call.
+        written = db.transaction.return_value.set.call_args_list[0][0][1]
         assert written["receipt_filename"] == "receipt.pdf"
         assert written["receipt_content_type"] == "application/pdf"
 

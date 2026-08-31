@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from google.cloud.firestore import transactional
 from google.cloud.firestore_v1.base_query import FieldFilter
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
@@ -38,6 +39,7 @@ from .models_expense import (
     ExpenseItem,
     recalculate_project_amounts,
 )
+from .routes.expenses import _write_revision_in_transaction
 from .services import instagram
 from .services import recipes as recipe_service
 from .services import uploads
@@ -666,18 +668,21 @@ def _resolve_receipt_url(receipt_url: str) -> dict:
     }
 
 
-def _write_revision(db, expense_id: str, revision: int, snapshot: dict, summary: str) -> None:
-    """Write an immutable revision snapshot for audit trail."""
-    db.collection("expense_revisions").document().set(
-        {
-            "expense_id": expense_id,
-            "revision": revision,
-            "snapshot": snapshot,
-            "changed_by": "mcp",
-            "changed_at": datetime.now(timezone.utc),
-            "change_summary": summary,
-        }
+def _mcp_create_expense_logic(transaction, db, doc_ref, data: dict) -> None:
+    """Commits the expense document and its first revision atomically —
+    reuses routes/expenses.py's _write_revision_in_transaction rather than a
+    second, divergent implementation, which is how this exact class of bug
+    (expense doc and revision as two independent writes) came back a second
+    time here after being fixed for the HTTP route (see that module's own
+    comment on this: "a second, divergent implementation is how this class
+    of bug comes back," originally said about the receipt-URL validator)."""
+    transaction.set(doc_ref, data)
+    _write_revision_in_transaction(
+        transaction, db, doc_ref.id, 1, {**data, "id": doc_ref.id}, "mcp", "Created via MCP"
     )
+
+
+_mcp_create_expense_transaction = transactional(_mcp_create_expense_logic)
 
 
 @mcp.tool()
@@ -799,11 +804,14 @@ def create_expense(
 
     db = get_db()
     doc_ref = db.collection("expenses").document()
-    doc_ref.set(data)
+
+    # Document + first revision commit atomically — see
+    # _mcp_create_expense_logic's own docstring for why this reuses
+    # routes/expenses.py's transactional helper rather than a second,
+    # independent implementation.
+    _mcp_create_expense_transaction(db.transaction(), db, doc_ref, data)
     data["id"] = doc_ref.id
 
-    # Write first revision
-    _write_revision(db, doc_ref.id, 1, data, "Created via MCP")
     logger.info("MCP create_expense: %s %s (%s)", vendor, date, doc_ref.id)
 
     # Build recipe summary for response

@@ -7,7 +7,7 @@ deletable, and not a financial record.
 
 Receipts reached through the ``expenses`` ledger are fine: an expense is never
 deleted, only voided, and every change writes an immutable snapshot into
-``expense_revisions`` (routes/expenses.py::_write_revision). Receipts attached
+``expense_revisions`` (routes/expenses.py::_write_revision_in_transaction). Receipts attached
 directly to a *recipe* have none of that. The recipe document is the only live
 record of what the object is, so detaching it left a file that survives for
 seven years with nothing saying what it was — an anonymous scan rather than

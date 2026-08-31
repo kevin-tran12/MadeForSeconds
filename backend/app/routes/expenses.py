@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from google.cloud import storage
+from google.cloud.firestore import transactional
 
 from ..auth import require_admin
 from ..config import settings
@@ -46,11 +47,16 @@ def _doc_to_summary(doc) -> ExpenseSummary:
     return ExpenseSummary(**data)
 
 
-def _write_revision(
-    db, expense_id: str, revision: int, snapshot: dict, changed_by: str, summary: str
+def _write_revision_in_transaction(
+    transaction, db, expense_id: str, revision: int, snapshot: dict, changed_by: str, summary: str
 ) -> None:
-    """Write an immutable revision snapshot for audit trail."""
-    db.collection("expense_revisions").document().set(
+    """Write an immutable revision snapshot for audit trail, as part of an
+    active transaction — never called outside one, so the revision and
+    whatever expense-document write accompanies it commit together or not
+    at all."""
+    revision_ref = db.collection("expense_revisions").document()
+    transaction.set(
+        revision_ref,
         {
             "expense_id": expense_id,
             "revision": revision,
@@ -58,16 +64,39 @@ def _write_revision(
             "changed_by": changed_by,
             "changed_at": datetime.now(timezone.utc),
             "change_summary": summary,
-        }
+        },
     )
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
+#
+# Every mutation below commits its expense-document write and its
+# expense_revisions audit write inside one Firestore transaction — a
+# timeout, quota failure, or crash between "write the expense" and "write
+# the revision" (previously two independent operations) can no longer leave
+# one without the other. update/void additionally read the current document
+# *inside* the transaction rather than before it starts, which is what makes
+# the revision-number increment safe under concurrent requests: if two
+# updates race, Firestore's own optimistic-concurrency check invalidates
+# whichever transaction's read set went stale first and retries it
+# automatically, so the retried one recomputes its revision against the
+# other's already-committed state instead of colliding on the same number.
+
+
+def _create_expense_logic(transaction, db, doc_ref, data: dict, admin_email: str) -> None:
+    transaction.set(doc_ref, data)
+    _write_revision_in_transaction(
+        transaction, db, doc_ref.id, 1, {**data, "id": doc_ref.id}, admin_email, "Created"
+    )
+
+
+_create_expense_transaction = transactional(_create_expense_logic)
 
 
 @router.post("", response_model=Expense, status_code=201)
 async def create_expense(body: ExpenseCreate, request: Request):
-    """Create a new expense entry with audit trail."""
+    """Create a new expense entry. The document and its first revision
+    commit atomically."""
     db = get_db()
     now = datetime.now(timezone.utc)
 
@@ -92,14 +121,11 @@ async def create_expense(body: ExpenseCreate, request: Request):
     data["receipt_content_type"] = None
 
     doc_ref = db.collection("expenses").document()
-    doc_ref.set(data)
+    admin_email = request.state.admin_email  # always set by require_admin
+
+    _create_expense_transaction(db.transaction(), db, doc_ref, data, admin_email)
 
     data["id"] = doc_ref.id
-
-    # Write first revision
-    admin_email = request.state.admin_email  # always set by require_admin
-    _write_revision(db, doc_ref.id, 1, data, admin_email, "Created")
-
     return Expense(**data)
 
 
@@ -149,24 +175,26 @@ async def get_expense(expense_id: str):
     return _doc_to_expense(doc)
 
 
-@router.put("/{expense_id}", response_model=Expense)
-async def update_expense(expense_id: str, body: ExpenseUpdate, request: Request):
-    """Update an expense. Writes a revision snapshot before applying changes."""
-    db = get_db()
-    doc_ref = db.collection("expenses").document(expense_id)
-    doc = doc_ref.get()
-
-    if not doc.exists:
+def _update_expense_logic(transaction, db, doc_ref, raw_updates: dict, admin_email: str) -> dict:
+    # Read phase — must happen before any write in this transaction, and
+    # must be the read that decides everything below, not a pre-transaction
+    # read: this is what lets Firestore's own retry-on-conflict machinery
+    # keep two concurrent updates from computing the same revision number.
+    snapshot = doc_ref.get(transaction=transaction)
+    if not snapshot.exists:
         raise HTTPException(status_code=404, detail="Expense not found")
 
-    existing = doc.to_dict()
-
+    existing = snapshot.to_dict()
     if existing.get("status") == "voided":
         raise HTTPException(status_code=400, detail="Cannot update a voided expense")
 
-    updates = body.model_dump(exclude_none=True)
+    updates = dict(raw_updates)  # never mutate the caller's dict — Firestore
+    # may retry this function on contention, and a mutated-in-place dict
+    # would compound across retries.
 
-    # Recalculate project amounts if items or raw values changed
+    # Recalculate project amounts if items or raw values changed. Needs
+    # `existing` for its fallback raw_tax/raw_subtotal, so this can only
+    # happen after the transactional read above, not before it.
     if "items" in updates:
         from ..models_expense import ExpenseItem
 
@@ -181,49 +209,78 @@ async def update_expense(expense_id: str, body: ExpenseUpdate, request: Request)
     updates["updated_at"] = now
     updates["revision"] = new_revision
 
-    # Write revision BEFORE applying update (immutable audit trail)
-    admin_email = request.state.admin_email  # always set by require_admin
-    _write_revision(
-        db, expense_id, new_revision, {**existing, "id": expense_id}, admin_email, "Updated"
+    # Write phase — revision snapshot captures the PRE-change state, same as
+    # before; both writes are buffered in this one transaction and commit
+    # together (or, on a raised exception above, neither commits at all).
+    _write_revision_in_transaction(
+        transaction, db, doc_ref.id, new_revision, {**existing, "id": doc_ref.id}, admin_email, "Updated"
     )
+    transaction.update(doc_ref, updates)
 
-    doc_ref.update(updates)
+    # Merged rather than re-read after commit: `.update()` sets exactly
+    # these fields and nothing else server-computed, so this is identical to
+    # what a post-commit `.get()` would show, at the cost of one fewer read.
+    return {**existing, **updates}
 
-    updated_doc = doc_ref.get()
-    return _doc_to_expense(updated_doc)
+
+_update_expense_transaction = transactional(_update_expense_logic)
 
 
-@router.post("/{expense_id}/void")
-async def void_expense(expense_id: str, request: Request, reason: str = ""):
-    """Void an expense (no deletes allowed — audit trail)."""
+@router.put("/{expense_id}", response_model=Expense)
+async def update_expense(expense_id: str, body: ExpenseUpdate, request: Request):
+    """Update an expense. The revision snapshot and the update commit
+    atomically — a failure between them, or two updates racing on the same
+    revision number, are no longer possible."""
     db = get_db()
     doc_ref = db.collection("expenses").document(expense_id)
-    doc = doc_ref.get()
+    updates = body.model_dump(exclude_none=True)
+    admin_email = request.state.admin_email  # always set by require_admin
 
-    if not doc.exists:
+    merged = _update_expense_transaction(db.transaction(), db, doc_ref, updates, admin_email)
+    merged["id"] = expense_id
+    return Expense(**merged)
+
+
+def _void_expense_logic(transaction, db, doc_ref, reason: str, admin_email: str) -> None:
+    snapshot = doc_ref.get(transaction=transaction)
+    if not snapshot.exists:
         raise HTTPException(status_code=404, detail="Expense not found")
 
-    existing = doc.to_dict()
+    existing = snapshot.to_dict()
     if existing.get("status") == "voided":
         raise HTTPException(status_code=400, detail="Expense is already voided")
 
     now = datetime.now(timezone.utc)
     new_revision = existing.get("revision", 1) + 1
 
-    admin_email = request.state.admin_email  # always set by require_admin
-    _write_revision(
-        db, expense_id, new_revision, {**existing, "id": expense_id}, admin_email, "Voided"
+    _write_revision_in_transaction(
+        transaction, db, doc_ref.id, new_revision, {**existing, "id": doc_ref.id}, admin_email, "Voided"
     )
-
-    doc_ref.update(
+    transaction.update(
+        doc_ref,
         {
             "status": "voided",
             "voided_at": now,
             "void_reason": reason,
             "updated_at": now,
             "revision": new_revision,
-        }
+        },
     )
+
+
+_void_expense_transaction = transactional(_void_expense_logic)
+
+
+@router.post("/{expense_id}/void")
+async def void_expense(expense_id: str, request: Request, reason: str = ""):
+    """Void an expense (no deletes allowed — audit trail). Revision snapshot
+    and the status change commit atomically, same guarantee as
+    update_expense."""
+    db = get_db()
+    doc_ref = db.collection("expenses").document(expense_id)
+    admin_email = request.state.admin_email  # always set by require_admin
+
+    _void_expense_transaction(db.transaction(), db, doc_ref, reason, admin_email)
 
     return {"voided": True, "expense_id": expense_id}
 
