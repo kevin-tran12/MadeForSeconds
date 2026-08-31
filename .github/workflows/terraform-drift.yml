@@ -1,0 +1,117 @@
+name: Terraform Drift Detection
+
+# Runs independently of ci.yml on purpose — a schedule trigger on the same
+# workflow file would re-run the ENTIRE test suite (security scan, backend,
+# frontend, E2E) nightly for no reason; this workflow does only the plan
+# comparison, nothing else.
+#
+# "Alert on drift" means: fail this workflow run when either environment's
+# plan is non-empty. GitHub's own built-in behavior — an email to the repo
+# owner whenever a scheduled workflow run fails — is the entire notification
+# mechanism here. No new infrastructure, no new secret, no bespoke alerting
+# code to maintain; this repo already relies on the same "let the platform's
+# native failure signal be the alert" idea elsewhere (a failed CI run on a
+# PR is itself the signal, nothing separate posts about it).
+on:
+  schedule:
+    # 13:00 UTC daily — same hour as the existing weekly-usage-report Cloud
+    # Scheduler job (modules/backend-service/scheduler.tf), no reason for a
+    # different one. This is a GitHub Actions schedule, not a GCP Cloud
+    # Scheduler job, so it does not consume any of the 3-jobs-per-billing-
+    # account free-tier allowance production and staging already spend.
+    - cron: '0 13 * * *'
+  workflow_dispatch: {} # manual trigger, e.g. right after a merge, to confirm the fix actually landed
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    name: Drift Check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment: production
+            working_directory: terraform
+          - environment: staging
+            working_directory: terraform/environments/staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.15.9
+
+      - name: Authenticate to GCP via Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      # Same placeholder-value reasoning as ci.yml's terraform-check job —
+      # see that job's own "Plan — production" step for the full
+      # explanation of why fake secret values are safe here (every
+      # secret-value resource ignores secret_data after creation) and why
+      # the required ones aren't a guess (the app itself requires them in
+      # production).
+      - name: Plan
+        working-directory: ${{ matrix.working_directory }}
+        env:
+          TF_VAR_gcp_project_id: ${{ matrix.environment == 'production' && vars.GCP_PROJECT_ID_PROD || vars.GCP_PROJECT_ID_STAGING }}
+          TF_VAR_admin_emails: ${{ vars.ADMIN_EMAILS }}
+          TF_VAR_allowed_origins: ${{ matrix.environment == 'production' && vars.PROD_ALLOWED_ORIGINS || vars.STAGING_ALLOWED_ORIGINS }}
+          TF_VAR_backend_image: ${{ matrix.environment == 'production' && vars.PROD_BACKEND_IMAGE || vars.STAGING_BACKEND_IMAGE }}
+          TF_VAR_github_owner: ${{ github.repository_owner }}
+          TF_VAR_github_repo: ${{ github.event.repository.name }}
+          TF_VAR_state_admin_email: ${{ vars.STATE_ADMIN_EMAIL }}
+          TF_VAR_billing_account: ${{ vars.BILLING_ACCOUNT }}
+          TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+          TF_VAR_deployment_target: ${{ matrix.environment }}
+          TF_VAR_staging_gcp_project_id: ${{ vars.GCP_PROJECT_ID_STAGING }}
+          TF_VAR_stripe_secret_key: ci-plan-placeholder-not-real
+          TF_VAR_stripe_webhook_secret: ci-plan-placeholder-not-real
+          TF_VAR_subscriber_jwt_secret: ci-plan-placeholder-not-real
+        run: |
+          set -uo pipefail
+          if [ "${{ vars.PROD_REDIS_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_redis_url="rediss://ci-plan-placeholder-not-real"
+          fi
+          if [ "${{ vars.PROD_RESEND_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_resend_api_key="ci-plan-placeholder-not-real"
+          fi
+
+          terraform init -input=false
+
+          # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes
+          # present. Captured explicitly rather than trusting `set -e`,
+          # since 1 and 2 need different messages, not just "failed".
+          set +e
+          terraform plan -lock-timeout=5m -input=false -no-color -detailed-exitcode -out=/tmp/tfplan
+          exit_code=$?
+          set -e
+
+          if [ "$exit_code" -eq 0 ]; then
+            echo "No drift detected for ${{ matrix.environment }}."
+          elif [ "$exit_code" -eq 2 ]; then
+            echo "::error::Drift detected for ${{ matrix.environment }} — the applied infrastructure no longer matches terraform/*.tf on main. Full plan below."
+            terraform show -no-color /tmp/tfplan
+            exit 1
+          else
+            echo "::error::terraform plan itself failed for ${{ matrix.environment }} (exit code $exit_code) — see the log above for the real error, not a drift finding."
+            exit 1
+          fi
+
+      - name: Upload plan (only runs if drift was found — a genuine plan error leaves no file)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-drift-${{ matrix.environment }}
+          path: /tmp/tfplan
+          retention-days: 7
+          if-no-files-found: ignore

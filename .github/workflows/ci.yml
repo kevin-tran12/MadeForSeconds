@@ -224,6 +224,18 @@ jobs:
   terraform-check:
     name: Terraform Validate
     runs-on: ubuntu-latest
+    # id-token: write is needed only for the WIF auth step below (Workload
+    # Identity Federation exchanges this token for a short-lived GCP
+    # credential — google-github-actions/auth requires it). contents stays
+    # read-only, same as every other job — this workflow deliberately never
+    # requests pull-requests: write, so plan output goes to this job's own
+    # log + an uploaded artifact, not an auto-posted PR comment; granting
+    # write access to PRs is exactly the risk this hardening pass spends
+    # several other PRs trying to reduce, not something to reopen here for
+    # convenience.
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
 
@@ -274,6 +286,105 @@ jobs:
         run: |
           pip install -r requirements.txt pytest
           python -m pytest -q
+
+      # Everything below needs real GCP credentials, which a forked PR never
+      # gets (GitHub withholds secrets/vars and, with it, any meaningful WIF
+      # trust from fork-triggered pull_request runs) — this condition is the
+      # explicit, visible equivalent of that for same-repo branches, PRs and
+      # pushes to main both proceed; only forked PRs skip, with a clear
+      # notice rather than a silent gap or a red X.
+      - name: Note that GCP-authenticated plan steps are skipped for forked PRs
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        run: echo "::notice::Forked PR — skipping the production/staging terraform plan steps below (no GCP credentials for forks). fmt/validate/test above already ran and are unaffected."
+
+      - name: Authenticate to GCP via Workload Identity Federation
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      # Plan visibility only — this job never applies. Sensitive-backed
+      # variables (stripe_secret_key, stripe_webhook_secret,
+      # subscriber_jwt_secret, redis_url, resend_api_key) get short,
+      # deliberately-fake placeholder strings, never real values: every one
+      # of the resources they gate uses `lifecycle { ignore_changes =
+      # [secret_data] }` (terraform/modules/security/secrets.tf), so
+      # Terraform never diffs the actual secret content against what a
+      # placeholder says — the placeholder's only job is satisfying each
+      # resource's `count = var.x != "" ? 1 : 0` gate so the plan doesn't
+      # propose destroying a real secret just because CI doesn't have its
+      # value. stripe_secret_key/stripe_webhook_secret/subscriber_jwt_secret
+      # are always non-blank here because the app itself requires them in
+      # production (backend/app/config.py's validate_production_settings) —
+      # not a guess about this deployment specifically. redis_url and
+      # resend_api_key are genuinely optional, so their shape (configured or
+      # not) comes from two plain, non-secret repo variables the operator
+      # set by checking `gcloud secrets list` once, not from assuming either
+      # way.
+      - name: Plan — production
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        working-directory: terraform
+        env:
+          TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID_PROD }}
+          TF_VAR_admin_emails: ${{ vars.ADMIN_EMAILS }}
+          TF_VAR_allowed_origins: ${{ vars.PROD_ALLOWED_ORIGINS }}
+          TF_VAR_backend_image: ${{ vars.PROD_BACKEND_IMAGE }}
+          TF_VAR_github_owner: ${{ github.repository_owner }}
+          TF_VAR_github_repo: ${{ github.event.repository.name }}
+          TF_VAR_state_admin_email: ${{ vars.STATE_ADMIN_EMAIL }}
+          TF_VAR_billing_account: ${{ vars.BILLING_ACCOUNT }}
+          TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+          TF_VAR_deployment_target: production
+          TF_VAR_staging_gcp_project_id: ${{ vars.GCP_PROJECT_ID_STAGING }}
+          TF_VAR_stripe_secret_key: ci-plan-placeholder-not-real
+          TF_VAR_stripe_webhook_secret: ci-plan-placeholder-not-real
+          TF_VAR_subscriber_jwt_secret: ci-plan-placeholder-not-real
+        run: |
+          set -euo pipefail
+          if [ "${{ vars.PROD_REDIS_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_redis_url="rediss://ci-plan-placeholder-not-real"
+          fi
+          if [ "${{ vars.PROD_RESEND_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_resend_api_key="ci-plan-placeholder-not-real"
+          fi
+          terraform init -input=false
+          terraform plan -lock-timeout=5m -input=false -no-color -out=/tmp/tfplan-production
+          terraform show -no-color /tmp/tfplan-production
+
+      - name: Upload production plan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-production
+          path: /tmp/tfplan-production
+          retention-days: 7
+
+      - name: Plan — staging
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        working-directory: terraform/environments/staging
+        env:
+          TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID_STAGING }}
+          TF_VAR_admin_emails: ${{ vars.ADMIN_EMAILS }}
+          TF_VAR_allowed_origins: ${{ vars.STAGING_ALLOWED_ORIGINS }}
+          TF_VAR_backend_image: ${{ vars.STAGING_BACKEND_IMAGE }}
+          TF_VAR_github_owner: ${{ github.repository_owner }}
+          TF_VAR_github_repo: ${{ github.event.repository.name }}
+          TF_VAR_state_admin_email: ${{ vars.STATE_ADMIN_EMAIL }}
+          TF_VAR_billing_account: ${{ vars.BILLING_ACCOUNT }}
+          TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+        run: |
+          terraform init -input=false
+          terraform plan -lock-timeout=5m -input=false -no-color -out=/tmp/tfplan-staging
+          terraform show -no-color /tmp/tfplan-staging
+
+      - name: Upload staging plan
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-staging
+          path: /tmp/tfplan-staging
+          retention-days: 7
 
   inventory-check:
     name: Inventory Check
