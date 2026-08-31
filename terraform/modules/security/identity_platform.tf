@@ -52,5 +52,10 @@ resource "google_identity_platform_config" "default" {
     "localhost",
     "${var.gcp_project_id}.firebaseapp.com",
     "${var.gcp_project_id}.web.app",
+    # Cloudflare Pages branch alias — a dedicated long-lived `staging` git
+    # branch (not a short-lived PR branch), so this stays stable rather than
+    # needing an update on every feature branch. Verified live: resolves and
+    # serves the real frontend (2026-08-30).
+    "staging.madeforseconds.pages.dev",
   ]
 }
