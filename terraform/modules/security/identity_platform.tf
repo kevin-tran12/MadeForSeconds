@@ -31,7 +31,14 @@ resource "google_identity_platform_config" "default" {
   # (39e71d85.madeforseconds.pages.dev) accumulated here and was removed. Admin
   # sign-in is only exercised on the production hostname; if you ever need it on a
   # preview, add that host temporarily and take it out again afterwards.
-  authorized_domains = [
+  #
+  # Split by deployment_target (Epic 8) — this resource is created in BOTH
+  # environments via the shared module, and until this was caught (while
+  # actually setting up staging's own frontend, PR 9), it used production's
+  # exact domain list unconditionally. Staging's own firebaseapp.com/web.app
+  # host are project-derived, not copy-pasted; its Cloudflare Pages hostname
+  # gets added here once that project exists and the real hostname is known.
+  authorized_domains = var.deployment_target == "production" ? [
     "localhost",
     # Load-bearing: this is VITE_FIREBASE_AUTH_DOMAIN, the origin that handles the
     # OAuth redirect. Removing it breaks signInWithPopup, however unused it looks.
@@ -41,5 +48,9 @@ resource "google_identity_platform_config" "default" {
     "made-for-seconds.web.app",
     "madeforseconds.com",
     "madeforseconds.pages.dev",
+    ] : [
+    "localhost",
+    "${var.gcp_project_id}.firebaseapp.com",
+    "${var.gcp_project_id}.web.app",
   ]
 }
