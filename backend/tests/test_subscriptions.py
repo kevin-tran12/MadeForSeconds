@@ -228,8 +228,9 @@ class FakeTransaction:
 
 class FakeRef:
     """Stand-in for the processed_events DocumentReference (the reservation doc)."""
-    def __init__(self, snapshot):
+    def __init__(self, snapshot, event_id="evt_fake"):
         self._snapshot = snapshot
+        self.id = event_id
 
     def get(self, transaction=None):
         return self._snapshot

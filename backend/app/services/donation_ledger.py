@@ -27,16 +27,9 @@ that retries forever. A second write with the same identity converges to the
 same document instead of producing a duplicate row.
 """
 
-import hashlib
+from ..log_redaction import keyed_hash as keyed_email_hash
 
 COLLECTION = "donation_transactions"
-
-
-def keyed_email_hash(email: str) -> str:
-    """One-way, unsalted hash of a donor email for grouping without storing
-    the address a second time in a collection meant to outlive routine
-    data-subject deletions of the ``donations`` aggregate."""
-    return hashlib.sha256((email or "").strip().lower().encode()).hexdigest()
 
 
 def write_donation_record(
