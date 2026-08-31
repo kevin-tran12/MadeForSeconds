@@ -13,6 +13,26 @@ class Settings(BaseSettings):
     # server that only validates tokens). workos_authkit_domain is the OAuth issuer URL.
     workos_authkit_domain: str = ""  # e.g. https://<slug>.authkit.app
     mcp_resource_url: str = ""  # public URL of the MCP resource, e.g. https://<backend>/mcp
+    # Audience the MCP resource server requires on every access token — a
+    # token signed for a different resource in the same WorkOS environment
+    # must be rejected, not merely trusted because it's WorkOS-signed. Blank
+    # defaults to mcp_resource_url itself (see mcp_audience property) so this
+    # never needs setting twice.
+    mcp_expected_audience: str = ""
+    # Fail-closed by default (P1 finding: audience was never checked at all).
+    # The only legitimate reason to flip this is WorkOS AuthKit genuinely not
+    # emitting an audience claim for this resource — verify that first
+    # (docs/DEPLOYMENT.md § MCP token binding), don't disable pre-emptively.
+    mcp_enforce_audience: bool = True
+    # WorkOS 'sub' claim identifying the owner — an immutable identity check
+    # independent of the email claim, which AuthKit may or may not emit.
+    # Blank means identity relies on the email claim alone.
+    mcp_owner_subject: str = ""
+    # Comma-separated OAuth scopes every MCP access token must carry,
+    # enforced by the SDK itself (AuthSettings.required_scopes in
+    # mcp_server.py). Blank means no scope beyond a valid, owned token is
+    # required.
+    mcp_required_scopes: str = ""
     redis_url: str | None = None  # e.g. rediss://default:TOKEN@host.upstash.io:6379
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
@@ -65,6 +85,15 @@ class Settings(BaseSettings):
     def workos_jwks_url(self) -> str:
         """JWKS endpoint for verifying WorkOS-issued access tokens."""
         return f"{self.workos_issuer_url}/oauth2/jwks"
+
+    @property
+    def mcp_audience(self) -> str:
+        """The audience every MCP access token is checked against."""
+        return self.mcp_expected_audience or self.mcp_resource_url
+
+    @property
+    def mcp_required_scopes_list(self) -> list[str]:
+        return [s.strip() for s in self.mcp_required_scopes.split(",") if s.strip()]
 
     model_config = {"env_file": ".env"}
 

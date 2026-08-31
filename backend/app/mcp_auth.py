@@ -8,9 +8,22 @@ returning ``None`` makes the SDK reject the request with a 401 + a compliant
 ``WWW-Authenticate`` challenge pointing at the protected-resource metadata.
 
 Tokens are WorkOS-signed JWTs verified against the AuthKit JWKS (RS256 only —
-``alg: none`` and symmetric algorithms are rejected). Access is gated to the
-configured admin emails as defense-in-depth on top of WorkOS-side sign-in
-restrictions.
+``alg: none`` and symmetric algorithms are rejected). Beyond signature and
+issuer, three checks bind the token to *this* resource and *this* owner — a
+security review flagged their absence as P1: signature + issuer alone only
+prove a token came from our AuthKit environment, not that it was issued for
+this MCP resource or for the site owner specifically.
+
+  1. Audience (``settings.mcp_audience``) — enforced by default
+     (``settings.mcp_enforce_audience``). A token issued for a different
+     resource in the same WorkOS environment is rejected.
+  2. Owner identity — the token must resolve to an immutable subject
+     (``settings.mcp_owner_subject``) or an admin email
+     (``settings.admin_email_set``). No fallback: previously, a token with
+     no email claim at all was accepted anyway ("relying on WorkOS sign-in
+     restriction") — that gap is what let (1) matter less than it should.
+  3. Scopes — enforced by the MCP SDK itself via ``AuthSettings.required_scopes``
+     (see ``mcp_server.py``), not duplicated here.
 """
 
 import logging
@@ -44,6 +57,9 @@ class WorkOSTokenVerifier(TokenVerifier):
     """Validates WorkOS-issued access tokens for the MCP endpoint."""
 
     async def verify_token(self, token: str) -> AccessToken | None:
+        audience = settings.mcp_audience
+        enforce_audience = settings.mcp_enforce_audience and bool(audience)
+
         try:
             signing_key = _get_jwks_client().get_signing_key_from_jwt(token)
             claims = jwt.decode(
@@ -51,28 +67,48 @@ class WorkOSTokenVerifier(TokenVerifier):
                 signing_key.key,
                 algorithms=["RS256"],
                 issuer=settings.workos_issuer_url,
-                # WorkOS access-token audiences vary by config; issuer + signature
-                # already bind the token to our AuthKit env, and the admin-email
-                # gate below restricts who is accepted.
-                options={"verify_aud": False, "require": ["exp", "iss"]},
+                audience=audience if enforce_audience else None,
+                options={"verify_aud": enforce_audience, "require": ["exp", "iss"]},
             )
+        except jwt.InvalidAudienceError:
+            logger.warning(
+                "MCP token rejected: audience does not match %r — token was issued for a "
+                "different resource",
+                audience,
+            )
+            return None
+        except jwt.MissingRequiredClaimError as exc:
+            if enforce_audience and exc.args and exc.args[0] == "aud":
+                logger.error(
+                    "MCP token rejected: no 'aud' claim present, but audience enforcement "
+                    "is on (mcp_enforce_audience=true). If WorkOS AuthKit genuinely does not "
+                    "emit an audience for this resource, configure one (a custom claim or "
+                    "resource indicator) rather than disabling enforcement — see "
+                    "docs/DEPLOYMENT.md § MCP token binding."
+                )
+                return None
+            logger.warning("MCP token verification failed: %s", exc)
+            return None
         except Exception as exc:
             logger.warning("MCP token verification failed: %s", exc)
             return None
 
-        # Admin gate: when the token carries an email claim, it must be an admin.
-        # If WorkOS is not configured to emit email, fall back to its own
-        # sign-in restriction (the env should be locked to the admin user).
+        # Owner identity: an immutable subject match, or an admin email. No
+        # fallback-allow — a token satisfying neither is rejected outright.
+        subject = claims.get("sub", "")
         email = claims.get("email", "")
-        if email:
-            if email not in settings.admin_email_set:
-                logger.warning("MCP token rejected: %s is not an admin", email)
-                return None
-        else:
+        owner_subject = settings.mcp_owner_subject
+
+        is_owner_subject = bool(owner_subject) and subject == owner_subject
+        is_admin_email = bool(email) and email in settings.admin_email_set
+
+        if not (is_owner_subject or is_admin_email):
             logger.warning(
-                "MCP token has no email claim; relying on WorkOS sign-in restriction. "
-                "Enable an email claim in AuthKit to enforce the admin gate here."
+                "MCP token rejected: no owner identity matched (sub=%r, email=%r)",
+                subject,
+                email,
             )
+            return None
 
         return AccessToken(
             token=token,

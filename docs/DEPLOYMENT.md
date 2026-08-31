@@ -1142,6 +1142,31 @@ Client Registration, and restrict sign-in to the admin email. Set
 `workos_authkit_domain` (the issuer, `https://<slug>.authkit.app`) and
 `mcp_resource_url` (`https://<cloud-run-url>/mcp`) in `terraform.tfvars`.
 
+**MCP token binding.** Beyond signature and issuer, every access token is
+checked against three things (`backend/app/mcp_auth.py`) — a security review
+flagged their absence as P1, since signature + issuer alone only prove a
+token came from this WorkOS environment, not that it was issued for this MCP
+resource or for the owner specifically:
+
+- **Audience** — enforced by default (`MCP_ENFORCE_AUDIENCE=true`), checked
+  against `MCP_EXPECTED_AUDIENCE` if set, otherwise `MCP_RESOURCE_URL`
+  itself. No new env var is required for this to be active — it takes effect
+  from the existing `mcp_resource_url` alone.
+- **Owner identity** — an admin email (`ADMIN_EMAILS`, already required) or,
+  optionally, an immutable WorkOS `sub` claim (`MCP_OWNER_SUBJECT`). A token
+  satisfying neither is rejected outright — no fallback.
+- **Scopes** — optional (`MCP_REQUIRED_SCOPES`, comma-separated), enforced by
+  the MCP SDK itself.
+
+**If WorkOS AuthKit genuinely does not emit an `aud` claim for this
+resource**, every token will be rejected and the logs will say so explicitly
+(`mcp_auth.py`'s own error message names the setting to check). Verify with
+AuthKit first (a custom claim or resource indicator) rather than disabling
+enforcement — `MCP_ENFORCE_AUDIENCE=false` exists as a documented escape
+hatch, not a default posture. None of these four are currently wired through
+Terraform (they all have safe defaults); add them as plain Cloud Run env
+vars, or as new `terraform.tfvars` entries, once you have real values to set.
+
 **claude.ai custom connector:** add the URL `https://<cloud-run-url>/mcp/`,
 leave the OAuth Client ID/Secret **blank** (DCR handles registration), then
 complete the WorkOS login as the admin.
