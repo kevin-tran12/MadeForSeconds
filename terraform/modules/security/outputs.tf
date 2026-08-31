@@ -37,3 +37,13 @@ output "deploy_sa_id" {
   description = "Deploy SA's resource id — what a Cloud Build trigger's service_account field expects"
   value       = google_service_account.deploy.id
 }
+
+output "workload_identity_provider" {
+  description = "Full resource name of the GitHub Actions WIF provider — the WIF_PROVIDER value google-github-actions/auth expects. null in staging, where these resources don't exist."
+  value       = try(google_iam_workload_identity_pool_provider.github[0].name, null)
+}
+
+output "terraform_sa_email" {
+  description = "mfs-terraform's email — the WIF_SERVICE_ACCOUNT value google-github-actions/auth expects. null in staging."
+  value       = try(google_service_account.terraform[0].email, null)
+}

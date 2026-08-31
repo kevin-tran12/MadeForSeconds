@@ -18,6 +18,16 @@ output "deploy_service_account_email" {
   value       = module.security.deploy_sa_email
 }
 
+output "workload_identity_provider" {
+  description = "Full resource name of the GitHub Actions WIF provider — the WIF_PROVIDER GitHub Actions repo variable value. Read with: terraform output -raw workload_identity_provider"
+  value       = module.security.workload_identity_provider
+}
+
+output "terraform_service_account_email" {
+  description = "mfs-terraform's email — the WIF_SERVICE_ACCOUNT GitHub Actions repo variable value. Read with: terraform output -raw terraform_service_account_email"
+  value       = module.security.terraform_sa_email
+}
+
 # ─── Secret wiring ────────────────────────────────────────────────────────────
 # Cloud Run rejects a revision that references a secret its service identity
 # cannot read, so these two are worth being able to read straight off the state
