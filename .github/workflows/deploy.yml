@@ -35,8 +35,19 @@ jobs:
       id-token: write
     outputs:
       digest: ${{ steps.push-staging.outputs.digest }}
+      short_sha: ${{ steps.short-sha.outputs.value }}
     steps:
       - uses: actions/checkout@v7
+
+      # Cloud Run's own limit: a --tag value plus the service name
+      # ("mfs-backend", 11 chars) together can't exceed 46 characters.
+      # candidate- (10) + the full 40-char github.sha blows well past that
+      # — found by a real deploy failing with exactly that error on this
+      # pipeline's first live run. 7 hex chars is the same convention
+      # `git rev-parse --short` and cloudbuild.yaml's old $SHORT_SHA used.
+      - name: Compute short SHA for Cloud Run tags
+        id: short-sha
+        run: echo "value=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       # mfs-deploy, not mfs-terraform — this identity only ever pushes an
       # image and deploys it (modules/backend-service/deploy_iam.tf), the
@@ -188,7 +199,7 @@ jobs:
             --region=${{ env.REGION }} \
             --image=${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_STAGING }}/mfs/backend@${{ needs.build.outputs.digest }} \
             --no-traffic \
-            --tag=candidate-${{ github.sha }} \
+            --tag=candidate-${{ needs.build.outputs.short_sha }} \
             --quiet
 
       - name: Smoke test the candidate revision
@@ -198,7 +209,7 @@ jobs:
             --project=${{ vars.GCP_PROJECT_ID_STAGING }} \
             --region=${{ env.REGION }} \
             --format=json \
-            | python3 -c "import json,sys; svc=json.load(sys.stdin); print(next(t['url'] for t in svc['status']['traffic'] if t.get('tag') == 'candidate-${{ github.sha }}'))")
+            | python3 -c "import json,sys; svc=json.load(sys.stdin); print(next(t['url'] for t in svc['status']['traffic'] if t.get('tag') == 'candidate-${{ needs.build.outputs.short_sha }}'))")
           echo "Candidate URL: $candidate_url"
           python3 backend/scripts/smoke_test_deploy.py --url "$candidate_url"
 
@@ -207,7 +218,7 @@ jobs:
           gcloud run services update-traffic mfs-backend \
             --project=${{ vars.GCP_PROJECT_ID_STAGING }} \
             --region=${{ env.REGION }} \
-            --to-tags=candidate-${{ github.sha }}=100 \
+            --to-tags=candidate-${{ needs.build.outputs.short_sha }}=100 \
             --quiet
 
       - name: Read the service URL
@@ -397,7 +408,7 @@ jobs:
             --region=${{ env.REGION }} \
             --image=${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_PROD }}/mfs/backend@${{ needs.build.outputs.digest }} \
             --no-traffic \
-            --tag=candidate-${{ github.sha }} \
+            --tag=candidate-${{ needs.build.outputs.short_sha }} \
             --quiet
 
       - name: Smoke test the candidate revision
@@ -407,7 +418,7 @@ jobs:
             --project=${{ vars.GCP_PROJECT_ID_PROD }} \
             --region=${{ env.REGION }} \
             --format=json \
-            | python3 -c "import json,sys; svc=json.load(sys.stdin); print(next(t['url'] for t in svc['status']['traffic'] if t.get('tag') == 'candidate-${{ github.sha }}'))")
+            | python3 -c "import json,sys; svc=json.load(sys.stdin); print(next(t['url'] for t in svc['status']['traffic'] if t.get('tag') == 'candidate-${{ needs.build.outputs.short_sha }}'))")
           echo "Candidate URL: $candidate_url"
           python3 backend/scripts/smoke_test_deploy.py --url "$candidate_url"
 
@@ -416,5 +427,5 @@ jobs:
           gcloud run services update-traffic mfs-backend \
             --project=${{ vars.GCP_PROJECT_ID_PROD }} \
             --region=${{ env.REGION }} \
-            --to-tags=candidate-${{ github.sha }}=100 \
+            --to-tags=candidate-${{ needs.build.outputs.short_sha }}=100 \
             --quiet
