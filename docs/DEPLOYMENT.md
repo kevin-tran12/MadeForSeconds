@@ -494,6 +494,21 @@ fail to update the secret, it tells Terraform the resource shouldn't exist
 and destroys it. The guard step exists so a missing secret is a clear,
 loud CI failure instead of a live incident.
 
+**Required GitHub Actions variables (not secrets — neither of these is
+sensitive), same tab's Variables sub-tab.** Both are required by
+`validate_production_settings()` (`backend/app/config.py`) — leaving them
+blank doesn't fail the apply, it fails the *next* deploy's Cloud Run
+startup probe instead, since Cloud Run only ever sees the env values
+Terraform actually wrote. Found exactly that way on this pipeline's first
+live run — `ci.yml`'s plan-only steps have the same gap, but a plan never
+pushes new env vars to a running service, so it never surfaced there:
+
+| Variable | Value |
+|---|---|
+| `WORKOS_AUTHKIT_DOMAIN` | Same value as your local root `terraform.tfvars` — one WorkOS environment typically serves both staging and production |
+| `STAGING_MCP_RESOURCE_URL` | Staging's Cloud Run URL + `/mcp` — `terraform output -raw cloud_run_url` from `terraform/environments/staging`, then append `/mcp` |
+| `PROD_MCP_RESOURCE_URL` | Same value as your local root `terraform.tfvars` |
+
 **Cloudflare Pages' staging alias tracks a `staging` git branch, not
 `main`.** The `staging-e2e` job fast-forwards `staging` to the commit being
 promoted before running Playwright against
