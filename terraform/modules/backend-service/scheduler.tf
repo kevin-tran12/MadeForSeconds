@@ -51,14 +51,19 @@ resource "google_cloud_scheduler_job" "instagram_token_refresh" {
 # A weekly Cloud Scheduler job calls the backend's internal usage-report
 # endpoint, which aggregates the trailing 7 days of Cloud Run request logs
 # (counts only — no IP addresses leave the endpoint) and emails a summary to
-# var.alert_email. Unconditional: alert_email is a required variable, so this
-# job always exists (unlike the Instagram job above, which is optional).
+# var.alert_email. Runs in production only (var.deployment_target) — Cloud
+# Scheduler's 3-job free limit is per billing account, already fully spent by
+# production's own three jobs, so staging keeps its headroom free. Was
+# unconditional before staging existed; alert_email being a required variable
+# no longer implies this job always exists, only that it exists when it can.
 
 locals {
   usage_report_url = "${trimsuffix(var.mcp_resource_url, "/mcp")}/api/internal/usage/weekly-report"
 }
 
 resource "google_cloud_scheduler_job" "weekly_usage_report" {
+  count = var.deployment_target == "production" ? 1 : 0
+
   project     = var.gcp_project_id
   region      = var.gcp_region
   name        = "weekly-usage-report"

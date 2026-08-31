@@ -23,9 +23,10 @@ module "security" {
 module "storage" {
   source = "./modules/storage"
 
-  gcp_project_id  = var.gcp_project_id
-  gcp_region      = var.gcp_region
-  allowed_origins = var.allowed_origins
+  gcp_project_id    = var.gcp_project_id
+  gcp_region        = var.gcp_region
+  allowed_origins   = var.allowed_origins
+  deployment_target = var.deployment_target
 
   # Bucket-level IAM lives with the buckets, so the module needs the identity
   # it is granting to.
@@ -115,13 +116,14 @@ resource "time_sleep" "wait_for_secret_accessors" {
 module "backend-service" {
   source = "./modules/backend-service"
 
-  gcp_project_id  = var.gcp_project_id
-  gcp_region      = var.gcp_region
-  environment     = var.environment
-  allowed_origins = var.allowed_origins
-  backend_image   = var.backend_image
-  github_owner    = var.github_owner
-  github_repo     = var.github_repo
+  gcp_project_id    = var.gcp_project_id
+  gcp_region        = var.gcp_region
+  environment       = var.environment
+  deployment_target = var.deployment_target
+  allowed_origins   = var.allowed_origins
+  backend_image     = var.backend_image
+  github_owner      = var.github_owner
+  github_repo       = var.github_repo
 
   workos_authkit_domain  = var.workos_authkit_domain
   mcp_resource_url       = var.mcp_resource_url
@@ -163,6 +165,12 @@ module "observability" {
 module "cost-controls" {
   source = "./modules/cost-controls"
 
+  # Production-only: the budget breaker guards the single billing account
+  # both deployment targets share, and staging's own spend is bounded by
+  # being deliberately lean (no scheduler jobs, no backups) rather than by a
+  # second breaker watching the same budget twice.
+  count = var.deployment_target == "production" ? 1 : 0
+
   gcp_project_id        = var.gcp_project_id
   gcp_region            = var.gcp_region
   billing_account       = var.billing_account
@@ -179,6 +187,11 @@ module "cost-controls" {
 
 module "secret-maintenance" {
   source = "./modules/secret-maintenance"
+
+  # Production-only: staging's secrets are test-mode credentials the pruner
+  # has no reason to guard, and the 6-active-version free limit it prunes
+  # against is already fully consumed by production's own secrets.
+  count = var.deployment_target == "production" ? 1 : 0
 
   gcp_project_id = var.gcp_project_id
   gcp_region     = var.gcp_region

@@ -57,6 +57,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `instagram_user_id` | Instagram Creator account numeric ID (deprecated for now — leave blank; see [MCP server § Instagram publishing](#mcp-server-recipeexpense-automation)) |
 | `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy, if ever re-enabled — currently left blank) |
 | `environment` | `production` or `development` — only these two are meaningful, injected as `ENVIRONMENT`. Defaults to `production`; leave unset unless you know why you're changing it |
+| `deployment_target` | `production` or `staging` — which GCP project's infra topology this apply is for. Distinct from `environment` above: staging still runs the app in `production` mode (real auth, TOTP, Stripe test-mode webhooks), this only gates which infra exists (Cloud Scheduler jobs, Firestore backups, the budget breaker, the secret pruner, the state bucket resource). Defaults to `production` |
 | `state_admin_email` | Google account of whoever runs `terraform apply` — granted `objectAdmin` on the state bucket. Must match the casing already in state if you're picking up an existing deployment; IAM preserves case and a mismatch forces the binding to be replaced |
 
 > `terraform.tfvars` is gitignored — never commit it. It holds live Stripe keys

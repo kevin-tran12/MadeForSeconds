@@ -22,3 +22,8 @@ variable "backend_sa_email" {
   description = "Backend runtime service account. IAM bindings live with the resource they grant on, so the bucket grants are here rather than beside the service account."
   type        = string
 }
+
+variable "deployment_target" {
+  description = "Which GCP project's infrastructure topology this apply targets — \"production\" or \"staging\". Gates the Firestore backup schedules, which are production-only."
+  type        = string
+}

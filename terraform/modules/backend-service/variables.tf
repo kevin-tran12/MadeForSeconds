@@ -15,6 +15,11 @@ variable "environment" {
   type        = string
 }
 
+variable "deployment_target" {
+  description = "Which GCP project's infrastructure topology this apply targets — \"production\" or \"staging\". Gates the weekly-usage-report Cloud Scheduler job, which is production-only (staging's own Cloud Scheduler headroom stays free for that reason)."
+  type        = string
+}
+
 variable "allowed_origins" {
   description = "Comma-separated CORS origins, also injected as ALLOWED_ORIGINS"
   type        = string
