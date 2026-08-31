@@ -80,17 +80,12 @@ variable "instagram_access_token" {
 # ─── From module.security ──────────────────────────────────────────────────
 
 variable "backend_sa_email" {
-  description = "Backend runtime SA email — Cloud Run's service identity and the scheduler grant target. No longer a Cloud Build grant target as of Epic 2 (2.1) — cloudbuild.tf's trigger runs as deploy_sa_id instead."
+  description = "Backend runtime SA email — Cloud Run's service identity and the scheduler grant target. No longer a build/deploy grant target as of Epic 2 (2.1) — the deploy pipeline runs as deploy_sa_email instead."
   type        = string
 }
 
 variable "backend_sa_name" {
   description = "Backend SA's fully-qualified resource name — what a scheduler job's service_account_id expects"
-  type        = string
-}
-
-variable "deploy_sa_id" {
-  description = "Deploy SA's resource id — cloudbuild.tf's Cloud Build trigger runs as this identity, not backend_sa_id, so a compromised build inherits deploy-only permissions rather than the runtime service's Firestore/Secret Manager/receipt-bucket access"
   type        = string
 }
 

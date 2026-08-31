@@ -138,7 +138,6 @@ module "backend-service" {
 
   backend_sa_email = module.security.backend_sa_email
   backend_sa_name  = module.security.backend_sa_name
-  deploy_sa_id     = module.security.deploy_sa_id
   deploy_sa_email  = module.security.deploy_sa_email
   secret_ids       = module.security.secret_ids
 

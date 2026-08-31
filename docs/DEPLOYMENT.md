@@ -129,20 +129,33 @@ gcloud services enable cloudresourcemanager.googleapis.com --project=<staging-pr
 ```
 
 `backend_image` in the example tfvars points at Google's public Cloud Run
-sample image, not production's real image — staging's Cloud Run service
-agent has no read access to production's Artifact Registry repo (a
-different project) until the merge-to-main promotion pipeline grants it as
-part of building the real cross-project build-once/promote-by-digest flow.
+sample image, not production's real image, until the merge-to-main
+promotion pipeline (`.github/workflows/deploy.yml`) deploys a real one.
 Full staging setup (Cloudflare Pages, Stripe test-mode webhook, the
 promotion pipeline itself) lands in later hardening-pass PRs; this step
 only gets the infrastructure itself standing.
+
+**"Build once, promote by digest" without a cross-project registry pull.**
+The plan's original framing was a single shared Artifact Registry repo in
+production, with staging's Cloud Run pulling from it cross-project. The
+pipeline instead builds the image once and pushes it to *each* project's own
+`mfs` repo (`modules/backend-service/artifact_registry.tf`, created
+unconditionally in both) — same digest both places, verified by comparing
+digests after each push, not by only ever having one copy. This keeps each
+environment's image-pull path entirely within its own project (no Cloud Run
+service-agent grant on the other project's registry to get right, and no new
+failure mode where a working deploy in one environment silently depends on
+IAM state in the other), at the cost of Artifact Registry's cleanup policies
+running twice instead of once — negligible against each project's own
+independent free-tier allowance at this scale.
 
 **Workload Identity Federation (GitHub Actions).** Applying the root
 `terraform/` config (production) also creates a WIF pool/provider trusting
 only `kevin-tran12/MadeForSeconds`, and an `mfs-terraform` service account
 GitHub Actions impersonates — no service-account key anywhere. Deliberately
-a separate identity from `mfs-deploy` (Cloud Build's own, narrowly scoped to
-push-and-deploy): Terraform needs to manage IAM, service accounts, buckets,
+a separate identity from `mfs-deploy` (also WIF-trusted as of the
+merge-to-main pipeline, § Merge-to-main promotion pipeline below, but
+narrowly scoped to push-and-deploy only): Terraform needs to manage IAM, service accounts, buckets,
 secrets, Firestore, and monitoring across the whole project, which is a
 fundamentally broader surface — `roles/editor` +
 `roles/resourcemanager.projectIamAdmin` + `roles/iam.serviceAccountAdmin` +
@@ -305,7 +318,7 @@ gcloud run services update mfs-backend \
   --project made-for-seconds
 ```
 
-Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild.yaml`.
+Or push to `main` — `.github/workflows/deploy.yml` runs these steps automatically, against staging first and production only after a full staging E2E pass (see § Merge-to-main promotion pipeline below). The manual commands above are for an out-of-band rolling update outside that pipeline — a hotfix, or recovering from a stuck deploy.
 
 > **The deploy pipeline owns the running image, not Terraform.** `terraform/modules/backend-service/cloud_run.tf`
 > sets `ignore_changes` on the container image, so `terraform apply` never
@@ -433,6 +446,61 @@ Or push to `main` — Cloud Build runs these steps automatically via `cloudbuild
 > test above, plus it does not exercise the Firestore expense-receipt
 > association — it is a real-GCS IAM integration test for the storage layer
 > specifically, not a full-stack receipt test.
+
+### Merge-to-main promotion pipeline
+
+`.github/workflows/deploy.yml` runs on every push to `main`: build the
+backend image once → apply staging Terraform → deploy the candidate to
+staging (`--no-traffic` → `smoke_test_deploy.py` → promote) → seed staging's
+Firestore → run the full Playwright suite against staging → apply production
+Terraform → deploy the *same* image digest to production, same
+no-traffic/smoke-test/promote sequence. Any job failing stops the chain
+before production is touched — see the workflow file itself for the exact
+per-job breakdown; `needs:` chains every job strictly behind the one before
+it (`build → staging-apply → staging-deploy → staging-seed/staging-e2e →
+production-apply → production-deploy`).
+
+Two identities, matching the split already established for Terraform vs.
+Cloud Build access: `mfs-terraform` (broad, `roles/editor`-based) does every
+`terraform apply`; `mfs-deploy` (narrow, scoped to exactly "push an image,
+deploy it" — `modules/backend-service/deploy_iam.tf`) does every build,
+push, and promote step. Both authenticate via the same Workload Identity
+Federation pool described below — `mfs-deploy` needs the same
+`roles/iam.workloadIdentityUser` binding `mfs-terraform` already had, added
+in `modules/security/workload_identity.tf`.
+
+**Required GitHub Actions secrets, in addition to the ones set up in the
+pre-flight checklist.** The staging ones reuse `STRIPE_TEST_SECRET_KEY`,
+`STRIPE_TEST_WEBHOOK_SECRET`, and `STAGING_SUBSCRIBER_JWT_SECRET`, already
+set. Production's real secrets have never been pushed to GitHub before this
+pipeline needed to apply Terraform against real production state — add
+these under **Settings → Secrets and variables → Actions → Secrets** before
+merging anything that reaches `production-apply` for the first time:
+
+| Secret | Value |
+|---|---|
+| `PROD_STRIPE_SECRET_KEY` | The real `sk_live_...` key, same one currently only in your local `terraform.tfvars` |
+| `PROD_STRIPE_WEBHOOK_SECRET` | The real `whsec_...` for the production webhook endpoint |
+| `PROD_SUBSCRIBER_JWT_SECRET` | The real value from `terraform.tfvars` |
+| `PROD_REDIS_URL` | Only if `PROD_REDIS_CONFIGURED` variable is `true` |
+| `PROD_RESEND_API_KEY` | Only if `PROD_RESEND_CONFIGURED` variable is `true` |
+
+**This is not optional plumbing — `production-apply` fails its own guard
+step and refuses to run rather than apply with these blank**, specifically
+because `stripe_secret_key` / `stripe_webhook_secret` / `subscriber_jwt_secret`
+default to `""` in `terraform/variables.tf`, and each one's Secret Manager
+resource is gated `count = var.x != "" ? 1 : 0` — a blank value doesn't just
+fail to update the secret, it tells Terraform the resource shouldn't exist
+and destroys it. The guard step exists so a missing secret is a clear,
+loud CI failure instead of a live incident.
+
+**Cloudflare Pages' staging alias tracks a `staging` git branch, not
+`main`.** The `staging-e2e` job fast-forwards `staging` to the commit being
+promoted before running Playwright against
+`https://staging.madeforseconds.pages.dev`, so Cloudflare's own build picks
+it up. There's a fixed wait for that rebuild rather than polling
+Cloudflare's Deployments API for completion — a known rough edge to
+tighten once a real run shows how much margin it actually needs.
 
 ### What requires what kind of deploy?
 

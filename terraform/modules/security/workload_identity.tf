@@ -76,6 +76,36 @@ resource "google_service_account_iam_member" "terraform_workload_identity_user" 
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github[0].name}/attribute.repository/${var.github_owner}/${var.github_repo}"
 }
 
+# mfs-deploy also needs WIF trust — PR 10's merge-triggered promotion
+# pipeline builds and promotes the backend image under this identity, not
+# mfs-terraform's much broader one (same split the plan/apply steps already
+# use: two identities, two blast radii). mfs-deploy itself already exists in
+# both projects unconditionally (service_accounts.tf), each already holding
+# its own project's Cloud Run deploy + Artifact Registry write grants
+# (modules/backend-service/deploy_iam.tf) — the only thing missing is a way
+# for GitHub Actions to authenticate as either of them.
+resource "google_service_account_iam_member" "deploy_workload_identity_user" {
+  count = var.deployment_target == "production" ? 1 : 0
+
+  service_account_id = google_service_account.deploy.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github[0].name}/attribute.repository/${var.github_owner}/${var.github_repo}"
+}
+
+# Staging's own mfs-deploy, granted from the same one WIF pool — mirrors
+# terraform_editor_staging etc. below: no second pool, just a cross-project
+# grant on the other project's identity. Referenced by its fully-qualified
+# resource id string (not a Terraform resource reference) because staging's
+# mfs-deploy is created by a different apply entirely (this file only runs
+# under deployment_target == "production").
+resource "google_service_account_iam_member" "deploy_workload_identity_user_staging" {
+  count = var.deployment_target == "production" && var.staging_gcp_project_id != "" ? 1 : 0
+
+  service_account_id = "projects/${var.staging_gcp_project_id}/serviceAccounts/mfs-deploy@${var.staging_gcp_project_id}.iam.gserviceaccount.com"
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github[0].name}/attribute.repository/${var.github_owner}/${var.github_repo}"
+}
+
 # ─── mfs-terraform's own permissions — production ─────────────────────────────
 #
 # Broad, not a hand-enumerated custom role, unlike every other identity in
