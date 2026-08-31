@@ -113,7 +113,10 @@ jobs:
         working-directory: backend
         # tee: keep the human-readable log AND capture it for the inventory
         # check below, without running pytest a second time just to count.
-        run: pytest --cov=app --cov-report=term-missing | tee /tmp/pytest-output.txt
+        # pipefail: a bare `cmd | tee file` step exits 0 regardless of cmd's
+        # own exit code (the default GitHub Actions shell doesn't set this),
+        # which would silently turn a real test failure green here.
+        run: set -o pipefail && pytest --cov=app --cov-report=term-missing | tee /tmp/pytest-output.txt
         env:
           PYTHONPATH: .
           ENVIRONMENT: development
@@ -140,7 +143,8 @@ jobs:
       - name: Run unit tests
         # tee: keep the human-readable log AND capture it for the inventory
         # check below, without running vitest a second time just to count.
-        run: npm run test:unit | tee /tmp/vitest-output.txt
+        # pipefail: see the same note on the backend job's pytest step.
+        run: set -o pipefail && npm run test:unit | tee /tmp/vitest-output.txt
 
       - name: Set up Python
         uses: actions/setup-python@v7

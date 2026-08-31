@@ -67,6 +67,23 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _strip_ansi(text: str) -> str:
+    r"""Strip ANSI color/style escape codes.
+
+    vitest colorizes its summary even when stdout is piped to `tee` in a
+    GitHub Actions step (unlike pytest's plain-text summary, which is why
+    this only bit the frontend-count parser in practice) -- the escape
+    sequences land *inside* what looks like whitespace between words, e.g.
+    "Tests \x1b[22m \x1b[1m\x1b[32m95 passed", silently breaking a `\s+`
+    match. Applied to every captured-output read here, not just vitest's,
+    so a future colorized pytest plugin doesn't reintroduce the same bug.
+    """
+    return _ANSI_RE.sub("", text)
+
+
 def _count_files(pattern_dir: Path, glob: str) -> int:
     return len(list(pattern_dir.glob(glob)))
 
@@ -250,7 +267,7 @@ def fix_toolchain_table() -> None:
 
 
 def check_backend_count(output_path: Path) -> list[Mismatch]:
-    text = _read(output_path)
+    text = _strip_ansi(_read(output_path))
     # pytest --cov ends with "N passed[, M warnings] in Ts"; --collect-only says
     # "N tests collected". Either satisfies this check.
     m = re.search(r"(\d+) passed", text) or re.search(r"(\d+) tests collected", text)
@@ -278,7 +295,7 @@ def check_backend_count(output_path: Path) -> list[Mismatch]:
 
 
 def check_frontend_count(output_path: Path) -> list[Mismatch]:
-    text = _read(output_path)
+    text = _strip_ansi(_read(output_path))
     m = re.search(r"Tests\s+(\d+) passed", text)
     if not m:
         raise SystemExit(
