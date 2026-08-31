@@ -417,6 +417,14 @@ npm run test:e2e:ui          # interactive
 ```
 Covers: home page, public recipe browsing, recipe detail, admin recipe CRUD, navigation, support page.
 
+Set `PLAYWRIGHT_TEST_BASE_URL` to run the same suite against a real deployed
+target instead of a local dev server — e.g. staging:
+```bash
+PLAYWRIGHT_TEST_BASE_URL=https://staging.madeforseconds.pages.dev npx playwright test --project=chromium
+```
+When set, `playwright.config.ts` skips starting a local `npm run dev` server
+entirely (it would only ever bind to localhost, never the remote target).
+
 ---
 
 ## CI/CD
