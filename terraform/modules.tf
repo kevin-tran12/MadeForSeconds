@@ -161,6 +161,7 @@ module "observability" {
   gcp_project_id       = var.gcp_project_id
   backend_service_uri  = module.backend-service.service_uri
   notification_channel = google_monitoring_notification_channel.budget_email.name
+  images_bucket_name   = module.storage.images_bucket_name
 
   depends_on = [google_project_service.required_apis]
 }
