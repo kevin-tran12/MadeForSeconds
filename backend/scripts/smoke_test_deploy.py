@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -33,6 +34,30 @@ def _get(url: str, timeout: float = 15.0) -> tuple[int, bytes]:
         return exc.code, exc.read()
 
 
+def _get_tolerating_cold_start(url: str, attempts: int = 4, timeout: float = 20.0) -> tuple[int, bytes]:
+    """Like _get, but retries through a cold start.
+
+    A --no-traffic candidate revision scales back to zero the moment it
+    finishes passing Cloud Run's own startup probe — nothing routes real
+    traffic to it to keep it warm — so this script's own first request is
+    what wakes the instance again. Found live: the promotion pipeline's
+    first real run timed out here (15s default) against an instance that
+    had gone cold mere seconds after booting successfully. Only the first
+    call needs this; by the time it returns, the instance is warm for the
+    checks that follow.
+    """
+    last_exc: BaseException = TimeoutError("no attempts made")
+    for attempt in range(1, attempts + 1):
+        try:
+            return _get(url, timeout=timeout)
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_exc = exc
+            if attempt < attempts:
+                print(f"  (cold start? attempt {attempt}/{attempts} failed: {exc} — retrying)")
+                time.sleep(5)
+    raise last_exc
+
+
 def _check(label: str, condition: bool, detail: str = "") -> None:
     status = "PASS" if condition else "FAIL"
     print(f"  [{status}] {label}" + (f" — {detail}" if detail and not condition else ""))
@@ -46,7 +71,7 @@ def run(args: argparse.Namespace) -> int:
 
     try:
         print("\n[1] Health check")
-        status, body = _get(f"{base}/api/health")
+        status, body = _get_tolerating_cold_start(f"{base}/api/health")
         _check("GET /api/health returns 200", status == 200, f"HTTP {status}")
         try:
             payload = json.loads(body)
