@@ -316,8 +316,23 @@ jobs:
       - name: Wait for Cloudflare Pages to rebuild the staging alias
         run: sleep 90
 
+      # --project=chromium: matches the "Install Playwright chromium" step
+      # above — firefox/webkit binaries were never installed, so a bare
+      # `playwright test` fails every test on those two projects with
+      # "Executable doesn't exist", found on this pipeline's first real run.
+      #
+      # --grep-invert excludes admin-recipes.spec.ts's whole "Admin Recipes"
+      # suite and navigation.spec.ts's "admin link visibility" test.
+      # Staging deliberately runs with real auth and no dev bypass
+      # (terraform/environments/staging/main.tf's own comment: "staging
+      # exists to exercise real auth... not the dev bypass") — both specs
+      # rely on `sessionStorage.setItem('mfs_dev_admin', 'true')`, which
+      # only works against the local/CI emulator stack. Real staging admin
+      # coverage (auth denial, not the dev bypass) is PR 25/26's job, not
+      # this one's — this is the plan's own already-accepted "No real
+      # Identity Platform login" deviation, not a new gap.
       - name: Run full Playwright E2E suite against staging
-        run: npx playwright test
+        run: npx playwright test --project=chromium --grep-invert "Admin Recipes|admin link visibility"
         env:
           PLAYWRIGHT_TEST_BASE_URL: https://staging.madeforseconds.pages.dev
 
