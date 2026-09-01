@@ -33,6 +33,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.push-staging.outputs.digest }}
       short_sha: ${{ steps.short-sha.outputs.value }}
@@ -72,6 +73,38 @@ jobs:
       - name: Build image
         run: docker build --platform linux/amd64 -t backend:${{ github.sha }} ./backend
 
+      - name: Install trivy
+        env:
+          TRIVY_VERSION: 0.74.0
+          # Published in trivy_${VERSION}_checksums.txt on the release itself
+          # (github.com/aquasecurity/trivy/releases/tag/v0.74.0) — verified
+          # before install, same convention as ci.yml's gitleaks download.
+          TRIVY_SHA256: 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a
+        run: |
+          curl -sSfL -o /tmp/trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  /tmp/trivy.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/trivy.tar.gz -C /tmp trivy
+          sudo install -m 0755 /tmp/trivy /usr/local/bin/trivy
+
+      # CycloneDX SBOM of the exact bytes about to be deployed — generated
+      # before any push, from the local image, so it describes what was
+      # actually built rather than being re-derived from source later.
+      - name: Generate CycloneDX SBOM
+        run: trivy image --format cyclonedx --output /tmp/sbom.cdx.json backend:${{ github.sha }}
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: sbom-backend-${{ github.sha }}
+          path: /tmp/sbom.cdx.json
+
+      # Gates before either registry push — a vulnerable image never leaves
+      # this job. .trivyignore (repo root) is the documented, expiring
+      # allowlist for any HIGH/CRITICAL finding with no available fix.
+      - name: Scan image for HIGH/CRITICAL vulnerabilities
+        run: trivy image --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore backend:${{ github.sha }}
+
       - name: Tag for staging registry
         run: docker tag backend:${{ github.sha }} ${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_STAGING }}/mfs/backend:${{ github.sha }}
 
@@ -106,6 +139,17 @@ jobs:
             echo "::error::Production push digest ($digest) does not match staging's (${{ steps.push-staging.outputs.digest }}) — refusing to deploy an unverified image."
             exit 1
           fi
+
+      # Recorded once against the content-addressed digest (identical in
+      # both registries, verified above), not per-registry — the digest is
+      # what makes this attestation meaningful regardless of which
+      # registry reference it's later pulled through. Verifiable via
+      # `gh attestation verify` against this repo.
+      - name: Generate SLSA provenance attestation
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3
+        with:
+          subject-name: ${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_STAGING }}/mfs/backend
+          subject-digest: ${{ steps.push-staging.outputs.digest }}
 
   staging-apply:
     name: Apply Terraform (staging)

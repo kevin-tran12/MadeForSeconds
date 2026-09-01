@@ -1,0 +1,19 @@
+# Docker's build context has no concept of .gitignore -- COPY . . copies
+# whatever is sitting in this directory on whichever machine runs the
+# build, gitignored or not. Discovered for real while testing PR 21/22's
+# Trivy gate: a local `docker build` baked in backend/.venv (a 223MB
+# Windows-only dev virtualenv, unused and non-functional inside the Linux
+# container) and it surfaced as two spurious CVE findings against packages
+# the running app never actually imports. CI's own build starts from a
+# fresh `actions/checkout` with none of this present, so production was
+# never exposed -- but a build's output shouldn't depend on what happens
+# to be lying around on whichever machine ran it.
+.venv/
+.coverage
+.pytest_cache/
+tmp/
+__pycache__/
+*.pyc
+.env
+.env.local
+.env.*.local
