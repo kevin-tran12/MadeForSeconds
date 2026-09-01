@@ -206,7 +206,10 @@ def _detect_toolchain_versions() -> dict:
 
     dockerfile = ROOT / "backend" / "Dockerfile"
     if dockerfile.exists():
-        m = re.search(r"^FROM\s+(\S+)", dockerfile.read_text(encoding="utf-8"), re.MULTILINE)
+        # Digest-pinned (`python:3.12-slim@sha256:...`, PR 21) -- the table
+        # shows the human-readable tag, not the 64-char digest, so strip it
+        # rather than teaching the README to display a hash.
+        m = re.search(r"^FROM\s+([^\s@]+)", dockerfile.read_text(encoding="utf-8"), re.MULTILINE)
         if m:
             result["docker_base"] = m.group(1)
 
@@ -218,7 +221,19 @@ def _detect_toolchain_versions() -> dict:
     if workflows_dir.exists():
         actions: set[str] = set()
         for workflow_file in sorted(workflows_dir.glob("*.yml")):
-            actions.update(re.findall(r"uses:\s*(\S+)", workflow_file.read_text(encoding="utf-8")))
+            for line in workflow_file.read_text(encoding="utf-8").splitlines():
+                m = re.search(r"uses:\s*(\S+)@([0-9a-f]{40})(?:\s*#\s*(\S+))?", line)
+                if m:
+                    # Digest-pinned (PR 21) -- every pinned ref in this repo
+                    # carries a trailing `# vX` comment specifically so
+                    # tooling doesn't have to display the hash; fall back to
+                    # the raw sha if a ref is ever pinned without one.
+                    repo, sha, comment = m.groups()
+                    actions.add(f"{repo}@{comment or sha}")
+                    continue
+                m = re.search(r"uses:\s*(\S+)", line)
+                if m:
+                    actions.add(m.group(1))
         if actions:
             result["actions"] = ", ".join("`" + a + "`" for a in sorted(actions))
 
