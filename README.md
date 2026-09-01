@@ -21,7 +21,7 @@ A personal recipe site with supporter subscriptions, a TOTP-gated expense ledger
 | Backend hosting | GCP Cloud Run (scale to zero) |
 | Frontend hosting | Cloudflare Pages |
 | DNS / CDN | Cloudflare |
-| CI/CD | GitHub Actions + Cloud Build (backend) / Cloudflare Pages (frontend) |
+| CI/CD | GitHub Actions (build, staging/production apply + deploy) + Cloudflare Pages (frontend) |
 | Infrastructure | Terraform |
 | Observability | Cloud Monitoring alert policies (uptime, error rate, 5xx) + weekly usage email, budget-capped infra |
 
@@ -178,7 +178,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (523 tests across 27 files)
+│   ├── tests/                  Pytest suite (527 tests across 28 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -198,7 +198,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   ├── modules/
 │   │   ├── security/           Backend SA, Secret Manager, Identity Platform
 │   │   ├── storage/             Images + receipts buckets, Firestore
-│   │   ├── backend-service/     Cloud Run, Artifact Registry, Cloud Build, scheduler
+│   │   ├── backend-service/     Cloud Run, Artifact Registry, scheduler
 │   │   ├── observability/       Uptime check, error/5xx log metrics + alerts
 │   │   └── cost-controls/       Budget, breaker Cloud Functions, breaker-reset job
 │   └── *.tf                    Providers, variables, shared root-level resources
@@ -281,7 +281,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (523 tests)
+npm run test:backend                    # Pytest (527 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -397,7 +397,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (523 tests, 27 files)
+### Backend — pytest (527 tests, 28 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
@@ -510,7 +510,7 @@ gcloud logging read 'resource.labels.service_name="mfs-backend" AND textPayload:
 
 All `*.madeforseconds.pages.dev` preview URLs are pre-approved in the backend CORS config.
 
-### Backend (GCP Cloud Run — manual or Cloud Build)
+### Backend (GCP Cloud Run — manual or the deploy pipeline)
 
 After merging backend changes to `main`:
 
@@ -530,7 +530,7 @@ gcloud run services update mfs-backend \
   --project made-for-seconds
 ```
 
-Or push to `main` — Cloud Build runs these steps automatically if the trigger is configured.
+Or push to `main` — [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs these steps automatically, against staging first and production only after a full staging E2E pass (see [docs/DEPLOYMENT.md § Merge-to-main promotion pipeline](docs/DEPLOYMENT.md#merge-to-main-promotion-pipeline)).
 
 ### What requires what kind of deploy?
 
