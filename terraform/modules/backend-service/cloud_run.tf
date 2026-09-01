@@ -60,8 +60,28 @@ resource "google_cloud_run_v2_service" "backend" {
     # Image rollout and infra rollout must be able to happen independently.
     #
     # client/client_version are metadata gcloud stamps on deploys it performs.
+    #
+    # template[0].revision and the top-level `scaling` block: neither is set
+    # anywhere in this config (min_instance_count/max_instance_count below
+    # live under template.scaling — a *different* block from this resource's
+    # separate top-level `scaling`, which the google provider schema exposes
+    # for manual-scaling mode and which this config has no opinion on at
+    # all). Cloud Run's own API populates both as a side effect of
+    # `gcloud run deploy` (the deploy pipeline's --no-traffic candidate
+    # deploys), and every apply since then read them back as drift and
+    # cleared them again. Harmless when applies and deploys were minutes or
+    # hours apart, as they always were before the promotion pipeline
+    # (PR 10) — but the pipeline runs `terraform apply` immediately before
+    # `gcloud run deploy`, and an apply clearing these fields at nearly the
+    # same moment a new instance is starting was followed by that
+    # instance's startup probe failing, twice in a row, on this pipeline's
+    # first real runs. template.scaling's own min/max (the two fields this
+    # config actually sets) are deliberately NOT ignored — those stay real
+    # Terraform-owned infrastructure decisions.
     ignore_changes = [
       template[0].containers[0].image,
+      template[0].revision,
+      scaling,
       client,
       client_version,
     ]
