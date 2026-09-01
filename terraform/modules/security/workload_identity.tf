@@ -172,9 +172,26 @@ resource "google_project_iam_member" "terraform_pubsub_admin" {
   member  = "serviceAccount:${google_service_account.terraform[0].email}"
 }
 
+# Editor doesn't cover Cloud Logging admin operations either — found the same
+# way as the secretmanager/pubsub gaps above: a real apply (PR 23, this
+# config's own google_logging_project_exclusion and
+# google_logging_project_bucket_config resources), not code review. Scoped
+# to configWriter rather than the broader logging.admin — this identity
+# manages exclusions and bucket retention, not sinks or log-based metric
+# *views*, and configWriter is exactly the permission set for that
+# (logging.exclusions.*, logging.buckets.*), confirmed via `gcloud iam
+# roles describe roles/logging.configWriter` rather than assumed from the
+# role's name.
+resource "google_project_iam_member" "terraform_logging_config_writer" {
+  count   = var.deployment_target == "production" ? 1 : 0
+  project = var.gcp_project_id
+  role    = "roles/logging.configWriter"
+  member  = "serviceAccount:${google_service_account.terraform[0].email}"
+}
+
 # ─── mfs-terraform's own permissions — staging (cross-project) ────────────────
 #
-# The same identity, granted the same three roles on the OTHER project, so
+# The same identity, granted the same four roles on the OTHER project, so
 # one WIF pool/SA pair can apply Terraform against both environments — see
 # staging_gcp_project_id's description in variables.tf for why this isn't a
 # second WIF pool. Skipped entirely (count = 0) until that variable is set,
@@ -211,5 +228,12 @@ resource "google_project_iam_member" "terraform_pubsub_admin_staging" {
   count   = var.deployment_target == "production" && var.staging_gcp_project_id != "" ? 1 : 0
   project = var.staging_gcp_project_id
   role    = "roles/pubsub.admin"
+  member  = "serviceAccount:${google_service_account.terraform[0].email}"
+}
+
+resource "google_project_iam_member" "terraform_logging_config_writer_staging" {
+  count   = var.deployment_target == "production" && var.staging_gcp_project_id != "" ? 1 : 0
+  project = var.staging_gcp_project_id
+  role    = "roles/logging.configWriter"
   member  = "serviceAccount:${google_service_account.terraform[0].email}"
 }

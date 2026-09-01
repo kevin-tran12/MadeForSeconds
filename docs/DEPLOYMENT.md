@@ -159,8 +159,14 @@ narrowly scoped to push-and-deploy only): Terraform needs to manage IAM, service
 secrets, Firestore, and monitoring across the whole project, which is a
 fundamentally broader surface — `roles/editor` +
 `roles/resourcemanager.projectIamAdmin` + `roles/iam.serviceAccountAdmin` +
-`roles/secretmanager.admin` + `roles/pubsub.admin` on both the production
-and staging projects. Read the two values GitHub Actions needs and set them
+`roles/secretmanager.admin` + `roles/pubsub.admin` + `roles/logging.configWriter`
+on both the production and staging projects. Each of the four roles beyond
+`editor` closes one specific gap in what Editor doesn't cover — found by
+running a real apply under this identity, not by reading role
+documentation (PR 8 for the first three; PR 23's audit-log exclusion and
+log-bucket retention config for the fourth, which needs
+`logging.exclusions.*`/`logging.buckets.*`, permissions `roles/editor`
+doesn't include). Read the two values GitHub Actions needs and set them
 as repo variables (Settings → Secrets and variables → Actions →
 Variables) — `WIF_PROVIDER` and `WIF_SERVICE_ACCOUNT`:
 
