@@ -119,7 +119,9 @@ def mock_cache():
     """Patches the app.cache singleton with a MagicMock."""
     with (
         patch("app.cache.cache") as mock,
-        patch("app.routes.public.cache", new=mock)
+        patch("app.routes.public.cache", new=mock),
+        patch("app.routes.subscriptions.cache", new=mock),
+        patch("app.routes.admin.cache", new=mock),
     ):
         mock.get.return_value = None
         yield mock

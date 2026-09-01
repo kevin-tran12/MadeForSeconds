@@ -210,32 +210,87 @@ def test_cancel_confirm_valid_token(client, mock_db, mock_stripe):
         mock_stripe.Subscription.cancel.assert_called_once_with("sub_123")
         mock_db.collection.return_value.document.return_value.update.assert_called_once()
 
-def test_public_supporters_list(client, mock_db):
-    """Returns only name_enabled supporters."""
-    # Subscriber doc
+def _supporters_query_mocks(sub_docs, don_docs):
+    """Builds the two per-collection query-chain mocks list_supporters issues:
+    .where("public_listing", "==", True).order_by(...).limit(...).stream()."""
+    sub_collection = MagicMock()
+    sub_collection.where.return_value.order_by.return_value.limit.return_value.stream.return_value = iter(sub_docs)
+    don_collection = MagicMock()
+    don_collection.where.return_value.order_by.return_value.limit.return_value.stream.return_value = iter(don_docs)
+    return sub_collection, don_collection
+
+
+def test_public_supporters_list(client, mock_db, mock_cache):
+    """Returns publicly-listed supporters sorted by total donated, highest first."""
     sub_doc = MagicMock()
-    sub_doc.to_dict.return_value = {
-        "display_name": "Sub 1",
-        "name_enabled": True,
-        "status": "active"
-    }
-    # Donation doc
+    sub_doc.to_dict.return_value = {"display_name": "Sub 1", "total_donated_cents": 500}
     don_doc = MagicMock()
-    don_doc.to_dict.return_value = {
-        "display_name": "Don 1",
-        "name_enabled": False # Should be hidden
-    }
-    
-    mock_db.collection.side_effect = [
-        MagicMock(where=MagicMock(return_value=MagicMock(stream=MagicMock(return_value=iter([sub_doc]))))), # subscribers
-        MagicMock(stream=MagicMock(return_value=iter([don_doc]))) # donations
-    ]
-    
+    don_doc.to_dict.return_value = {"display_name": "Don 1", "total_donated_cents": 1000}
+
+    sub_collection, don_collection = _supporters_query_mocks([sub_doc], [don_doc])
+    mock_db.collection.side_effect = [sub_collection, don_collection]
+
     response = client.get("/api/subscribe/supporters")
     assert response.status_code == 200
     data = response.json()
-    assert len(data) == 1
-    assert data[0]["display_name"] == "Sub 1"
+    assert [s["display_name"] for s in data] == ["Don 1", "Sub 1"]
+
+    # The query filters on the denormalised flag server-side rather than
+    # streaming everything and filtering in Python.
+    sub_collection.where.assert_called_once_with("public_listing", "==", True)
+    don_collection.where.assert_called_once_with("public_listing", "==", True)
+
+
+def test_supporters_query_is_bounded_by_limit(client, mock_db, mock_cache):
+    """Each collection read is a LIMIT query, not a full scan — the query
+    itself is bounded regardless of how many supporters actually exist."""
+    from app.routes.subscriptions import _SUPPORTERS_MAX_LIMIT
+
+    sub_collection, don_collection = _supporters_query_mocks([], [])
+    mock_db.collection.side_effect = [sub_collection, don_collection]
+
+    response = client.get("/api/subscribe/supporters")
+    assert response.status_code == 200
+
+    sub_collection.where.return_value.order_by.return_value.limit.assert_called_once_with(_SUPPORTERS_MAX_LIMIT)
+    don_collection.where.return_value.order_by.return_value.limit.assert_called_once_with(_SUPPORTERS_MAX_LIMIT)
+
+
+def test_supporters_response_respects_requested_limit(client, mock_db, mock_cache):
+    """A caller-supplied ?limit= slices the (already bounded) result further,
+    on top of the server-side cap — proves the response size tracks the
+    requested page size, not whatever the query happened to return."""
+    docs = [
+        MagicMock(to_dict=MagicMock(return_value={"display_name": f"Supporter {i}", "total_donated_cents": i}))
+        for i in range(10)
+    ]
+    sub_collection, don_collection = _supporters_query_mocks(docs, [])
+    mock_db.collection.side_effect = [sub_collection, don_collection]
+
+    response = client.get("/api/subscribe/supporters?limit=3")
+    assert response.status_code == 200
+    assert len(response.json()) == 3
+
+
+def test_supporters_list_is_cached_across_requests(client, mock_db, mock_cache):
+    """A second request must not re-query Firestore — the cache is checked
+    first and only populated on a miss."""
+    sub_doc = MagicMock()
+    sub_doc.to_dict.return_value = {"display_name": "Sub 1", "total_donated_cents": 500}
+    sub_collection, don_collection = _supporters_query_mocks([sub_doc], [])
+    mock_db.collection.side_effect = [sub_collection, don_collection]
+
+    first = client.get("/api/subscribe/supporters")
+    assert first.status_code == 200
+    mock_cache.set.assert_called_once()
+    cached_value = mock_cache.set.call_args[0][1]
+
+    mock_cache.get.return_value = cached_value
+    mock_db.collection.side_effect = AssertionError("second request should not hit Firestore")
+
+    second = client.get("/api/subscribe/supporters")
+    assert second.status_code == 200
+    assert second.json() == first.json()
 
 
 # ── Webhook processing: fakes (no Firestore SDK / transaction-retry machinery) ──
@@ -445,10 +500,27 @@ def test_apply_subscription_checkout_existing_subscriber_uses_increment():
     ref, payload = txn.update_calls[0]
     assert ref is existing.reference
     assert isinstance(payload["total_donated_cents"], Increment)
-    # public_listing isn't touched on an update — this write never changes
-    # display_name/name_enabled, so Firestore's partial-merge .update()
-    # must leave whatever value is already there alone.
-    assert "public_listing" not in payload
+    # No display_name/name_enabled on this fixture, so recompute -> False.
+    assert payload["public_listing"] is False
+
+
+def test_apply_subscription_checkout_resubscribe_restores_public_listing():
+    """A resubscribe (existing subscriber, new checkout session) must
+    restore public_listing from the still-stored display preference —
+    not leave it wherever a prior cancellation last set it."""
+    from app.routes.subscriptions import _apply_subscription_checkout
+    txn = FakeTransaction()
+    existing = FakeSnapshot(
+        exists=True,
+        data={"email": "a@b.com", "display_name": "Ann", "name_enabled": True, "public_listing": False},
+    )
+    data = {
+        "customer": "cus_1", "subscription": "sub_1",
+        "customer_details": {"email": "a@b.com"}, "amount_total": 500,
+    }
+    outcome = _apply_subscription_checkout(txn, FakeDb(), data, existing, _NOW)
+    assert outcome == "processed"
+    assert txn.update_calls[0][1]["public_listing"] is True
 
 
 def test_apply_subscription_updated_not_found_raises():
@@ -466,6 +538,27 @@ def test_apply_subscription_updated_found_updates_status():
     assert txn.update_calls[0][1]["status"] == "past_due"
 
 
+def test_apply_subscription_updated_past_due_clears_public_listing():
+    """A lapsed subscriber must vanish from the public list even though
+    display_name/name_enabled never changed — list_supporters no longer
+    filters on status in Python, so public_listing has to track it."""
+    from app.routes.subscriptions import _apply_subscription_updated
+    txn = FakeTransaction()
+    existing = FakeSnapshot(exists=True, data={"display_name": "Ann", "name_enabled": True, "public_listing": True})
+    _apply_subscription_updated(txn, {"id": "sub_1", "status": "past_due"}, existing, _NOW)
+    assert txn.update_calls[0][1]["public_listing"] is False
+
+
+def test_apply_subscription_updated_reactivated_recomputes_public_listing():
+    """Recovering back to active must re-derive public_listing from the
+    subscriber's own display preference, not just flip it back to True."""
+    from app.routes.subscriptions import _apply_subscription_updated
+    txn = FakeTransaction()
+    existing = FakeSnapshot(exists=True, data={"display_name": "Ann", "name_enabled": False, "public_listing": False})
+    _apply_subscription_updated(txn, {"id": "sub_1", "status": "active"}, existing, _NOW)
+    assert txn.update_calls[0][1]["public_listing"] is False  # name_enabled=False -> still excluded
+
+
 def test_apply_subscription_deleted_not_found_raises():
     from app.routes.subscriptions import _apply_subscription_deleted
     with pytest.raises(WebhookProcessingError):
@@ -479,6 +572,7 @@ def test_apply_subscription_deleted_found_cancels():
     outcome = _apply_subscription_deleted(txn, {"id": "sub_1"}, existing, _NOW)
     assert outcome == "processed"
     assert txn.update_calls[0][1]["status"] == "canceled"
+    assert txn.update_calls[0][1]["public_listing"] is False
 
 
 def test_apply_payment_failed_no_subscription_id_ignored():
@@ -493,6 +587,14 @@ def test_apply_payment_failed_not_found_raises():
     from app.routes.subscriptions import _apply_payment_failed
     with pytest.raises(WebhookProcessingError):
         _apply_payment_failed(FakeTransaction(), {"subscription": "sub_1"}, None, _NOW)
+
+
+def test_apply_payment_failed_clears_public_listing():
+    from app.routes.subscriptions import _apply_payment_failed
+    txn = FakeTransaction()
+    existing = FakeSnapshot(exists=True, data={"display_name": "Ann", "name_enabled": True, "public_listing": True})
+    _apply_payment_failed(txn, {"subscription": "sub_1"}, existing, _NOW)
+    assert txn.update_calls[0][1]["public_listing"] is False
 
 
 def test_apply_payment_succeeded_subscription_create_ignored():

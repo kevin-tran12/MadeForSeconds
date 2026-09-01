@@ -39,9 +39,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import config  # noqa: E402
 from app.firestore import get_db  # noqa: E402
-from app.routes.subscriptions import compute_public_listing  # noqa: E402
+from app.routes.subscriptions import compute_public_listing, _public_listing_for_status  # noqa: E402
 
 COLLECTIONS = ("subscribers", "donations")
+
+
+def _expected_public_listing(collection: str, data: dict) -> bool:
+    """subscribers has a status lifecycle (active/past_due/canceled) that
+    must also gate public_listing — see _public_listing_for_status's own
+    docstring — donations has no such field and was never filtered on one."""
+    if collection == "subscribers":
+        return _public_listing_for_status(data, data.get("status", ""))
+    return compute_public_listing(data.get("display_name"), data.get("name_enabled", True))
 
 
 def run(args: argparse.Namespace) -> int:
@@ -54,7 +63,7 @@ def run(args: argparse.Namespace) -> int:
         for doc in db.collection(collection).stream():
             scanned += 1
             data = doc.to_dict() or {}
-            expected = compute_public_listing(data.get("display_name"), data.get("name_enabled", True))
+            expected = _expected_public_listing(collection, data)
 
             if data.get("public_listing") == expected:
                 correct += 1

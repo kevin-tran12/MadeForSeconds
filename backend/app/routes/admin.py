@@ -290,6 +290,7 @@ async def approve_note(collection: str, doc_id: str):
         "note_pending_public": None,
         "updated_at": datetime.now(timezone.utc),
     })
+    cache.clear()
     return {"approved": True, "note": note}
 
 
@@ -359,6 +360,7 @@ async def toggle_note(collection: str, doc_id: str):
         "note_enabled": not current,
         "updated_at": datetime.now(timezone.utc),
     })
+    cache.clear()
     return {"note_enabled": not current}
 
 
@@ -382,4 +384,5 @@ async def toggle_name(collection: str, doc_id: str):
         "public_listing": compute_public_listing(data.get("display_name"), new_name_enabled),
         "updated_at": datetime.now(timezone.utc),
     })
+    cache.clear()
     return {"name_enabled": new_name_enabled}

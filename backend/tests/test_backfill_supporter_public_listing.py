@@ -66,7 +66,7 @@ def test_dry_run_never_writes(backfill):
 
 
 def test_already_correct_is_left_alone(backfill):
-    doc = FakeDoc("d1", {"display_name": "Alex", "name_enabled": True, "public_listing": True})
+    doc = FakeDoc("d1", {"display_name": "Alex", "name_enabled": True, "status": "active", "public_listing": True})
     db = FakeDb(subscribers=[doc])
     args = Namespace(project="test-project", live=True)
 
@@ -111,8 +111,37 @@ def test_no_display_name_expects_false(backfill):
 
 
 def test_missing_name_enabled_field_defaults_true(backfill):
-    doc = FakeDoc("d1", {"display_name": "Alex"})  # name_enabled never set
+    doc = FakeDoc("d1", {"display_name": "Alex", "status": "active"})  # name_enabled never set
     db = FakeDb(subscribers=[doc])
+    args = Namespace(project="test-project", live=True)
+
+    with patch.object(backfill, "get_db", return_value=db):
+        backfill.run(args)
+
+    assert doc.reference.updates == [{"public_listing": True}]
+
+
+def test_subscriber_with_lapsed_status_expects_false(backfill):
+    """A subscriber whose display preference alone would qualify them, but
+    whose subscription has lapsed, must still backfill to False — the old
+    read path filtered on status == "active" in Python; this backfill
+    feeds the new indexed read path, which has no such filter of its own."""
+    doc = FakeDoc("d1", {"display_name": "Alex", "name_enabled": True, "status": "canceled"})
+    db = FakeDb(subscribers=[doc])
+    args = Namespace(project="test-project", live=True)
+
+    with patch.object(backfill, "get_db", return_value=db):
+        backfill.run(args)
+
+    assert doc.reference.updates == [{"public_listing": False}]
+
+
+def test_donation_has_no_status_gate(backfill):
+    """donations has no status lifecycle — a display_name/name_enabled=True
+    donation doc backfills to True regardless, matching pre-existing
+    (never status-filtered) behaviour for one-time donors."""
+    doc = FakeDoc("d1", {"display_name": "Alex", "name_enabled": True})
+    db = FakeDb(donations=[doc])
     args = Namespace(project="test-project", live=True)
 
     with patch.object(backfill, "get_db", return_value=db):
@@ -134,7 +163,7 @@ def test_write_failure_is_counted_and_exits_nonzero(backfill):
 
 
 def test_both_collections_are_scanned(backfill):
-    sub_doc = FakeDoc("s1", {"display_name": "Sub", "name_enabled": True})
+    sub_doc = FakeDoc("s1", {"display_name": "Sub", "name_enabled": True, "status": "active"})
     don_doc = FakeDoc("d1", {"display_name": "Don", "name_enabled": True})
     db = FakeDb(subscribers=[sub_doc], donations=[don_doc])
     args = Namespace(project="test-project", live=True)

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud.firestore import Increment, transactional
 from pydantic import BaseModel, Field
 
+from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
 from ..log_redaction import keyed_hash
@@ -117,6 +118,10 @@ def _apply_subscription_checkout(transaction, db, data: dict, existing_doc, now,
     # correlate this line with Stripe's own dashboard.
     if existing_doc:
         subscriber_data["total_donated_cents"] = Increment(amount_total)
+        # A resubscribe after a prior cancellation must restore public_listing
+        # from the subscriber's own still-stored display preference, not
+        # leave it stuck on whatever _apply_subscription_deleted set it to.
+        subscriber_data["public_listing"] = _public_listing_for_status(existing_doc.to_dict(), "active")
         transaction.update(existing_doc.reference, subscriber_data)
         logger.info("Updated subscriber (event=%s)", event_id)
     else:
@@ -133,6 +138,21 @@ def _apply_subscription_checkout(transaction, db, data: dict, existing_doc, now,
     return "processed"
 
 
+def _public_listing_for_status(data: dict, status: str) -> bool:
+    """public_listing must track status, not just display preference — the
+    old read path filtered supporters to status == "active" in Python;
+    the indexed read path (list_supporters) has no such filter, so a
+    subscriber whose subscription lapses must be denormalised out of
+    public_listing here or they'd stay visible forever once first listed.
+    Shared with backfill_supporter_public_listing.py rather than
+    re-derived there — a second copy of this rule is exactly how a stale
+    or wrong listing would come back, same reasoning as
+    compute_public_listing's own docstring."""
+    if status != "active":
+        return False
+    return compute_public_listing(data.get("display_name"), data.get("name_enabled", True))
+
+
 def _apply_subscription_updated(transaction, data: dict, existing_doc, now, event_id=None) -> str:
     status = data.get("status")
     current_period_end = data.get("current_period_end")
@@ -140,7 +160,11 @@ def _apply_subscription_updated(transaction, data: dict, existing_doc, now, even
     if existing_doc is None:
         raise WebhookProcessingError(f"Subscription updated but no subscriber found (event={event_id})")
 
-    update_data: dict = {"status": status, "updated_at": now}
+    update_data: dict = {
+        "status": status,
+        "updated_at": now,
+        "public_listing": _public_listing_for_status(existing_doc.to_dict(), status),
+    }
     if current_period_end:
         update_data["current_period_end"] = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
 
@@ -153,7 +177,9 @@ def _apply_subscription_deleted(transaction, data: dict, existing_doc, now, even
     if existing_doc is None:
         raise WebhookProcessingError(f"Subscription deleted but no subscriber found (event={event_id})")
 
-    transaction.update(existing_doc.reference, {"status": "canceled", "updated_at": now})
+    transaction.update(
+        existing_doc.reference, {"status": "canceled", "updated_at": now, "public_listing": False}
+    )
     logger.info("Subscription canceled (event=%s)", event_id)
     return "processed"
 
@@ -165,7 +191,9 @@ def _apply_payment_failed(transaction, data: dict, existing_doc, now, event_id=N
     if existing_doc is None:
         raise WebhookProcessingError(f"Payment failed but no subscriber found (event={event_id})")
 
-    transaction.update(existing_doc.reference, {"status": "past_due", "updated_at": now})
+    transaction.update(
+        existing_doc.reference, {"status": "past_due", "updated_at": now, "public_listing": False}
+    )
     logger.info("Payment failed (event=%s)", event_id)
     return "processed"
 
@@ -591,6 +619,11 @@ async def stripe_webhook(request: Request):
             f"event_id={event_id}<br>Stripe never captured an email for this checkout — "
             "retrying won't add one; needs manual reconciliation in the Stripe dashboard.",
         )
+    elif outcome == "processed":
+        # A processed event can change display_name, public_listing, or a
+        # totals field the cached supporter list depends on (a skipped
+        # replay or an ignored/ineligible event never touches any of that).
+        cache.clear()
 
     return {"status": "ok"}
 
@@ -728,6 +761,7 @@ async def setup_profile(body: SetupProfileRequest):
             update_data["public_listing"] = compute_public_listing(display_name, True)  # unset -> defaults True
             db.collection("donations").add(update_data)
 
+    cache.clear()
     return SetupProfileResponse(
         display_name=display_name or None,
         note=note or None,
@@ -820,37 +854,55 @@ async def cancel_confirm(body: CancelConfirmRequest):
     return {"message": "Your subscription has been canceled. Thank you for your support!"}
 
 
-@router.get("/supporters", response_model=list[Supporter])
+_SUPPORTERS_MAX_LIMIT = 100
+_SUPPORTERS_CACHE_KEY = f"supporters:top{_SUPPORTERS_MAX_LIMIT}"
+
+
+def _supporter_row(data: dict) -> dict:
+    note = data.get("note") if (data.get("note_is_public") and data.get("note_enabled", True)) else None
+    total = data.get("total_donated_cents", data.get("amount_cents", 0))
+    return {"display_name": data["display_name"], "note": note, "total": total}
+
+
+@router.get(
+    "/supporters",
+    response_model=list[Supporter],
+    dependencies=[Depends(rate_limit("supporters", 60, 60))],
+)
 async def list_supporters(limit: int | None = None):
-    """Return display names and public notes of supporters, sorted by total donated."""
-    db = get_db()
-    supporters = []
+    """Return display names and public notes of supporters, sorted by total donated.
 
-    # Active subscribers with display names
-    sub_docs = db.collection("subscribers").where("status", "==", "active").stream()
-    for doc in sub_docs:
-        data = doc.to_dict()
-        name = data.get("display_name")
-        if name and data.get("name_enabled", True):
-            note = data.get("note") if (data.get("note_is_public") and data.get("note_enabled", True)) else None
-            total = data.get("total_donated_cents", 0)
-            supporters.append({"display_name": name, "note": note, "total": total})
+    Bounded and indexed rather than a full collection scan: public_listing
+    (denormalised at every write that can change it — see
+    compute_public_listing and _public_listing_for_status) plus the
+    (public_listing, total_donated_cents) composite index means each
+    collection read is a LIMIT query, so cost no longer grows with the
+    number of supporters. Cached once at the max page size and sliced down
+    per request rather than per requested limit, so a burst of different
+    limit values shares one cache entry instead of fragmenting the cache.
+    """
+    requested = min(limit, _SUPPORTERS_MAX_LIMIT) if limit and limit > 0 else _SUPPORTERS_MAX_LIMIT
 
-    # One-time donors with display names
-    donation_docs = db.collection("donations").stream()
-    for doc in donation_docs:
-        data = doc.to_dict()
-        name = data.get("display_name")
-        if name and data.get("name_enabled", True):
-            note = data.get("note") if (data.get("note_is_public") and data.get("note_enabled", True)) else None
-            total = data.get("total_donated_cents", data.get("amount_cents", 0))
-            supporters.append({"display_name": name, "note": note, "total": total})
+    supporters = cache.get(_SUPPORTERS_CACHE_KEY)
+    if supporters is None:
+        db = get_db()
+        supporters = []
+        for collection in ("subscribers", "donations"):
+            docs = (
+                db.collection(collection)
+                .where("public_listing", "==", True)
+                .order_by("total_donated_cents", direction="DESCENDING")
+                .limit(_SUPPORTERS_MAX_LIMIT)
+                .stream()
+            )
+            supporters.extend(_supporter_row(doc.to_dict()) for doc in docs)
 
-    # Sort by total donated (top donors first)
-    supporters.sort(key=lambda s: s.get("total", 0), reverse=True)
+        # Each source query already returns its own top _SUPPORTERS_MAX_LIMIT
+        # sorted descending, so the true global top _SUPPORTERS_MAX_LIMIT is
+        # guaranteed to be within this merged set.
+        supporters.sort(key=lambda s: s.get("total", 0), reverse=True)
+        supporters = supporters[:_SUPPORTERS_MAX_LIMIT]
+        cache.set(_SUPPORTERS_CACHE_KEY, supporters)
 
-    if limit and limit > 0:
-        supporters = supporters[:limit]
-
-    return [Supporter(display_name=s["display_name"], note=s.get("note")) for s in supporters]
+    return [Supporter(display_name=s["display_name"], note=s.get("note")) for s in supporters[:requested]]
 
