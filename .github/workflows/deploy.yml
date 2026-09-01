@@ -37,7 +37,7 @@ jobs:
       digest: ${{ steps.push-staging.outputs.digest }}
       short_sha: ${{ steps.short-sha.outputs.value }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       # Cloud Run's own limit: a --tag value plus the service name
       # ("mfs-backend", 11 chars) together can't exceed 46 characters.
@@ -55,7 +55,7 @@ jobs:
       # Authenticated per-project below since mfs-deploy is a separate
       # identity in each project, not the one shared mfs-terraform is.
       - name: Authenticate as mfs-deploy (staging)
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: mfs-deploy@${{ vars.GCP_PROJECT_ID_STAGING }}.iam.gserviceaccount.com
@@ -85,7 +85,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Authenticate as mfs-deploy (production)
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: mfs-deploy@${{ vars.GCP_PROJECT_ID_PROD }}.iam.gserviceaccount.com
@@ -115,15 +115,15 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4
         with:
           terraform_version: 1.15.9
 
       - name: Authenticate as mfs-terraform
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
@@ -193,10 +193,10 @@ jobs:
     outputs:
       url: ${{ steps.describe.outputs.url }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Authenticate as mfs-deploy (staging)
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: mfs-deploy@${{ vars.GCP_PROJECT_ID_STAGING }}.iam.gserviceaccount.com
@@ -247,10 +247,10 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: '3.12'
 
@@ -263,7 +263,7 @@ jobs:
       # covers Firestore, so this reuses an existing grant rather than
       # adding a third identity or widening mfs-deploy's narrow scope.
       - name: Authenticate as mfs-terraform
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
@@ -283,10 +283,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Set up Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: '22'
           cache: npm
@@ -338,7 +338,7 @@ jobs:
 
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: playwright-report-staging
           path: playwright-report/
@@ -352,15 +352,15 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4
         with:
           terraform_version: 1.15.9
 
       - name: Authenticate as mfs-terraform
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
@@ -421,10 +421,10 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Authenticate as mfs-deploy (production)
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed  # v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: mfs-deploy@${{ vars.GCP_PROJECT_ID_PROD }}.iam.gserviceaccount.com
