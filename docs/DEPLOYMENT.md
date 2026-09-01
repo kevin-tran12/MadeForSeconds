@@ -469,6 +469,23 @@ Federation pool described below — `mfs-deploy` needs the same
 `roles/iam.workloadIdentityUser` binding `mfs-terraform` already had, added
 in `modules/security/workload_identity.tf`.
 
+**Supply-chain gate, before either registry push.** The `build` job scans
+the freshly built local image with Trivy (`--severity HIGH,CRITICAL
+--exit-code 1`) before it ever reaches staging or production — a vulnerable
+image never gets pushed to either registry. `.trivyignore` (repo root) is
+the documented, dated allowlist for a HIGH/CRITICAL finding with no fix
+available yet; every entry carries an expiry and the reason it's safe to
+defer, per the file's own header comment. The same step also emits a
+CycloneDX SBOM (uploaded as a build artifact, `sbom-backend-<sha>`) and a
+GitHub-native SLSA provenance attestation against the verified staging
+digest (`actions/attest-build-provenance`, independently checkable via `gh
+attestation verify`) — both describe the exact bytes that get promoted to
+production, not something re-derived from source afterward. The backend
+image and every `uses:` in this repo's workflow files are pinned by
+digest/SHA rather than a mutable tag, each with a `# vX` comment for
+readability; Dependabot's `docker` and `github-actions` ecosystems keep
+those pins current.
+
 **Required GitHub Actions secrets, in addition to the ones set up in the
 pre-flight checklist.** The staging ones reuse `STRIPE_TEST_SECRET_KEY`,
 `STRIPE_TEST_WEBHOOK_SECRET`, and `STAGING_SUBSCRIBER_JWT_SECRET`, already

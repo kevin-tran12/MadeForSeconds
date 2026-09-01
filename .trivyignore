@@ -1,0 +1,37 @@
+# Trivy vulnerability allowlist for the backend container image, enforced by
+# .github/workflows/deploy.yml's "Scan image for HIGH/CRITICAL
+# vulnerabilities" step (--severity HIGH,CRITICAL --exit-code 1).
+#
+# Every entry MUST carry an expiry date and a reason — an unreviewed
+# permanent waiver is exactly how a real vulnerability stays unpatched
+# forever. When an entry expires, either the fix has shipped upstream (drop
+# the line) or it hasn't (open a fresh dated entry with updated
+# justification — don't silently extend the old one).
+#
+# Format:
+#   CVE-YYYY-NNNNN  # reason — added YYYY-MM-DD, expires YYYY-MM-DD
+#
+# Current entries, added 2026-09-01 while wiring up the gate for the first
+# time (hardening plan PR 22): every one is a Debian OS package baked into
+# python:3.12-slim with no fix published yet (empty "Fixed Version" in
+# `trivy image` output — confirmed by actually running the scan, not
+# assumed), and every affected package (perl, gzip, libacl1, libsqlite3-0,
+# ncurses) is base-OS tooling this FastAPI app never shells out to or
+# otherwise reaches at runtime — real exposure is materially lower than the
+# CVSS score alone implies. Re-run `trivy image --severity HIGH,CRITICAL
+# <image>` against a fresh build past the expiry date; drop whichever
+# entries Debian has since fixed, re-date the rest with updated
+# justification if they're somehow still open.
+CVE-2026-41992  # gzip — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-54369  # libacl1 — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2025-69720  # ncurses (libncursesw6/libtinfo6/ncurses-base/ncurses-bin) — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-11822  # libsqlite3-0 — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-11824  # libsqlite3-0 — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-13221  # perl-base — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-42496  # perl-base (perl-archive-tar) — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-8376   # perl-base — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-42497  # perl-base (perl-Archive-Tar) — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-48962  # perl-base (perl-IO-Compress) — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-57432  # perl-base — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-57433  # perl-base (Storable) — no fix published — added 2026-09-01, expires 2026-10-01
+CVE-2026-9538   # perl-base (perl-Archive-Tar) — no fix published — added 2026-09-01, expires 2026-10-01

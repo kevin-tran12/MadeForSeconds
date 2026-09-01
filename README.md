@@ -459,7 +459,7 @@ stale for months). Regenerate this table with the same script (`--fix`) rather t
 | `google` / `google-beta` provider | 6.50.0 | `terraform/.terraform.lock.hcl` |
 | Playwright | 1.62.1 | `package.json` |
 | Backend base image | `python:3.12-slim` | `backend/Dockerfile` |
-| GitHub Actions | `actions/checkout@v7`, `actions/setup-node@v7`, `actions/setup-python@v7`, `actions/upload-artifact@v4`, `google-github-actions/auth@v2`, `hashicorp/setup-terraform@v4` | `.github/workflows/*.yml` |
+| GitHub Actions | `actions/attest-build-provenance@v3`, `actions/checkout@v7`, `actions/setup-node@v7`, `actions/setup-python@v7`, `actions/upload-artifact@v4`, `google-github-actions/auth@v2`, `hashicorp/setup-terraform@v4` | `.github/workflows/*.yml` |
 
 ---
 
