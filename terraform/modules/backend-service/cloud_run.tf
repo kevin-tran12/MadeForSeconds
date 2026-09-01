@@ -61,26 +61,31 @@ resource "google_cloud_run_v2_service" "backend" {
     #
     # client/client_version are metadata gcloud stamps on deploys it performs.
     #
-    # template[0].revision and the top-level `scaling` block: neither is set
-    # anywhere in this config (min_instance_count/max_instance_count below
-    # live under template.scaling — a *different* block from this resource's
-    # separate top-level `scaling`, which the google provider schema exposes
-    # for manual-scaling mode and which this config has no opinion on at
-    # all). Cloud Run's own API populates both as a side effect of
-    # `gcloud run deploy` (the deploy pipeline's --no-traffic candidate
-    # deploys), and every apply since then read them back as drift and
-    # cleared them again. Harmless when applies and deploys were minutes or
-    # hours apart, as they always were before the promotion pipeline
-    # (PR 10) — but the pipeline runs `terraform apply` immediately before
-    # `gcloud run deploy`, and an apply clearing these fields at nearly the
-    # same moment a new instance is starting was followed by that
-    # instance's startup probe failing, twice in a row, on this pipeline's
-    # first real runs. template.scaling's own min/max (the two fields this
-    # config actually sets) are deliberately NOT ignored — those stay real
-    # Terraform-owned infrastructure decisions.
+    # The top-level `scaling` block: not set anywhere in this config
+    # (min_instance_count/max_instance_count below live under
+    # template.scaling — a *different* block from this resource's separate
+    # top-level `scaling`, which the google provider schema exposes for
+    # manual-scaling mode and which this config has no opinion on at all).
+    # Cloud Run's own API populates it as a side effect of `gcloud run
+    # deploy` (the deploy pipeline's --no-traffic candidate deploys), and
+    # every apply since then read it back as drift and cleared it again.
+    # template.scaling's own min/max (the two fields this config actually
+    # sets) are deliberately NOT ignored — those stay real Terraform-owned
+    # infrastructure decisions.
+    #
+    # template[0].revision is deliberately NOT ignored, despite looking like
+    # the same class of drift — it briefly was (see git history), and that
+    # was wrong: ignoring it locks the plan onto whatever revision name was
+    # in state the moment ignore_changes started applying, and Cloud Run
+    # rejects reusing an existing revision name for different template
+    # content ("Revision named ... with different configuration already
+    # exists") — hit for real the next time this same file changed
+    # anything else in template. Leaving it unignored is what lets Terraform
+    # (and Cloud Run) mint a fresh auto-generated name whenever the template
+    # actually changes, which is what avoids the collision in the first
+    # place.
     ignore_changes = [
       template[0].containers[0].image,
-      template[0].revision,
       scaling,
       client,
       client_version,
