@@ -162,6 +162,15 @@ jobs:
           TF_VAR_stripe_secret_key: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
           TF_VAR_stripe_webhook_secret: ${{ secrets.STRIPE_TEST_WEBHOOK_SECRET }}
           TF_VAR_subscriber_jwt_secret: ${{ secrets.STAGING_SUBSCRIBER_JWT_SECRET }}
+          # Both required by validate_production_settings() (backend/app/config.py)
+          # — a blank value here doesn't fail the apply, it fails the NEXT
+          # deploy's startup probe instead, since Cloud Run only ever sees
+          # env values Terraform actually wrote. Found by exactly that
+          # failure on this pipeline's first live run: ci.yml's plan-only
+          # steps had the same gap, but a plan never pushes new env vars to
+          # a running service, so it never surfaced there.
+          TF_VAR_workos_authkit_domain: ${{ vars.WORKOS_AUTHKIT_DOMAIN }}
+          TF_VAR_mcp_resource_url: ${{ vars.STAGING_MCP_RESOURCE_URL }}
         run: |
           set -euo pipefail
           if [ "${{ vars.STAGING_REDIS_CONFIGURED }}" = "true" ]; then
@@ -373,6 +382,10 @@ jobs:
           TF_VAR_stripe_secret_key: ${{ secrets.PROD_STRIPE_SECRET_KEY }}
           TF_VAR_stripe_webhook_secret: ${{ secrets.PROD_STRIPE_WEBHOOK_SECRET }}
           TF_VAR_subscriber_jwt_secret: ${{ secrets.PROD_SUBSCRIBER_JWT_SECRET }}
+          # See the identical comment on staging-apply for why these two are
+          # here at all.
+          TF_VAR_workos_authkit_domain: ${{ vars.WORKOS_AUTHKIT_DOMAIN }}
+          TF_VAR_mcp_resource_url: ${{ vars.PROD_MCP_RESOURCE_URL }}
         run: |
           set -euo pipefail
           if [ "${{ vars.PROD_REDIS_CONFIGURED }}" = "true" ]; then
