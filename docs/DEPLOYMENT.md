@@ -623,6 +623,16 @@ gcloud storage cat gs://made-for-seconds-tf-state/terraform/state/default.tflock
 - **Stripe webhook idempotency**: `processed_events` documents carry a `ttl`
   timestamp (30 days from creation) and a matching Firestore TTL policy
   (`google_firestore_field.processed_events_ttl`) deletes them automatically.
+- **Cloud Audit Logs** (`terraform/modules/observability/audit_log.tf`): ADMIN_READ enabled
+  project-wide (who looked at an IAM policy, a secret's metadata, a bucket's ACL — not just who
+  changed one; admin-activity logs for actual changes are always on regardless of this config).
+  DATA_READ/DATA_WRITE on Secret Manager and DATA_READ on GCS — the two services a credential or
+  document leak would actually go through — deliberately not "allServices" DATA_READ, which would
+  also audit every ordinary Firestore read and blow through the 50 GiB/mo free log-ingest allowance.
+  A log-router exclusion drops the public images bucket's DATA_READ entries (anonymous GETs on every
+  recipe-page view would otherwise dominate ingest with zero security signal); the receipts bucket's
+  DATA_READ traffic is not excluded. `_Default` log bucket retention is pinned to 30 days explicitly
+  (GCP's own default, made a reviewable Terraform resource rather than an implicit setting).
   30 days matches Stripe's own event-retention window — the List Events API
   (and CLI/Dashboard manual replay, which relies on it) only returns events
   created in the last 30 days, so that's the real ceiling a replayed event
