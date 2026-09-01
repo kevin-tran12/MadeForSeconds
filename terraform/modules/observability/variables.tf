@@ -17,3 +17,8 @@ variable "images_bucket_name" {
   description = "The public images bucket's name — audit_log.tf excludes its DATA_READ traffic from the log sink (anonymous GETs would otherwise dominate ingest against the 50 GiB/mo free allowance)"
   type        = string
 }
+
+variable "receipts_bucket_name" {
+  description = "The private receipts bucket's name (7-year tax retention) — detection_alerts.tf watches for its IAM/ACL config being changed, the one bucket that must never become public"
+  type        = string
+}
