@@ -220,10 +220,24 @@ resource "google_cloud_run_v2_service" "backend" {
         cpu_idle = true
       }
 
+      # No explicit values here used to mean Cloud Run's own defaults —
+      # observed live, repeatedly, to be too tight for this app's real
+      # cold-start variance: a scale-to-zero, cpu_idle instance's first
+      # request pays for Cloud Logging client setup, FastAPI/uvicorn boot,
+      # and MCP server creation all at once, and that occasionally ran past
+      # whatever window the defaults allowed — "Container failed to become
+      # healthy" on the promotion pipeline's own early real runs, on more
+      # than one revision, independent of the scaling-block drift fixed
+      # separately. 6 attempts x 10s gives a cold start up to 60s to
+      # respond before Cloud Run gives up, well above every failure
+      # observed so far.
       startup_probe {
         http_get {
           path = "/api/health"
         }
+        timeout_seconds   = 10
+        period_seconds    = 10
+        failure_threshold = 6
       }
 
       liveness_probe {
