@@ -22,9 +22,18 @@ const PAGE_SCHEMAS: Record<string, { key: string; label: string; hint?: string; 
     { key: 'follow_heading', label: 'Sidebar "Follow" Heading' },
     { key: 'thank_you_message', label: 'Supporters Thank-You Message', multiline: true },
   ],
+  social: [
+    { key: 'tone', label: 'Tone', hint: 'How posts should sound. Leave blank to keep the built-in default.', multiline: true },
+    { key: 'do', label: 'Do', hint: 'What every post should include.', multiline: true },
+    { key: 'dont', label: "Don't", hint: 'What posts must avoid.', multiline: true },
+    { key: 'cta', label: 'Call to action', hint: 'The closing line, e.g. where to find the full recipe.' },
+    { key: 'hashtags_brand', label: 'Brand hashtags', hint: 'Comma-separated; always included.' },
+    { key: 'hashtags_cuisine', label: 'Cuisine hashtags', hint: 'Comma-separated; Claude picks a few per post.' },
+    { key: 'hashtags_niche', label: 'Niche hashtags', hint: 'Comma-separated dish-level tags; Claude picks a few per post.' },
+  ],
 }
 
-const PAGE_LABELS: Record<string, string> = { home: 'Home', about: 'About' }
+const PAGE_LABELS: Record<string, string> = { home: 'Home', about: 'About', social: 'Social kit' }
 
 export function AdminPageEditPage() {
   const { pageId = '' } = useParams<{ pageId: string }>()

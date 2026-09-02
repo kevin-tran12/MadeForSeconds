@@ -1325,7 +1325,8 @@ WorkOS dependency), matching the `require_admin` dev bypass.
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
 `request_image_upload`, `upload_image_from_url`, `create_expense`,
-`publish_instagram_post`, `publish_recipe_to_instagram`.
+`publish_instagram_post`, `publish_recipe_to_instagram`, `get_social_kit`,
+`social_status`.
 
 **Recipe workflow**: `create_recipe` saves an unpublished draft (duplicate
 titles return a `slug_conflict` pointer instead of writing a second copy) →
@@ -1393,6 +1394,27 @@ status doc so expiry is visible from the MCP `social_status` tool without
 opening Cloud Logging. Recovery from a lapsed token is the same as first
 setup: repeat step 2, add the new token with `gcloud secrets versions add
 instagram-access-token --data-file=-`, then step 4.
+
+**Drafting posts** is the MCP client's job, not the backend's: `get_social_kit(slug)`
+returns the recipe summary, the brand voice and hashtag tiers (editable under
+Admin → Pages → *Social kit*, stored on Firestore `pages/social`; built-in
+defaults apply until then), per-platform limits, and the workflow — draft,
+show the operator, publish only after approval. `social_status()` reports
+each platform's token health from the refresh job's `config/social` record.
+
+**TikTok is backlogged** (verified against developers.tiktok.com, Sep 2026):
+access tokens last 24 h, refresh tokens 365 days and rotate on every refresh
+(`POST https://open.tiktokapis.com/v2/oauth/token/`); the `video.publish`
+scope is required; an unaudited app can only post `SELF_ONLY` (private) until
+TikTok audits it; `PULL_FROM_URL` — and every photo post — needs media served
+from a verified domain or URL prefix, which the bucket's
+`storage.googleapis.com` URLs can never be, so the Cloudflare image proxy
+(backlog story 7.4) is a prerequisite for photo posts; video via
+`FILE_UPLOAD` needs no domain. A dedicated non-personal account works. When it
+lands it reuses the `social-token-refresh` job (a `tiktok` entry in
+`services/social.py`'s platform table) plus two secrets, `tiktok-client-secret`
+and a `tiktok-oauth` JSON blob. Until then `get_social_kit` marks TikTok as
+draft-only.
 
 ---
 

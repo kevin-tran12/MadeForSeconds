@@ -151,6 +151,8 @@ Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev
 | `publish_recipe` / `unpublish_recipe` | Toggle visibility; publish refuses incomplete recipes |
 | `delete_recipe` | Requires the title as confirmation |
 | `create_expense` | Add a ledger entry with an attached receipt |
+| `get_social_kit` | Recipe summary + brand voice + hashtag tiers + platform limits so the MCP client drafts Instagram/TikTok posts consistently (no server-side LLM) |
+| `social_status` | Per-platform token health from the twice-monthly refresh job |
 
 Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` to iterate → `request_image_upload` + `update_recipe(image_url=…)` → `publish_recipe`.
 
@@ -186,7 +188,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (822 tests across 36 files)
+│   ├── tests/                  Pytest suite (826 tests across 36 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -289,7 +291,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (822 tests)
+npm run test:backend                    # Pytest (826 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -422,7 +424,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (822 tests, 36 files)
+### Backend — pytest (826 tests, 36 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
