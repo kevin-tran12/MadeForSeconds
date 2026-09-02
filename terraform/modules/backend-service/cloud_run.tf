@@ -31,6 +31,7 @@ locals {
       { name = "STRIPE_WEBHOOK_SECRET", secret_id = var.secret_ids.stripe_webhook_secret },
       { name = "SUBSCRIBER_JWT_SECRET", secret_id = var.secret_ids.subscriber_jwt_secret },
       { name = "RESEND_API_KEY", secret_id = var.secret_ids.resend_api_key },
+      { name = "ANTHROPIC_API_KEY", secret_id = var.secret_ids.anthropic_api_key },
     ] : entry if entry.secret_id != null
   ]
 }

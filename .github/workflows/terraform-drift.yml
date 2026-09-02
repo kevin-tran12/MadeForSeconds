@@ -85,6 +85,9 @@ jobs:
           if [ "${{ vars.PROD_RESEND_CONFIGURED }}" = "true" ]; then
             export TF_VAR_resend_api_key="ci-plan-placeholder-not-real"
           fi
+          if [ "${{ vars.PROD_ANTHROPIC_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_anthropic_api_key="ci-plan-placeholder-not-real"
+          fi
 
           terraform init -input=false
 

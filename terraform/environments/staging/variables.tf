@@ -98,6 +98,13 @@ variable "resend_api_key" {
   default     = ""
 }
 
+variable "anthropic_api_key" {
+  description = "Anthropic API key for the Sous Chef assistant. Leave blank unless staging also has redis_url — the backend refuses to start with a key and no Redis (config.validate_production_settings)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "frontend_url" {
   description = "Staging Cloudflare Pages URL"
   type        = string

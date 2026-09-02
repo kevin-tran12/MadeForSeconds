@@ -87,6 +87,13 @@ variable "resend_api_key" {
   default     = ""
 }
 
+variable "anthropic_api_key" {
+  description = "Anthropic API key for the Sous Chef assistant. Blank leaves the feature off (the endpoint answers 503) and creates no secret — see docs/DEPLOYMENT.md § Sous Chef assistant"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "frontend_url" {
   description = "Frontend URL for building links in emails (e.g., https://madeforseconds.pages.dev)"
   type        = string

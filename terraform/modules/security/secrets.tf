@@ -180,6 +180,31 @@ resource "google_secret_manager_secret_version" "instagram_access_token_initial"
   }
 }
 
+# Anthropic API key — the Sous Chef assistant (backend/app/services/assistant.py).
+# Injected as the ANTHROPIC_API_KEY env var, so a rotated version is only read
+# at revision start: `gcloud secrets versions add anthropic-api-key` then redeploy.
+resource "google_secret_manager_secret" "anthropic_api_key" {
+  count     = var.anthropic_api_key != "" ? 1 : 0
+  project   = var.gcp_project_id
+  secret_id = "anthropic-api-key"
+
+  version_destroy_ttl = "604800s" # 7 days — see the comment above admin_emails
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "anthropic_api_key_initial" {
+  count       = var.anthropic_api_key != "" ? 1 : 0
+  secret      = google_secret_manager_secret.anthropic_api_key[0].id
+  secret_data = var.anthropic_api_key
+
+  lifecycle {
+    ignore_changes = [secret_data]
+  }
+}
+
 # ─── One list of secrets, not three ───────────────────────────────────────────
 #
 # Every secret above, keyed by logical name. Optional ones are null when their
@@ -204,6 +229,7 @@ locals {
     subscriber_jwt_secret  = try(google_secret_manager_secret.subscriber_jwt_secret[0].secret_id, null)
     resend_api_key         = try(google_secret_manager_secret.resend_api_key[0].secret_id, null)
     instagram_access_token = try(google_secret_manager_secret.instagram_access_token[0].secret_id, null)
+    anthropic_api_key      = try(google_secret_manager_secret.anthropic_api_key[0].secret_id, null)
   }
 
   # The subset that exists for this deployment — every one of them needs an

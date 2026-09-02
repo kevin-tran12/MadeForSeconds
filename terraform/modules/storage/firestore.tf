@@ -184,3 +184,21 @@ resource "google_firestore_field" "processed_events_ttl" {
 
   depends_on = [google_firestore_database.default]
 }
+
+# Sous Chef feedback (assistant_feedback) is the one place reader-submitted
+# text is stored: a question and answer the reader chose to rate. It exists so
+# the owner can turn wrong answers into per-recipe notes, which needs no
+# archive — the backend stamps `ttl` = created_at + 180 days and this policy
+# deletes the doc after that. Same billed-TTL-delete caveat and the same
+# index_config {} reasoning as processed_events above.
+resource "google_firestore_field" "assistant_feedback_ttl" {
+  project    = var.gcp_project_id
+  database   = google_firestore_database.default.name
+  collection = "assistant_feedback"
+  field      = "ttl"
+
+  ttl_config {}
+  index_config {}
+
+  depends_on = [google_firestore_database.default]
+}

@@ -49,6 +49,7 @@ run "every_injected_secret_is_readable_with_all_features_enabled" {
     subscriber_jwt_secret  = "placeholder-subscriber-jwt-signing-value"
     resend_api_key         = "placeholder-resend-key"
     instagram_access_token = "placeholder-instagram-token"
+    anthropic_api_key      = "placeholder-anthropic-key"
     workos_authkit_domain  = "https://example.authkit.app"
     mcp_resource_url       = "https://backend.example.invalid/mcp"
   }
@@ -63,10 +64,10 @@ run "every_injected_secret_is_readable_with_all_features_enabled" {
   # rather than passing a vacuously-empty set difference.
   assert {
     condition = length(setsubtract(
-      toset(["stripe-secret-key", "stripe-webhook-secret", "subscriber-jwt-secret", "resend-api-key"]),
+      toset(["stripe-secret-key", "stripe-webhook-secret", "subscriber-jwt-secret", "resend-api-key", "anthropic-api-key"]),
       output.secrets_injected_into_cloud_run
     )) == 0
-    error_message = "Expected all four optional feature secrets to be injected when their tfvars are set, got: ${join(", ", output.secrets_injected_into_cloud_run)}"
+    error_message = "Expected all five optional feature secrets to be injected when their tfvars are set, got: ${join(", ", output.secrets_injected_into_cloud_run)}"
   }
 
   assert {
@@ -97,6 +98,7 @@ run "no_optional_secrets_leaves_only_admin_emails" {
     subscriber_jwt_secret  = ""
     resend_api_key         = ""
     instagram_access_token = ""
+    anthropic_api_key      = ""
   }
 
   assert {
@@ -136,6 +138,7 @@ run "already_qualified_accessor_names_still_match" {
     subscriber_jwt_secret  = "placeholder-subscriber-jwt-signing-value"
     resend_api_key         = "placeholder-resend-key"
     instagram_access_token = "placeholder-instagram-token"
+    anthropic_api_key      = "placeholder-anthropic-key"
     workos_authkit_domain  = "https://example.authkit.app"
     mcp_resource_url       = "https://backend.example.invalid/mcp"
   }
@@ -156,6 +159,7 @@ run "already_qualified_accessor_names_still_match" {
         subscriber_jwt_secret  = "subscriber-jwt-secret"
         resend_api_key         = "resend-api-key"
         instagram_access_token = "instagram-access-token"
+        anthropic_api_key      = "anthropic-api-key"
       }
       # The form a live plan against existing state actually returned —
       # every entry fully qualified, unlike secret_ids above.
@@ -167,6 +171,7 @@ run "already_qualified_accessor_names_still_match" {
         "projects/mfs-test/secrets/subscriber-jwt-secret",
         "projects/mfs-test/secrets/resend-api-key",
         "projects/mfs-test/secrets/instagram-access-token",
+        "projects/mfs-test/secrets/anthropic-api-key",
       ])
     }
   }
@@ -176,9 +181,9 @@ run "already_qualified_accessor_names_still_match" {
   # came out empty.
   assert {
     condition = output.secrets_injected_into_cloud_run == toset(
-      ["admin-emails", "redis-url", "stripe-secret-key", "stripe-webhook-secret", "subscriber-jwt-secret", "resend-api-key"]
+      ["admin-emails", "redis-url", "stripe-secret-key", "stripe-webhook-secret", "subscriber-jwt-secret", "resend-api-key", "anthropic-api-key"]
     )
-    error_message = "Expected the usual six secrets Cloud Run injects with every feature enabled, got: ${join(", ", output.secrets_injected_into_cloud_run)}"
+    error_message = "Expected the usual seven secrets Cloud Run injects with every feature enabled, got: ${join(", ", output.secrets_injected_into_cloud_run)}"
   }
 
   assert {

@@ -45,6 +45,8 @@ subscriber_jwt_secret = "REPLACE_WITH_GENERATED_HEX"
 
 resend_api_key = "" # optional; leave blank to skip cancellation emails in staging
 
+anthropic_api_key = "" # optional; only alongside redis_url (see variables.tf)
+
 frontend_url = "" # the staging Cloudflare Pages URL, once PR 9 creates it
 
 # Instagram publishing is deprecated even in production — leave blank.

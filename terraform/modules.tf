@@ -20,6 +20,7 @@ module "security" {
   subscriber_jwt_secret  = var.subscriber_jwt_secret
   resend_api_key         = var.resend_api_key
   instagram_access_token = var.instagram_access_token
+  anthropic_api_key      = var.anthropic_api_key
 
   depends_on = [google_project_service.required_apis]
 }

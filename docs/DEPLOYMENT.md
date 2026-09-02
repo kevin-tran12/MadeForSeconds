@@ -49,6 +49,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `stripe_product_id` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `subscriber_jwt_secret` | 32+ character secret for cancel link JWTs |
 | `resend_api_key` | Resend API key for cancellation emails |
+| `anthropic_api_key` | (Optional) Anthropic API key for the Sous Chef assistant — blank keeps the feature off and creates no secret; needs `redis_url` in production (see [Sous Chef assistant](#sous-chef-assistant)) |
 | `frontend_url` | Your production frontend URL (used in email links) |
 | `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
 | `billing_account` | GCP billing account ID, for the budget alert |
@@ -507,6 +508,7 @@ merging anything that reaches `production-apply` for the first time:
 | `PROD_SUBSCRIBER_JWT_SECRET` | The real value from `terraform.tfvars` |
 | `PROD_REDIS_URL` | Only if `PROD_REDIS_CONFIGURED` variable is `true` |
 | `PROD_RESEND_API_KEY` | Only if `PROD_RESEND_CONFIGURED` variable is `true` |
+| `PROD_ANTHROPIC_API_KEY` | Only if `PROD_ANTHROPIC_CONFIGURED` variable is `true` — the Sous Chef assistant's Anthropic key (staging: `STAGING_ANTHROPIC_API_KEY`) |
 
 **This is not optional plumbing — `production-apply` fails its own guard
 step and refuses to run rather than apply with these blank**, specifically
@@ -531,6 +533,7 @@ pushes new env vars to a running service, so it never surfaced there:
 | `WORKOS_AUTHKIT_DOMAIN` | Same value as your local root `terraform.tfvars` — one WorkOS environment typically serves both staging and production |
 | `STAGING_MCP_RESOURCE_URL` | Staging's Cloud Run URL + `/mcp` — `terraform output -raw cloud_run_url` from `terraform/environments/staging`, then append `/mcp` |
 | `PROD_MCP_RESOURCE_URL` | Same value as your local root `terraform.tfvars` |
+| `PROD_ANTHROPIC_CONFIGURED` | Optional, unlike the two above: `true` once `PROD_ANTHROPIC_API_KEY` is set **and** `PROD_REDIS_CONFIGURED` is `true`; anything else leaves the Sous Chef assistant off. `STAGING_ANTHROPIC_CONFIGURED` is the staging twin |
 
 **Cloudflare Pages' staging alias tracks a `staging` git branch, not
 `main`.** The `staging-e2e` job fast-forwards `staging` to the commit being
@@ -1240,6 +1243,7 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `STRIPE_PRODUCT_ID` | GCP Secret Manager | Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | GCP Secret Manager | Secret for signing cancel link JWTs (32+ chars) |
 | `RESEND_API_KEY` | GCP Secret Manager | Resend API key for cancellation emails |
+| `ANTHROPIC_API_KEY` | GCP Secret Manager (optional) | Anthropic API key for the Sous Chef assistant; blank keeps the feature off |
 | `WORKOS_AUTHKIT_DOMAIN` | Plain env (Terraform) | WorkOS AuthKit domain — OAuth issuer for MCP auth |
 | `MCP_RESOURCE_URL` | Plain env (Terraform) | Public URL of the `/mcp` endpoint (OAuth resource) |
 | `REDIS_URL` | GCP Secret Manager (optional) | Upstash Redis URL for caching |
@@ -1355,6 +1359,47 @@ then required.
 
 ---
 
+## Sous Chef assistant
+
+The Sous Chef is the on-page cooking assistant (Claude, via the Anthropic API)
+that lands over several PRs; this section covers only the pieces that touch
+infrastructure and operations.
+
+**Secret.** `anthropic_api_key` (tfvar) → Secret Manager `anthropic-api-key` →
+the `ANTHROPIC_API_KEY` env var on Cloud Run. Blank keeps the feature off
+entirely: no secret is created and the endpoint answers 503 `not_configured`,
+which is what staging and E2E see. In the pipeline the value comes from the
+GitHub secret `PROD_ANTHROPIC_API_KEY`, gated on the repo variable
+`PROD_ANTHROPIC_CONFIGURED=true` (staging: `STAGING_ANTHROPIC_API_KEY` /
+`STAGING_ANTHROPIC_CONFIGURED`) — the same shape as Resend, with the same gate
+in `ci.yml` and `terraform-drift.yml` so a plan never proposes destroying the
+secret once it exists.
+
+**Redis is required alongside the key.** The assistant meters its own LLM
+spend against a hard monthly cap in Redis (`mfs:rl:llm:spend:YYYY-MM`); an
+in-memory counter on a scale-to-zero instance would reset on every cold start
+and silently un-cap spend. `validate_production_settings` refuses to start
+with `ANTHROPIC_API_KEY` set and `REDIS_URL` blank — never flip
+`*_ANTHROPIC_CONFIGURED` on for an environment whose `*_REDIS_CONFIGURED` is
+not also `true`, or the next candidate revision crash-loops its startup probe
+(a safe failure, but it blocks the pipeline). Set a workspace spend limit in
+the Anthropic Console as the provider-side second wall.
+
+**Rotation.** `echo -n "$KEY" | gcloud secrets versions add anthropic-api-key --data-file=-`,
+then redeploy — the key is env-injected, so a new version is only read at
+revision start. Once the canary drill has been run, add `anthropic-api-key`
+to `secret_pruner_write_enabled_ids` so old versions are pruned like the
+others.
+
+**Cost.** One more managed secret: +$0.06/mo immediately, ~+$0.12/mo at the
+pruner's two-version steady state (the [Secret version pruning](#secret-version-pruning)
+tables above predate it). The `assistant_feedback` collection carries a
+180-day Firestore TTL policy (`google_firestore_field.assistant_feedback_ttl`)
+with the same billed-delete caveat as `processed_events`. No new Cloud
+Scheduler job.
+
+---
+
 ## GCP free tier summary
 
 | Service | Free allowance | Expected usage |
@@ -1366,7 +1411,7 @@ then required.
 | Cloud Build | 2,500 build-min/mo | ~2 min per backend deploy |
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
-| Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded |
+| Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded. The Sous Chef assistant's `anthropic-api-key` adds one managed secret (~$0.06/mo now, ~$0.12/mo at the pruner's two-version steady state) — accepted, see [Sous Chef assistant](#sous-chef-assistant) |
 | Cloud Scheduler | 3 free jobs per billing account | 3 jobs in use (weekly usage report, secret pruning, budget-breaker reset) — all free. Instagram's token-refresh job would have been a genuine 4th (~$0.10/month) had it stayed; see [Secret version pruning § Cost](#secret-version-pruning) for what re-enabling Instagram would change |
 
 ### Artifact Registry: gcf-artifacts has no cleanup policy
