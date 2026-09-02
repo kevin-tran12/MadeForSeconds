@@ -135,13 +135,23 @@ def _lookup_supporter(db, email: str, uid: str, now: datetime) -> bool:
     return False
 
 
+def _supporter_key(email: str, uid: str) -> str:
+    return f"assistant:supporter:{keyed_hash(email or uid)}"
+
+
+def forget_supporter(email: str, uid: str) -> None:
+    """Drop the cached supporter verdict for a reader — call after anything
+    that changes it out of band (linking a donation to their account)."""
+    cache.delete(_supporter_key((email or "").strip().lower(), uid))
+
+
 def is_supporter(db, email: str, uid: str, now: datetime | None = None) -> bool:
     """Cached (5 min) supporter check. The cache key hashes the email so the
     shared cache never holds a raw address; cache.clear() on any admin or
     profile mutation drops it early, which is fine."""
     email = (email or "").strip().lower()
     n = _now(now)
-    key = f"assistant:supporter:{keyed_hash(email or uid)}"
+    key = _supporter_key(email, uid)
     cached = cache.get(key)
     if isinstance(cached, dict) and n.timestamp() - float(cached.get("at", 0)) < SUPPORTER_CACHE_TTL:
         return bool(cached.get("supporter"))
