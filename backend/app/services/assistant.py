@@ -27,6 +27,7 @@ import anthropic
 from ..cache import cache
 from ..config import settings
 from ..models import Recipe
+from . import claude_auth
 from .recipes import get_all_published
 from .users import COOKING_LEVELS, DEFAULT_COOKING_LEVEL, MAX_EXPERIENCE_NOTES, clean_text
 
@@ -340,22 +341,38 @@ def build_request(
 # ── Claude API ────────────────────────────────────────────────────────────────
 
 _client: anthropic.AsyncAnthropic | None = None
+_credentials: claude_auth.FederatedCredentials | None = None
 
 
 def _get_client() -> anthropic.AsyncAnthropic:
-    global _client
+    """Federated on Cloud Run (services/claude_auth.py); a static key only
+    for local development. Explicit constructor arguments, so a stray
+    ANTHROPIC_API_KEY in the environment can never shadow federation."""
+    global _client, _credentials
     if _client is None:
-        _client = anthropic.AsyncAnthropic(
-            api_key=settings.anthropic_api_key,
-            timeout=anthropic.Timeout(45.0, connect=5.0),
-            max_retries=1,
-        )
+        common: dict = {"timeout": anthropic.Timeout(45.0, connect=5.0), "max_retries": 1}
+        _credentials = claude_auth.build_credentials()
+        if _credentials is not None:
+            _client = anthropic.AsyncAnthropic(credentials=_credentials, **common)
+        else:
+            _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key, **common)
     return _client
 
 
+async def _warm_credentials() -> None:
+    """Run the federation token exchange off the event loop before a Claude
+    call, so the SDK's own cache never exchanges on it. No-op on a key."""
+    _get_client()
+    if _credentials is not None:
+        await _credentials.warm()
+
+
 def reset_client() -> None:
-    global _client
+    global _client, _credentials
+    if _credentials is not None:
+        _credentials.close()
     _client = None
+    _credentials = None
 
 
 async def classify_topic(question: str, previous_user_message: str | None = None):
@@ -364,6 +381,7 @@ async def classify_topic(question: str, previous_user_message: str | None = None
     content = question
     if previous_user_message:
         content = f"Previous message: {previous_user_message}\n\nCurrent message: {question}"
+    await _warm_credentials()
     response = await _get_client().messages.create(
         model=settings.assistant_classifier_model,
         max_tokens=CLASSIFIER_MAX_TOKENS,
@@ -377,6 +395,7 @@ async def classify_topic(question: str, previous_user_message: str | None = None
 
 async def stream_answer(kwargs: dict) -> AsyncIterator[tuple[str, Any]]:
     """Yield ("delta", text) for each text chunk, then ("final", FinalInfo)."""
+    await _warm_credentials()
     async with _get_client().messages.stream(**kwargs) as stream:
         async for text in stream.text_stream:
             yield "delta", text
