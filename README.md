@@ -559,7 +559,7 @@ Or push to `main` — [`.github/workflows/deploy.yml`](.github/workflows/deploy.
 | `STRIPE_PRODUCT_ID` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | 32+ char secret for cancel link JWTs |
 | `RESEND_API_KEY` | Resend API key (cancel emails) |
-| `ANTHROPIC_API_KEY` | (Optional) Anthropic API key for the Sous Chef assistant — unset keeps it off |
+| `ANTHROPIC_API_KEY` | (Optional, local only) Anthropic key for the Sous Chef assistant — production authenticates with Workload Identity Federation instead (`ANTHROPIC_FEDERATION_RULE_ID` + organization and service-account ids, no key; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)) |
 | `REDIS_URL` | Upstash Redis URL (optional — falls back to in-memory) |
 
 The MCP server needs no configuration locally — it runs unauthenticated in dev. In production `WORKOS_AUTHKIT_DOMAIN` and `MCP_RESOURCE_URL` are both required, and the backend refuses to start without them (see `validate_production_settings` in [`backend/app/config.py`](backend/app/config.py)). Full production variable reference: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).

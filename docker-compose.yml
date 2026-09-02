@@ -48,7 +48,8 @@ services:
       STRIPE_PRODUCT_ID: ${STRIPE_PRODUCT_ID:-prod_UA7tqSXy0Vlvc9}
       SUBSCRIBER_JWT_SECRET: ${SUBSCRIBER_JWT_SECRET:-dev-subscriber-secret-change-in-prod}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
-      # Sous Chef assistant (optional locally; blank keeps the feature off)
+      # Sous Chef assistant (optional locally; blank keeps the feature off). A
+      # personal key is local-only — production federates and refuses a key.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       FRONTEND_URL: http://localhost:5173
       GCS_RECEIPTS_BUCKET_NAME: ""

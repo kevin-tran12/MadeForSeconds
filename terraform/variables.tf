@@ -87,11 +87,72 @@ variable "resend_api_key" {
   default     = ""
 }
 
-variable "anthropic_api_key" {
-  description = "Anthropic API key for the Sous Chef assistant. Blank leaves the feature off (the endpoint answers 503) and creates no secret — see docs/DEPLOYMENT.md § Sous Chef assistant"
+# ─── Sous Chef assistant: Anthropic Workload Identity Federation ─────────────
+#
+# Ids, not secrets. Cloud Run's runtime service account (mfs-backend)
+# authenticates to the Anthropic API with its Google-signed identity token;
+# these tell the backend which federation rule to exchange it under
+# (backend/app/services/claude_auth.py, docs/DEPLOYMENT.md § Sous Chef
+# assistant). All three blank leaves the assistant off — the endpoint answers
+# 503 not_configured — and injects nothing. A partial set is a misconfiguration
+# the backend would refuse at startup (a crash-looping revision), so it is
+# refused here, at plan time, instead.
+
+variable "anthropic_federation_rule_id" {
+  description = "Anthropic federation rule (fdrl_…) matching mfs-backend's identity token. Blank leaves the Sous Chef off; set together with anthropic_organization_id and anthropic_service_account_id"
   type        = string
-  sensitive   = true
   default     = ""
+
+  validation {
+    condition     = var.anthropic_federation_rule_id == "" || startswith(var.anthropic_federation_rule_id, "fdrl_")
+    error_message = "anthropic_federation_rule_id must be an Anthropic federation rule id (fdrl_…) or blank."
+  }
+
+  validation {
+    condition = (
+      (var.anthropic_federation_rule_id != "") == (var.anthropic_organization_id != "")
+      && (var.anthropic_federation_rule_id != "") == (var.anthropic_service_account_id != "")
+    )
+    error_message = "anthropic_federation_rule_id, anthropic_organization_id and anthropic_service_account_id must be set together — all three switch the Sous Chef on, all blank keep it off."
+  }
+}
+
+variable "anthropic_organization_id" {
+  description = "Anthropic organization UUID (Claude Console → Settings → Organization) — the organization the federation rule belongs to"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.anthropic_organization_id == "" || can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.anthropic_organization_id))
+    error_message = "anthropic_organization_id must be the organization's UUID or blank."
+  }
+}
+
+variable "anthropic_service_account_id" {
+  description = "Anthropic service account (svac_…) the federation rule targets — the identity the assistant's requests act as and are billed to"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.anthropic_service_account_id == "" || startswith(var.anthropic_service_account_id, "svac_")
+    error_message = "anthropic_service_account_id must be an Anthropic service account id (svac_…) or blank."
+  }
+}
+
+variable "anthropic_workspace_id" {
+  description = "Anthropic workspace (wrkspc_…, or the literal default) to scope the minted token to. Only needed when the federation rule is enabled for more than one workspace; blank otherwise"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.anthropic_workspace_id == "" || var.anthropic_workspace_id == "default" || startswith(var.anthropic_workspace_id, "wrkspc_")
+    error_message = "anthropic_workspace_id must be a workspace id (wrkspc_…), the literal default, or blank."
+  }
+
+  validation {
+    condition     = var.anthropic_workspace_id == "" || var.anthropic_federation_rule_id != ""
+    error_message = "anthropic_workspace_id is meaningless without anthropic_federation_rule_id — set the rule ids first."
+  }
 }
 
 variable "frontend_url" {

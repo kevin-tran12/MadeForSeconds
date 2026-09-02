@@ -31,9 +31,29 @@ locals {
       { name = "STRIPE_WEBHOOK_SECRET", secret_id = var.secret_ids.stripe_webhook_secret },
       { name = "SUBSCRIBER_JWT_SECRET", secret_id = var.secret_ids.subscriber_jwt_secret },
       { name = "RESEND_API_KEY", secret_id = var.secret_ids.resend_api_key },
-      { name = "ANTHROPIC_API_KEY", secret_id = var.secret_ids.anthropic_api_key },
     ] : entry if entry.secret_id != null
   ]
+
+  # Sous Chef assistant — Anthropic Workload Identity Federation. Ids, not
+  # secrets: the runtime service account's Google-signed identity token is
+  # what authenticates, exchanged by the backend for a short-lived Anthropic
+  # token (backend/app/services/claude_auth.py). All three blank injects
+  # nothing and leaves the feature off; the root variable validation refuses
+  # a partial set. The workspace only goes on the wire when set — an empty
+  # string is not "use the rule's workspace".
+  assistant_federation_enabled = (
+    var.anthropic_federation_rule_id != ""
+    && var.anthropic_organization_id != ""
+    && var.anthropic_service_account_id != ""
+  )
+  assistant_federation_env = local.assistant_federation_enabled ? merge(
+    {
+      ANTHROPIC_FEDERATION_RULE_ID = var.anthropic_federation_rule_id
+      ANTHROPIC_ORGANIZATION_ID    = var.anthropic_organization_id
+      ANTHROPIC_SERVICE_ACCOUNT_ID = var.anthropic_service_account_id
+    },
+    var.anthropic_workspace_id != "" ? { ANTHROPIC_WORKSPACE_ID = var.anthropic_workspace_id } : {},
+  ) : {}
 }
 
 resource "google_cloud_run_v2_service" "backend" {
@@ -212,6 +232,16 @@ resource "google_cloud_run_v2_service" "backend" {
       env {
         name  = "INSTAGRAM_REFRESH_AUDIENCE"
         value = local.instagram_refresh_url
+      }
+
+      # Sous Chef assistant — the federation ids (see local.assistant_federation_env).
+      # No Anthropic secret exists anywhere: the identity is the service account.
+      dynamic "env" {
+        for_each = local.assistant_federation_env
+        content {
+          name  = env.key
+          value = env.value
+        }
       }
 
       resources {

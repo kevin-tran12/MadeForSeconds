@@ -58,7 +58,6 @@ run "pruner_role_is_exactly_list_and_destroy_with_all_features_enabled" {
     subscriber_jwt_secret  = "placeholder-subscriber-jwt-signing-value"
     resend_api_key         = "placeholder-resend-key"
     instagram_access_token = "placeholder-instagram-token"
-    anthropic_api_key      = "placeholder-anthropic-key"
     workos_authkit_domain  = "https://example.authkit.app"
     mcp_resource_url       = "https://backend.example.invalid/mcp"
   }
@@ -101,10 +100,9 @@ run "pruner_role_is_exactly_list_and_destroy_with_all_features_enabled" {
       "subscriber-jwt-secret",
       "resend-api-key",
       "instagram-access-token",
-      "anthropic-api-key",
       "secret-pruner-canary",
     ])
-    error_message = "secret-pruner should be bound on exactly the eight application secrets plus its own canary when every optional feature is enabled."
+    error_message = "secret-pruner should be bound on exactly the seven application secrets plus its own canary when every optional feature is enabled."
   }
 }
 
@@ -121,7 +119,6 @@ run "pruner_binds_only_admin_emails_and_canary_with_no_optional_secrets" {
     subscriber_jwt_secret  = ""
     resend_api_key         = ""
     instagram_access_token = ""
-    anthropic_api_key      = ""
   }
 
   assert {

@@ -45,7 +45,12 @@ subscriber_jwt_secret = "REPLACE_WITH_GENERATED_HEX"
 
 resend_api_key = "" # optional; leave blank to skip cancellation emails in staging
 
-anthropic_api_key = "" # optional; only alongside redis_url (see variables.tf)
+# Sous Chef assistant: Anthropic federation ids for a staging-specific rule.
+# Blank keeps it off; only set all three alongside redis_url (see variables.tf).
+anthropic_federation_rule_id = ""
+anthropic_organization_id    = ""
+anthropic_service_account_id = ""
+anthropic_workspace_id       = ""
 
 frontend_url = "" # the staging Cloudflare Pages URL, once PR 9 creates it
 

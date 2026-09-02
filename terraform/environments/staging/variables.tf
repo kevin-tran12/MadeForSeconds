@@ -98,13 +98,6 @@ variable "resend_api_key" {
   default     = ""
 }
 
-variable "anthropic_api_key" {
-  description = "Anthropic API key for the Sous Chef assistant. Leave blank unless staging also has redis_url — the backend refuses to start with a key and no Redis (config.validate_production_settings)"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 variable "frontend_url" {
   description = "Staging Cloudflare Pages URL"
   type        = string
@@ -137,4 +130,33 @@ variable "billing_account" {
 variable "alert_email" {
   description = "Email address for staging alerts"
   type        = string
+}
+
+# Sous Chef assistant — Anthropic Workload Identity Federation ids for the
+# staging rule (a separate rule from production's, so either can be archived
+# alone). Ids, not secrets; format and all-or-none are validated by the root
+# module. Leave blank unless staging also has redis_url — the backend refuses
+# to start with federation and no Redis (config.validate_production_settings).
+variable "anthropic_federation_rule_id" {
+  description = "Anthropic federation rule id (fdrl_…) for staging; blank keeps the Sous Chef off"
+  type        = string
+  default     = ""
+}
+
+variable "anthropic_organization_id" {
+  description = "Anthropic organization UUID (the same organization as production)"
+  type        = string
+  default     = ""
+}
+
+variable "anthropic_service_account_id" {
+  description = "Anthropic service account id (svac_…) the staging rule targets"
+  type        = string
+  default     = ""
+}
+
+variable "anthropic_workspace_id" {
+  description = "Anthropic workspace id; only when the staging rule spans several workspaces"
+  type        = string
+  default     = ""
 }

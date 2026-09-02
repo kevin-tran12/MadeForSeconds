@@ -57,13 +57,6 @@ variable "instagram_access_token" {
   default     = ""
 }
 
-variable "anthropic_api_key" {
-  description = "Anthropic API key for the Sous Chef assistant — the secret is only created when this is non-empty"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
 # ─── Workload Identity Federation (Epic 8, PR 7) ────────────────────────────
 
 variable "deployment_target" {

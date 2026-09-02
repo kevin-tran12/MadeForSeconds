@@ -22,7 +22,6 @@ variable "secret_ids" {
     subscriber_jwt_secret  = string
     resend_api_key         = string
     instagram_access_token = string
-    anthropic_api_key      = string
   })
 }
 

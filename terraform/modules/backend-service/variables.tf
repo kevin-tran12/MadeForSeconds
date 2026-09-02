@@ -118,7 +118,6 @@ variable "secret_ids" {
     subscriber_jwt_secret  = string
     resend_api_key         = string
     instagram_access_token = string
-    anthropic_api_key      = string
   })
 }
 
@@ -144,4 +143,33 @@ variable "staging_bucket_name" {
 variable "scheduler_agent_email" {
   description = "Cloud Scheduler's service agent email (google_project_service_identity.cloudscheduler, declared at root — shared with module.cost-controls, which needs the same agent for a different grant)"
   type        = string
+}
+
+# ─── Sous Chef assistant: Anthropic Workload Identity Federation ─────────────
+# Plain config, validated (format + all-or-none) by the root module's variables.
+# The runtime service account's identity token is the credential; these only
+# name the rule it is exchanged under.
+
+variable "anthropic_federation_rule_id" {
+  description = "Anthropic federation rule id (fdrl_…); blank leaves the assistant off"
+  type        = string
+  default     = ""
+}
+
+variable "anthropic_organization_id" {
+  description = "Anthropic organization UUID"
+  type        = string
+  default     = ""
+}
+
+variable "anthropic_service_account_id" {
+  description = "Anthropic service account id (svac_…) the rule targets"
+  type        = string
+  default     = ""
+}
+
+variable "anthropic_workspace_id" {
+  description = "Anthropic workspace id (wrkspc_… or default); only when the rule spans several workspaces"
+  type        = string
+  default     = ""
 }

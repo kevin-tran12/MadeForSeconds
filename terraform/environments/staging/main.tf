@@ -79,10 +79,14 @@ module "app" {
   stripe_product_id      = var.stripe_product_id
   subscriber_jwt_secret  = var.subscriber_jwt_secret
   resend_api_key         = var.resend_api_key
-  anthropic_api_key      = var.anthropic_api_key
   frontend_url           = var.frontend_url
   instagram_user_id      = var.instagram_user_id
   instagram_access_token = var.instagram_access_token
+
+  anthropic_federation_rule_id = var.anthropic_federation_rule_id
+  anthropic_organization_id    = var.anthropic_organization_id
+  anthropic_service_account_id = var.anthropic_service_account_id
+  anthropic_workspace_id       = var.anthropic_workspace_id
 
   state_admin_email = var.state_admin_email
   billing_account   = var.billing_account
