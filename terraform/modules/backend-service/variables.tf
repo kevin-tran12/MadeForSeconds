@@ -140,6 +140,11 @@ variable "staging_bucket_name" {
 
 # ─── Root-level shared prerequisite ────────────────────────────────────────
 
+variable "notification_channel" {
+  description = "Full resource name of the shared alert email channel (google_monitoring_notification_channel.budget_email, declared at root) — for the social token-refresh alerts"
+  type        = string
+}
+
 variable "scheduler_agent_email" {
   description = "Cloud Scheduler's service agent email (google_project_service_identity.cloudscheduler, declared at root — shared with module.cost-controls, which needs the same agent for a different grant)"
   type        = string

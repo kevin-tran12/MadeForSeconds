@@ -14,7 +14,8 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
 from ..config import settings
-from ..services import instagram, usage_stats
+from ..firestore import get_db
+from ..services import instagram, social, usage_stats
 from ..services.email import send_email
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,23 @@ def refresh_instagram_token(request: Request) -> dict:
     _verify_oidc_caller(request, settings.instagram_refresh_audience)
     result = instagram.refresh_token()
     logger.info("Instagram token refresh invoked: refreshed=%s", result.get("refreshed"))
+    return result
+
+
+@router.post("/social/refresh-tokens")
+def refresh_social_tokens(request: Request) -> dict:
+    """Rotate every configured social platform's token (Instagram today).
+
+    Invoked twice a month by Cloud Scheduler (social-token-refresh). Each
+    platform is attempted independently; any failure logs
+    SOCIAL_REFRESH_FAILED (alerted on) and turns the response into a 500 so
+    the Scheduler attempt is recorded as failed and retried.
+    """
+    _verify_oidc_caller(request, settings.social_refresh_audience or settings.instagram_refresh_audience)
+    result = social.refresh_all(get_db())
+    logger.info("Social token refresh invoked: failed=%s", result["failed"])
+    if result["failed"]:
+        raise HTTPException(status_code=500, detail={"code": "social_refresh_failed", **result})
     return result
 
 

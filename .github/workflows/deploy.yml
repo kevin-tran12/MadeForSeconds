@@ -473,6 +473,10 @@ jobs:
           if [ "${{ vars.PROD_RESEND_CONFIGURED }}" = "true" ]; then
             export TF_VAR_resend_api_key="${{ secrets.PROD_RESEND_API_KEY }}"
           fi
+          if [ "${{ vars.PROD_INSTAGRAM_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_instagram_user_id="${{ vars.PROD_INSTAGRAM_USER_ID }}"
+            export TF_VAR_instagram_access_token="${{ secrets.PROD_INSTAGRAM_ACCESS_TOKEN }}"
+          fi
           terraform init -input=false
           terraform plan -lock-timeout=5m -input=false -no-color -out=tfplan
           terraform apply -lock-timeout=5m -input=false -no-color -auto-approve tfplan
