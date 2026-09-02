@@ -404,11 +404,11 @@ npm run test:backend
 ```
 Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, log redaction, reader identity and profile, Sous Chef spend metering and entitlements.
 
-### Frontend unit — vitest (101 tests, 15 files)
+### Frontend unit — vitest (108 tests, 17 files)
 ```bash
 npm run test:unit
 ```
-Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components, support and donation-link pages.
+Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components, support and donation-link pages, auth context and admin route gating.
 
 ### E2E — Playwright (6 spec files)
 ```bash

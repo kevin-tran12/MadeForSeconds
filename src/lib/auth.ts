@@ -4,6 +4,7 @@ import {
   GoogleAuthProvider,
   onAuthStateChanged as firebaseOnAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   type Auth,
   type User,
@@ -36,11 +37,30 @@ export function onAuthChange(callback: (user: User | null) => void): () => void 
   return firebaseOnAuthStateChanged(auth, callback)
 }
 
-export async function loginWithGoogle(): Promise<User> {
+// Firebase error codes for "the popup never got a chance" — iOS Safari and
+// some in-app browsers block or kill popups. Redirect-based sign-in lands the
+// user back on this page with the session in place; onAuthChange picks it up.
+const POPUP_BLOCKED_CODES = new Set([
+  'auth/popup-blocked',
+  'auth/operation-not-supported-in-this-environment',
+  'auth/web-storage-unsupported',
+])
+
+/** Sign in with Google via popup, falling back to a full-page redirect where popups are blocked. */
+export async function loginWithGoogle(): Promise<User | null> {
   const auth = getFirebaseAuth()
   const provider = new GoogleAuthProvider()
-  const cred = await signInWithPopup(auth, provider)
-  return cred.user
+  try {
+    const cred = await signInWithPopup(auth, provider)
+    return cred.user
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code
+    if (code && POPUP_BLOCKED_CODES.has(code)) {
+      await signInWithRedirect(auth, provider)
+      return null
+    }
+    throw err
+  }
 }
 
 export async function logout(): Promise<void> {
