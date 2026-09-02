@@ -352,3 +352,31 @@ class TestDeleteRecipe:
         raw_deleter.assert_not_called()
         db.delete.assert_called_once()
         svc_cache.clear.assert_called_once()
+
+
+# ── sous_chef_notes through the service layer ────────────────────────────────
+
+class TestSousChefNotes:
+    def test_doc_to_recipe_drops_notes_but_admin_view_keeps_them(self, db):
+        doc = _doc(sous_chef_notes="use day-old rice")
+        assert "sous_chef_notes" not in svc.doc_to_recipe(doc).model_dump()
+        assert svc.doc_to_admin_recipe(doc).sous_chef_notes == "use day-old rice"
+
+    def test_create_persists_notes_and_returns_admin_view(self, db, svc_cache):
+        db.stream.return_value = iter([])
+        db.id = "new-id"
+        recipe = svc.create_recipe(
+            db, RecipeCreate(title="Fried Rice", sous_chef_notes="use day-old rice"), source="admin"
+        )
+        assert db.set.call_args[0][0]["sous_chef_notes"] == "use day-old rice"
+        assert recipe.sous_chef_notes == "use day-old rice"
+
+    def test_update_can_set_and_clear_notes(self, db, svc_cache):
+        db.get.return_value = _doc(sous_chef_notes="old")
+        svc.update_recipe(db, "doc-id", RecipeUpdate(sous_chef_notes="new"), source="admin")
+        assert db.update.call_args[0][0]["sous_chef_notes"] == "new"
+        svc.update_recipe(db, "doc-id", RecipeUpdate(sous_chef_notes=None), source="admin")
+        assert db.update.call_args[0][0]["sous_chef_notes"] is None
+        # Omitting the field leaves it untouched.
+        svc.update_recipe(db, "doc-id", RecipeUpdate(title="Renamed"), source="admin")
+        assert "sous_chef_notes" not in db.update.call_args[0][0]
