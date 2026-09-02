@@ -44,6 +44,7 @@ def mock_db():
         patch("app.routes.expenses.get_db", return_value=mock),
         patch("app.routes.reports.get_db", return_value=mock),
         patch("app.routes.me.get_db", return_value=mock),
+        patch("app.routes.assistant.get_db", return_value=mock),
         patch("app.totp.get_db", return_value=mock),
     ):
         app.dependency_overrides[get_db] = lambda: mock

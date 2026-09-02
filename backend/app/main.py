@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 from .mcp_server import create_mcp_app  # noqa: E402
 from .routes import (  # noqa: E402
     admin,
+    assistant,
     expenses,
     internal,
     me,
@@ -138,6 +139,7 @@ app.include_router(reports.router)
 app.include_router(totp.router)
 app.include_router(internal.router)
 app.include_router(me.router)
+app.include_router(assistant.router)
 
 
 
