@@ -6,6 +6,12 @@ import { GoogleSignInButton } from '../components/auth/GoogleSignInButton'
 
 const PRESETS = [1, 5, 10, 25]
 
+// Sous Chef allowances, mirrored from the backend defaults
+// (backend/app/config.py: assistant_*_quota). Copy only — the backend enforces them.
+const FREE_DAILY = 5
+const SUPPORTER_DAILY = 50
+const SUPPORTER_MONTHLY = 400
+
 export function SupportPage() {
   const { user, loginGoogle } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
@@ -100,7 +106,8 @@ export function SupportPage() {
         </h1>
         <p className="text-content-muted">
           Everything on MadeForSeconds is free. If you love what we cook, your
-          voluntary donation helps keep the recipes coming.
+          voluntary donation helps keep the recipes coming — and as a thank-you,
+          supporters get {SUPPORTER_DAILY} Sous Chef questions a day instead of {FREE_DAILY}.
         </p>
       </div>
 
@@ -179,7 +186,7 @@ export function SupportPage() {
           {user ? (
             <p>
               Donating as <span className="font-semibold text-content-body">{user.email ?? 'your account'}</span>.
-              This donation will be linked to your account.
+              This donation will be linked to your account, so your Sous Chef perks apply right away.
             </p>
           ) : (
             <div className="flex flex-col gap-2">
@@ -233,7 +240,8 @@ export function SupportPage() {
         <p><span className="font-semibold text-content-muted">Recurring donations</span> renew automatically each month until canceled. Cancellations take effect at the end of the current billing period.</p>
         <p><span className="font-semibold text-content-muted">One-time donations</span> are final and non-refundable.</p>
         <p><span className="font-semibold text-content-muted">Shoutouts</span> are voluntary, revocable, and subject to review. We reserve the right to remove any display name or note at our discretion.</p>
-        <p><span className="font-semibold text-content-muted">No goods or services.</span> Your donation is a voluntary gift. It does not entitle you to any product, service, or exclusive content.</p>
+        <p><span className="font-semibold text-content-muted">Supporter perks.</span> Supporters get {SUPPORTER_DAILY} Sous Chef questions a day ({SUPPORTER_MONTHLY} a month) instead of {FREE_DAILY}, for 30 days after a one-time donation or while a monthly donation is active. Perks attach to the Google account you donate with; <Link to="/support/link/" className="underline hover:text-content-body">link a past donation</Link> if you used another email.</p>
+        <p><span className="font-semibold text-content-muted">No goods or services.</span> Your donation is a voluntary gift. Supporter perks are a thank-you that may change or end at any time; they are not a purchase and do not entitle you to any product, service, or exclusive content.</p>
       </div>
 
       {/* Subscription confirmation modal */}
