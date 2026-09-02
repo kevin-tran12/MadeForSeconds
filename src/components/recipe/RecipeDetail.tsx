@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Recipe, RecipeComponent, Ingredient } from '../../lib/types'
 import { DifficultyBadge } from './DifficultyBadge'
@@ -7,6 +7,12 @@ import { CookingMode } from './CookingMode'
 import { NutritionCard } from './NutritionCard'
 import { formatIngredient, type UnitSystem } from '../../lib/units'
 import { safeImageUrl } from '../../lib/safe-url'
+
+// The Sous Chef drawer (and its streaming client) only loads on first click,
+// the same policy as the admin pages: public visitors never pay for it.
+const SousChefDrawer = lazy(() =>
+  import('../assistant/SousChefDrawer').then((m) => ({ default: m.SousChefDrawer }))
+)
 
 const PLACEHOLDER =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400' viewBox='0 0 800 400'%3E%3Crect width='800' height='400' fill='%23faedcd'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-size='80' fill='%23e85d04'%3E%F0%9F%8D%BD%EF%B8%8F%3C/text%3E%3C/svg%3E"
@@ -240,6 +246,7 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
   const [servings, setServings] = useState(recipe.servings)
   const [copied, setCopied] = useState(false)
   const [cookingMode, setCookingMode] = useState(false)
+  const [sousChefOpen, setSousChefOpen] = useState(false)
   const [unitSystem, setUnitSystem] = useState<UnitSystem>(() => {
     const stored = localStorage.getItem('unit-system')
     return stored === 'metric' ? 'metric' : 'imperial'
@@ -644,6 +651,20 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
             </svg>
             Print Recipe
           </button>
+          <button
+            onClick={() => setSousChefOpen(true)}
+            className="inline-flex items-center gap-2 rounded-2xl border border-control-border bg-control px-6 py-4 text-base font-medium text-content-body transition-all hover:border-brand-border hover:text-brand hover:shadow-md active:scale-95"
+          >
+            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-4 4v-4z"
+              />
+            </svg>
+            Ask the Sous Chef
+          </button>
         </div>
 
         {/* Multi-component jump nav */}
@@ -870,6 +891,18 @@ export function RecipeDetail({ recipe }: { recipe: Recipe }) {
           }
           onExit={() => setCookingMode(false)}
         />
+      )}
+
+      {/* Sous Chef drawer — sees the same servings/unit system the reader does */}
+      {sousChefOpen && (
+        <Suspense fallback={null}>
+          <SousChefDrawer
+            recipe={recipe}
+            servings={servings}
+            unitSystem={unitSystem}
+            onClose={() => setSousChefOpen(false)}
+          />
+        </Suspense>
       )}
     </>
   )

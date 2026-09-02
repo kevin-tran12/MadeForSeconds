@@ -1,10 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { subscriberApi } from '../lib/api'
+import { useAuth } from '../hooks/useAuth'
 
 export function SupportSuccessPage() {
   const [searchParams] = useSearchParams()
   const sessionId = searchParams.get('session_id')
+  const { refreshMe } = useAuth()
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -36,6 +38,9 @@ export function SupportSuccessPage() {
         if (info.already_set_up) {
           setSaved(true)
         }
+        // A signed-in donor's supporter status (and Sous Chef allowance) is
+        // live as soon as the webhook lands — refresh the profile now.
+        void refreshMe()
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to verify donation')
