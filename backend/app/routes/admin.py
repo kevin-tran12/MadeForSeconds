@@ -386,3 +386,36 @@ async def toggle_name(collection: str, doc_id: str):
     })
     cache.clear()
     return {"name_enabled": new_name_enabled}
+
+
+# ── Sous Chef feedback ────────────────────────────────────────────────────────
+
+@router.get("/assistant/feedback")
+async def admin_list_assistant_feedback(limit: int = 50):
+    """Newest reader feedback on Sous Chef answers, thumbs-down first, so a
+    wrong answer can be turned into a recipe's sous_chef_notes. Never carries
+    an email — only the hashed reader key the feedback route stored."""
+    limit = max(1, min(limit, 200))
+    db = get_db()
+    docs = (
+        db.collection("assistant_feedback")
+        .order_by("created_at", direction="DESCENDING")
+        .limit(limit)
+        .stream()
+    )
+    rows = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        created = data.get("created_at")
+        rows.append({
+            "id": doc.id,
+            "slug": data.get("slug", ""),
+            "rating": data.get("rating", ""),
+            "question": data.get("question", ""),
+            "answer": data.get("answer", ""),
+            "comment": data.get("comment", ""),
+            "model": data.get("model", ""),
+            "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
+        })
+    rows.sort(key=lambda r: r["rating"] != "down")  # stable: down first, newest within each
+    return rows
