@@ -400,8 +400,47 @@ def test_ask_api_refusal_and_rule_leak_are_replaced(user_client, recipe_db, conf
     assert _parse_sse(body)[-1][1]["code"] == "refused"
 
 
+def test_client_federates_when_the_rule_ids_are_set(monkeypatch, fresh_cache):
+    from app.services import claude_auth
+
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    monkeypatch.setattr(settings, "anthropic_federation_rule_id", "fdrl_test")
+    monkeypatch.setattr(settings, "anthropic_organization_id", "00000000-0000-0000-0000-000000000000")
+    monkeypatch.setattr(settings, "anthropic_service_account_id", "svac_test")
+    assistant.reset_client()
+    try:
+        client = assistant._get_client()
+        assert client.api_key is None
+        assert isinstance(client.credentials, claude_auth.FederatedCredentials)
+        assert client.credentials is assistant._credentials
+    finally:
+        assistant.reset_client()
+
+
+def test_client_uses_the_static_key_locally(configured):
+    client = assistant._get_client()
+    assert client.api_key == "sk-ant-test" and client.credentials is None
+    assert assistant._credentials is None
+
+
+@pytest.mark.asyncio
+async def test_calls_warm_the_federated_token_off_the_loop(monkeypatch, fresh_cache):
+    """Both Claude calls run the exchange in a worker thread first."""
+    from unittest.mock import AsyncMock
+
+    warm = AsyncMock()
+    monkeypatch.setattr(assistant, "_credentials", type("C", (), {"warm": warm})())
+    client = FakeAnthropic()
+    with patch("app.services.assistant._get_client", return_value=client):
+        await assistant.classify_topic("how hot for chicken?")
+        assert warm.await_count == 1
+        async for _ in assistant.stream_answer({"model": "m"}):
+            pass
+        assert warm.await_count == 2
+
+
 def test_ask_503_when_not_configured(user_client, recipe_db, fresh_cache):
-    assert settings.anthropic_api_key == ""
+    assert settings.anthropic_api_key == "" and settings.assistant_configured is False
     response = user_client.post("/api/assistant/ask", json=ASK)
     assert response.status_code == 503 and response.json()["detail"]["code"] == "not_configured"
 

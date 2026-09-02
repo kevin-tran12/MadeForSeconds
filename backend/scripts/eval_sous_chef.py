@@ -7,7 +7,8 @@ change to SYSTEM_RULES or CLASSIFIER_RULES and paste the table into the PR:
     docker compose exec backend python scripts/eval_sous_chef.py
     docker compose exec backend python scripts/eval_sous_chef.py --only doneness-chicken,canning-refused
 
-Needs ANTHROPIC_API_KEY in the environment and the recipes the fixture names
+Needs ANTHROPIC_API_KEY in the environment (a personal key — the static key is
+for local runs only; production federates) and the recipes the fixture names
 published in whatever Firestore the environment points at (the emulator +
 seed.py locally). Each case goes through the same topic gate and
 build_request the endpoint uses, then rule-based checks run on the answer.
@@ -126,7 +127,7 @@ async def main() -> int:
     args = parser.parse_args()
 
     if not settings.assistant_configured:
-        print("ANTHROPIC_API_KEY is not set — nothing to evaluate against.", file=sys.stderr)
+        print("Sous Chef is not configured — set ANTHROPIC_API_KEY for a local run.", file=sys.stderr)
         return 2
 
     cases = json.loads(Path(args.fixture).read_text(encoding="utf-8"))["cases"]
