@@ -119,3 +119,27 @@ def test_recipe_update_field_bounds():
         RecipeUpdate(description="x" * 2001)
 
     assert RecipeUpdate(title="Fine").title == "Fine"
+
+
+# ── sous_chef_notes: owner-only, never on the public model ────────────────────
+
+def test_public_recipe_model_drops_sous_chef_notes():
+    from app.models import AdminRecipe, Recipe
+    data = {
+        "id": "r1", "title": "T", "slug": "t", "description": "", "ingredients": [],
+        "instructions": [], "prep_time_minutes": 0, "cook_time_minutes": 0, "servings": 1,
+        "difficulty": "easy", "categories": [], "image_url": None, "published": True,
+        "created_at": datetime(2026, 1, 1), "updated_at": datetime(2026, 1, 1),
+        "sous_chef_notes": "private",
+    }
+    assert "sous_chef_notes" not in Recipe(**data).model_dump()
+    assert AdminRecipe(**data).sous_chef_notes == "private"
+    assert AdminRecipe(**{k: v for k, v in data.items() if k != "sous_chef_notes"}).sous_chef_notes is None
+
+
+def test_sous_chef_notes_is_optional_and_bounded():
+    assert RecipeCreate(title="T").sous_chef_notes is None
+    assert RecipeCreate(title="T", sous_chef_notes="x").sous_chef_notes == "x"
+    assert RecipeUpdate(sous_chef_notes=None).model_dump(exclude_unset=True) == {"sous_chef_notes": None}
+    with pytest.raises(ValidationError):
+        RecipeCreate(title="T", sous_chef_notes="x" * 10_001)

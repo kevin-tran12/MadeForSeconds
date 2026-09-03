@@ -275,3 +275,30 @@ def test_toggle_name_on_without_display_name_keeps_public_listing_false(authenti
 
     update_call = mock_db.collection.return_value.document.return_value.update.call_args[0][0]
     assert update_call["public_listing"] is False
+
+
+def test_admin_recipes_round_trip_sous_chef_notes(authenticated_client, mock_db):
+    """Admin routes return the owner's view, including the assistant notes."""
+    mock_doc = MagicMock()
+    mock_doc.id = "r1"
+    mock_doc.to_dict.return_value = {
+        "title": "Fried Rice", "slug": "fried-rice", "description": "", "ingredients": [],
+        "instructions": [], "prep_time_minutes": 0, "cook_time_minutes": 0, "servings": 2,
+        "difficulty": "easy", "categories": [], "image_url": None, "published": False,
+        "created_at": datetime(2026, 3, 14), "updated_at": datetime(2026, 3, 14),
+        "sous_chef_notes": "use day-old rice",
+    }
+    mock_db.collection.return_value.order_by.return_value.stream.return_value = iter([mock_doc])
+    listed = authenticated_client.get("/api/admin/recipes").json()
+    assert listed[0]["sous_chef_notes"] == "use day-old rice"
+
+    mock_db.collection.return_value.document.return_value.id = "new-id"
+    mock_db.stream.return_value = iter([])
+    created = authenticated_client.post(
+        "/api/admin/recipes",
+        json={"title": "Laksa", "ingredients": [{"item": "noodles", "amount": "1", "unit": "pack"}],
+              "instructions": [{"step": 1, "text": "Cook"}], "sous_chef_notes": "toast the rempah"},
+    )
+    assert created.status_code == 201
+    assert created.json()["sous_chef_notes"] == "toast the rempah"
+    assert mock_db.set.call_args[0][0]["sous_chef_notes"] == "toast the rempah"
