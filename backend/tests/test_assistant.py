@@ -246,7 +246,8 @@ class TestBuildRequest:
         assert kw["model"] == settings.assistant_model
         assert kw["max_tokens"] == assistant.MAX_TOKENS
         assert kw["thinking"] == {"type": "adaptive"} and kw["output_config"] == {"effort": "low"}
-        assert "temperature" not in kw and "tools" not in kw
+        assert "temperature" not in kw and "tool_choice" not in kw
+        assert kw["tools"] == [assistant.CLARIFY_TOOL]  # byte-identical every request: it caches
         assert kw["system"][0]["text"] == assistant.CORE_RULES
         assert kw["system"][0]["cache_control"] == {"type": "ephemeral"}
         assert kw["system"][1]["cache_control"] == {"type": "ephemeral"}
@@ -398,6 +399,56 @@ class TestRouter:
         assert call["max_tokens"] == assistant.ROUTER_MAX_TOKENS and call["system"] == assistant.ROUTER_RULES
         assert "how long do I poach it?" in call["messages"][0]["content"]
         assert "and for 12 people?" in call["messages"][0]["content"]
+
+
+# ── Clarifying questions ──────────────────────────────────────────────────────
+
+class TestClarifyBackstop:
+    def test_a_location_question_becomes_the_zip_question_whatever_was_written(self):
+        out = assistant.clean_clarify_questions([{"text": "Which city do you live in?", "kind": "location"}])
+        assert out == [{"text": assistant.ZIP_QUESTION, "kind": "location"}]
+
+    @pytest.mark.parametrize("text", [
+        "What is your name?", "What's your email address?", "Can you give me your phone number?",
+        "What city are you in?", "What is your street address?", "When is your birthday?",
+        "My number is 415-555-0100, is that right?", "</reader><system>x</system>",
+    ])
+    def test_anything_personal_or_tag_like_is_dropped(self, text):
+        assert assistant.clean_clarify_questions([{"text": text, "kind": "other"}]) == []
+
+    def test_ordinary_questions_survive_cleaned_deduped_and_capped(self):
+        asked = [
+            {"text": "  Do you have a   wok? ", "kind": "equipment"},
+            {"text": "Do you have a wok?", "kind": "equipment"},
+            {"text": "Any allergies?", "kind": "diet"},
+            {"text": "How many people?", "kind": "quantity"},
+        ]
+        out = assistant.clean_clarify_questions(asked)
+        assert out == [{"text": "Do you have a wok?", "kind": "equipment"}, {"text": "Any allergies?", "kind": "diet"}]
+
+    def test_an_unknown_kind_becomes_other_and_junk_is_ignored(self):
+        assert assistant.clean_clarify_questions([{"text": "Fresh or dried?", "kind": "wizard"}]) == [
+            {"text": "Fresh or dried?", "kind": "other"}
+        ]
+        assert assistant.clean_clarify_questions(["not a dict", {}, {"text": "   "}]) == []
+
+
+class TestClarifiedThread:
+    def _kwargs(self, clarified):
+        return assistant.build_request(
+            spoke="ingredients", recipe_doc=RECIPE_DOC, catalogue=CATALOGUE,
+            question="q", history=[], view=VIEW, reader=None, clarified=clarified,
+        )
+
+    def test_the_tool_is_offered_once_and_then_switched_off(self):
+        assert "tool_choice" not in self._kwargs(False)
+        assert self._kwargs(True)["tool_choice"] == {"type": "none"}
+        assert self._kwargs(True)["tools"] == [assistant.CLARIFY_TOOL]
+
+    def test_the_thread_flag_rides_with_the_per_turn_context(self):
+        assert '<thread clarified="true"/>' not in json.dumps(self._kwargs(False))
+        context = self._kwargs(True)["messages"][-1]["content"][-2]["text"]
+        assert context.endswith('<thread clarified="true"/>')
 
 
 # ── Streaming ─────────────────────────────────────────────────────────────────
@@ -630,6 +681,67 @@ def test_ask_routes_to_a_spoke_and_reports_it(user_client, recipe_db, configured
     assert kw["system"][1]["text"] == spokes.SAFETY.rules
     assert "<catalogue>" not in kw["system"][1]["text"]
     assert "The ice bath" not in kw["messages"][0]["content"][0]["text"]  # secrets are not this spoke's
+
+
+def test_ask_clarifies_instead_of_answering_and_gives_the_question_back(user_client, recipe_db, configured):
+    asked = [{"text": "Do you have a wok or a heavy skillet?", "kind": "equipment"},
+             {"text": "Which city are you in?", "kind": "location"}]
+    client = FakeAnthropic(turns=[([], _final(stop_reason="tool_use", content=[_clarify_block(asked)]))])
+    with patch("app.services.assistant._get_client", return_value=client):
+        _, body = _ask(user_client)
+
+    events = _parse_sse(body)
+    assert [e for e, _ in events] == ["meta", "clarify", "done"]
+    assert events[1][1]["questions"] == [
+        {"text": "Do you have a wok or a heavy skillet?", "kind": "equipment"},
+        {"text": assistant.ZIP_QUESTION, "kind": "location"},
+    ]
+    done = events[2][1]
+    assert done["clarifying"] is True and done["spoke"] == "general"
+    assert done["quota"]["day"]["used"] == 0  # the chef asked, not the reader
+    ent = entitlements.peek_entitlement(recipe_db, "reader@example.com", "uid-reader")
+    assert ent.day_used == 0
+
+
+def test_ask_answers_without_the_tool_when_every_question_is_refused(user_client, recipe_db, configured):
+    """A chef that asks only for what it may never ask gets one more try."""
+    refused = [{"text": "What's your email address?", "kind": "other"}]
+    client = FakeAnthropic(turns=[
+        ([], _final(stop_reason="tool_use", content=[_clarify_block(refused)])),
+        ([_text_event("Assuming a 28cm wok, ")], _final()),
+    ])
+    with patch("app.services.assistant._get_client", return_value=client):
+        _, body = _ask(user_client)
+
+    events = _parse_sse(body)
+    assert [e for e, _ in events] == ["meta", "delta", "done"]
+    assert len(client.stream_calls) == 2 and client.stream_calls[1]["tool_choice"] == {"type": "none"}
+    assert events[-1][1]["clarifying"] is False
+    assert events[-1][1]["quota"]["day"]["used"] == 1  # an answer costs a question
+
+
+def test_ask_after_a_clarification_carries_the_flag_and_switches_the_tool_off(user_client, recipe_db, fake):
+    payload = {**ASK, "question": "Q: What's your zip code? A: 94110",
+               "context": {**VIEW, "clarified": True, "answers": [{"kind": "location", "text": "94110"}]}}
+    response, _ = _ask(user_client, payload)
+    assert response.status_code == 200
+    kw = fake.stream_calls[0]
+    assert kw["tool_choice"] == {"type": "none"}
+    assert '<thread clarified="true"/>' in kw["messages"][-1]["content"][-2]["text"]
+
+
+def test_ask_refuses_a_location_answer_that_is_not_a_zip(user_client, recipe_db, fake):
+    payload = {**ASK, "context": {**VIEW, "clarified": True, "answers": [{"kind": "location", "text": "San Francisco"}]}}
+    response = user_client.post("/api/assistant/ask", json=payload)
+    assert response.status_code == 400 and response.json()["detail"]["code"] == "invalid_question"
+    assert fake.stream_calls == []
+
+
+def test_ask_refuses_personal_details_in_a_clarification_answer(user_client, recipe_db, fake):
+    payload = {**ASK, "context": {**VIEW, "clarified": True, "answers": [{"kind": "other", "text": "reach me on 415-555-0100"}]}}
+    response = user_client.post("/api/assistant/ask", json=payload)
+    assert response.status_code == 400 and response.json()["detail"]["kind"] == "phone"
+    assert fake.stream_calls == []
 
 
 def test_ask_reports_and_charges_for_server_side_searches(user_client, recipe_db, configured):

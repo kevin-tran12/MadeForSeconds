@@ -27,7 +27,7 @@ import anthropic
 from ..cache import cache
 from ..config import settings
 from ..models import Recipe
-from . import claude_auth, llm_budget, spokes
+from . import claude_auth, llm_budget, pii, spokes
 from .recipes import get_all_published
 from .users import COOKING_LEVELS, DEFAULT_COOKING_LEVEL, MAX_EXPERIENCE_NOTES, clean_text
 
@@ -50,7 +50,64 @@ ROUTER_MAX_TOKENS = 6  # one label, and nothing to say if it wanders
 MIN_CACHEABLE_CHARS = 4_400
 
 # The one client-side tool: the chef asks the reader for what only they know.
+# Nothing executes it — the questions go to the reader and the thread waits.
 CLARIFY_TOOL_NAME = "ask_clarifying_questions"
+CLARIFY_KINDS = ("location", "equipment", "quantity", "diet", "other")
+MAX_CLARIFY_QUESTIONS = 3
+MAX_CLARIFY_CHARS = 200
+
+# The only location question that may ever reach a reader, whatever the model
+# wrote: a zip code is enough to point somewhere local and nothing is kept.
+ZIP_QUESTION = "What's your zip code? That's all I need to point you somewhere local."
+
+# A model-written question that reads like a request for personal information
+# is dropped outright. City and town are in here deliberately: the rule is a
+# zip code or nothing.
+_PERSONAL_ASK_RE = re.compile(
+    r"\b(your (full |first |last )?name|e-?mail|phone|mobile number|cell number|"
+    r"street address|your address|where do you live|what city|which city|your city|"
+    r"your town|birth ?day|birth date|date of birth|how old are you|your age|employer)\b",
+    re.I,
+)
+
+# Byte-identical on every request: the tools tier is a cache tier too, and a
+# definition that varied would invalidate it for every reader.
+CLARIFY_TOOL = {
+    "name": CLARIFY_TOOL_NAME,
+    "description": (
+        "Ask the reader for what only they can tell you, when you cannot answer accurately "
+        "without it. Ask every question you need in one call, then stop and wait for the reply. "
+        "Never use this for anything personal beyond a zip code."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": MAX_CLARIFY_QUESTIONS,
+                "description": "Every question you need answered, asked at once.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "maxLength": MAX_CLARIFY_CHARS,
+                            "description": "One short question, in plain words.",
+                        },
+                        "kind": {
+                            "type": "string",
+                            "enum": list(CLARIFY_KINDS),
+                            "description": "What the question is about. Use location only for where the reader shops.",
+                        },
+                    },
+                    "required": ["text", "kind"],
+                },
+            }
+        },
+        "required": ["questions"],
+    },
+}
 
 # A pause_turn means the server ran out of time mid tool use and wants the
 # turn continued. Continue once; a second pause is reported as truncated
@@ -78,7 +135,13 @@ GROUNDING
 - Answer from the recipe first. If the recipe does not say, say so plainly, then give a general guideline and label it as one.
 - Never invent an ingredient, quantity, time, or temperature that is not in the recipe.
 - Recommend another recipe from this site only when a <catalogue> block is in front of you, and only by its exact title from it. With no <catalogue>, say you can point them to the rest of the site if they ask, and stop.
-- Ask one short clarifying question when the request is ambiguous (which component, what equipment, how many people).
+- Never guess at what only the reader can tell you. See WHEN YOU NEED MORE.
+
+WHEN YOU NEED MORE
+- If you cannot answer accurately without something only the reader knows — what equipment or quantities they have, a dietary limit, their zip code for a where-to-buy question — call ask_clarifying_questions with every question you need in one call, say nothing else, and wait.
+- Never ask for what <recipe>, <view>, or <reader> already says, never ask about preferences, and never ask when the reader has already given the value. If you can answer with a stated assumption instead, do that.
+- A location question may only ever ask for a zip code. Never ask for a city, a neighbourhood, a shop they use, or anything else personal.
+- If <thread clarified="true"/> is present you have already asked once: answer with what you have and state your assumptions in one line.
 
 QUANTITIES AND SCALING
 - <view> gives the servings the reader's page currently shows and their unit system. The page has already scaled and converted every quantity: give numbers as the reader sees them, and do not re-scale the ingredient list unless asked.
@@ -342,7 +405,7 @@ def _recipe_block(doc: dict, keep: tuple[str, ...] | None = None) -> dict:
     }
 
 
-def _context_block(view: dict, reader: dict | None) -> dict:
+def _context_block(view: dict, reader: dict | None, clarified: bool = False) -> dict:
     servings = int(view.get("servings") or 1)
     units = "metric" if view.get("unit_system") == "metric" else "imperial"
     level = (reader or {}).get("level")
@@ -351,6 +414,9 @@ def _context_block(view: dict, reader: dict | None) -> dict:
     notes = clean_text((reader or {}).get("notes"), MAX_EXPERIENCE_NOTES)
     notes = _TAG_RE.sub("", notes)
     text = f'<view servings="{servings}" units="{units}"/>\n<reader level="{level}">{html.escape(notes)}</reader>'
+    if clarified:
+        # The chef has already had its one round of questions on this thread.
+        text = f'{text}\n<thread clarified="true"/>'
     return {"type": "text", "text": text}
 
 
@@ -372,6 +438,7 @@ def build_request(
     history: list[dict],
     view: dict,
     reader: dict | None = None,
+    clarified: bool = False,
 ) -> dict:
     """Assemble the Messages API call for one spoke.
 
@@ -387,7 +454,7 @@ def build_request(
     history = list(history)
     recipe_block = _recipe_block(recipe_doc, chosen.keep)
     spoke_block = _spoke_block(chosen, catalogue)
-    context_block = _context_block(view, reader)
+    context_block = _context_block(view, reader, clarified)
     question_block = {"type": "text", "text": question}
 
     def size(turns: list[dict]) -> int:
@@ -410,17 +477,24 @@ def build_request(
     else:
         messages = [{"role": "user", "content": [recipe_block, context_block, question_block]}]
 
-    return {
+    request = {
         "model": settings.assistant_model,
         "max_tokens": chosen.max_tokens,
         "thinking": {"type": "adaptive"},
         "output_config": {"effort": chosen.effort},
+        "tools": [CLARIFY_TOOL],
         "system": [
             {"type": "text", "text": CORE_RULES, "cache_control": {"type": "ephemeral"}},
             spoke_block,
         ],
         "messages": messages,
     }
+    if clarified:
+        # One round of questions per thread. (This costs the message-block
+        # cache entry for the second turn — a tool_choice change invalidates
+        # it — which is a few tenths of a cent, once, per clarified thread.)
+        request["tool_choice"] = {"type": "none"}
+    return request
 
 
 # ── Claude API ────────────────────────────────────────────────────────────────
@@ -587,6 +661,35 @@ async def stream_answer(kwargs: dict) -> AsyncIterator[tuple[str, Any]]:
         stop_reason=stop_reason,
         request_id=getattr(final, "_request_id", None),
     )
+
+
+def clean_clarify_questions(questions: list[dict]) -> list[dict]:
+    """The server-side backstop on what the chef may ask a reader.
+
+    A location question becomes the one location question allowed — a zip
+    code — whatever the model actually wrote. Anything else that reads like a
+    request for personal information is dropped, and so is anything that
+    imitates the prompt's own tags. What survives is cleaned like any other
+    text on its way to a reader, deduped, and capped at three.
+
+    An empty result from a non-empty ask means the chef asked only for things
+    it may not ask; the caller answers without the tool rather than putting
+    any of it in front of the reader.
+    """
+    out: list[dict] = []
+    for item in questions[:MAX_CLARIFY_QUESTIONS]:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind") if item.get("kind") in CLARIFY_KINDS else "other"
+        if kind == "location":
+            text = ZIP_QUESTION
+        else:
+            text = clean_text(item.get("text"), MAX_CLARIFY_CHARS)
+            if not text or _TAG_RE.search(text) or _PERSONAL_ASK_RE.search(text) or pii.find_personal_info(text):
+                continue
+        if not any(q["text"] == text for q in out):
+            out.append({"text": text, "kind": kind})
+    return out
 
 
 def leaks_rules(answer: str) -> bool:

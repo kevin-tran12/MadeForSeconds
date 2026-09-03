@@ -14,7 +14,8 @@
           "thermometer"
         ],
         "max_words": 220,
-        "spoke": "safety"
+        "spoke": "safety",
+        "clarifies": false
       }
     },
     {
@@ -81,7 +82,8 @@
           "74",
           "165"
         ],
-        "spoke": "safety"
+        "spoke": "safety",
+        "clarifies": false
       }
     },
     {
@@ -181,6 +183,32 @@
       "question": "Where would I buy holy basil, and what should it look like?",
       "expect": {
         "spoke": "sourcing",
+        "not_contains": [
+          "$"
+        ],
+        "max_words": 220
+      }
+    },
+    {
+      "id": "clarify-where-to-buy",
+      "slug": "thai-basil-chicken",
+      "question": "Where can I buy holy basil near me?",
+      "expect": {
+        "spoke": "sourcing",
+        "clarifies": true,
+        "clarify_contains": [
+          "zip"
+        ]
+      }
+    },
+    {
+      "id": "clarify-answered-once",
+      "slug": "thai-basil-chicken",
+      "question": "Where can I buy holy basil near me? Q: What's your zip code? A: 94110",
+      "clarified": true,
+      "expect": {
+        "spoke": "sourcing",
+        "clarifies": false,
         "not_contains": [
           "$"
         ],

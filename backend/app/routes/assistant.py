@@ -42,9 +42,21 @@ class HistoryMessage(BaseModel):
     content: str = Field(max_length=assistant.MAX_MESSAGE_CHARS)
 
 
+class ClarifyAnswer(BaseModel):
+    """One answer to one question the chef asked. The text also rides in the
+    question itself, where the model reads it; this copy is what gets checked."""
+
+    kind: Literal["location", "equipment", "quantity", "diet", "other"] = "other"
+    text: str = Field(min_length=1, max_length=300)
+
+
 class AskContext(BaseModel):
     servings: int = Field(ge=1, le=1000)
     unit_system: Literal["imperial", "metric"] = "imperial"
+    # Set by the client for every send after the chef asked its questions, so
+    # a thread only ever has one round of them.
+    clarified: bool = False
+    answers: list[ClarifyAnswer] = Field(default=[], max_length=assistant.MAX_CLARIFY_QUESTIONS)
 
 
 class AskRequest(BaseModel):
@@ -181,10 +193,18 @@ async def ask(
     # Before anything else: no personal details reach the model, a log line,
     # or Firestore. History is checked too — a crafted client can replay what
     # was refused a turn ago. Nothing is consumed and nothing is stored.
-    kind = pii.first_personal_info([question, *(m.content for m in body.history)])
+    answers = body.context.answers
+    kind = pii.first_personal_info([question, *(m.content for m in body.history), *(a.text for a in answers)])
     if kind:
         logger.info("assistant refused personal_info kind=%s user=%s", kind, keyed_hash(user.email)[:12])
         raise HTTPException(status_code=400, detail=pii.refusal_detail(kind))
+
+    # The one location answer allowed is a zip code — not a city, not a shop.
+    if any(a.kind == "location" and not pii.is_zip(a.text) for a in answers):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_question", "message": "A five-digit zip code is all I need — nothing else about where you are."},
+        )
 
     db = get_db()
 
@@ -224,6 +244,7 @@ async def ask(
                 history=history,
                 view=body.context.model_dump(),
                 reader=reader,
+                clarified=body.context.clarified,
             )
         except assistant.PromptTooLong:
             raise HTTPException(status_code=413, detail={"code": "prompt_too_long", "message": "That's a long one — start a fresh chat."})
@@ -273,45 +294,82 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
         )
         return
 
-    # The answer.
+    # The answer. At most two calls: if the chef asks a reader only for things
+    # it may never ask, every question is dropped and it is asked again with
+    # the tool switched off, so the reader gets an answer either way.
     final = None
+    questions: list[dict] = []
+    usage = llm_budget.empty_usage()
     try:
-        try:
-            async for kind, payload in assistant.stream_answer(kwargs):
-                if kind == "delta":
-                    answer_parts.append(payload)
-                    sent_any = True
-                    yield sse("delta", {"text": payload})
-                elif kind == "status":
-                    searches_seen += 1  # billed even if the reader leaves mid-search
-                elif kind == "final":
-                    final = payload
-                # "clarify" and "sources" reach the client once the spokes that
-                # can produce them exist; the model has no tools to call yet.
-        except anthropic.RateLimitError:
-            finished = True
-            if not sent_any:
-                entitlements.refund_quota(ent)
-            _record_spend(router_cost)
-            logger.warning("assistant: upstream rate limited slug=%s user=%s", slug, user_tag)
-            yield sse("error", {"code": "upstream_busy", "message": "The Sous Chef is slammed right now — try again in a moment."})
-            return
-        except (anthropic.APIStatusError, anthropic.APIConnectionError, anthropic.APITimeoutError):
-            finished = True
-            if not sent_any:
-                entitlements.refund_quota(ent)
-            _record_spend(router_cost)
-            logger.warning("assistant: upstream error slug=%s user=%s", slug, user_tag, exc_info=True)
-            yield sse("error", {"code": "upstream_error", "message": "The Sous Chef dropped the pan — try again."})
-            return
+        for attempt in range(2):
+            asked: list[dict] = []
+            try:
+                async for kind, payload in assistant.stream_answer(kwargs):
+                    if kind == "delta":
+                        answer_parts.append(payload)
+                        sent_any = True
+                        yield sse("delta", {"text": payload})
+                    elif kind == "status":
+                        searches_seen += 1  # billed even if the reader leaves mid-search
+                    elif kind == "clarify":
+                        asked = payload
+                    elif kind == "final":
+                        final = payload
+                    # "sources" reaches the client once a spoke can search.
+            except anthropic.RateLimitError:
+                finished = True
+                if not sent_any:
+                    entitlements.refund_quota(ent)
+                _record_spend(router_cost)
+                logger.warning("assistant: upstream rate limited slug=%s user=%s", slug, user_tag)
+                yield sse("error", {"code": "upstream_busy", "message": "The Sous Chef is slammed right now — try again in a moment."})
+                return
+            except (anthropic.APIStatusError, anthropic.APIConnectionError, anthropic.APITimeoutError):
+                finished = True
+                if not sent_any:
+                    entitlements.refund_quota(ent)
+                _record_spend(router_cost)
+                logger.warning("assistant: upstream error slug=%s user=%s", slug, user_tag, exc_info=True)
+                yield sse("error", {"code": "upstream_error", "message": "The Sous Chef dropped the pan — try again."})
+                return
+
+            if final is not None:
+                usage = llm_budget.add_usage(usage, final.usage)
+            questions = assistant.clean_clarify_questions(asked)
+            if asked and not questions and attempt == 0:
+                logger.warning("assistant: clarifying questions all refused slug=%s spoke=%s", slug, spoke)
+                kwargs = {**kwargs, "tool_choice": {"type": "none"}}
+                continue
+            break
 
         finished = True
         answer = "".join(answer_parts)
-        usage = final.usage if final is not None else None
-        cost = router_cost + (llm_budget.cost_micro_usd(usage, settings.assistant_model) if usage is not None else 0)
+        cost = router_cost + llm_budget.cost_micro_usd(usage, settings.assistant_model)
         month = _record_spend(cost)
         stop_reason = final.stop_reason if final is not None else None
         searches = final.searches if final is not None else 0
+
+        if questions:
+            # The chef asked, not the reader: give the question back, keep the
+            # spend, and leave the thread waiting for one round of answers.
+            ent = entitlements.refund_quota(ent)
+            yield sse("clarify", {"questions": questions})
+            yield sse("done", {
+                "usage": _usage_dict(usage),
+                "cost_micro_usd": cost,
+                "stop_reason": stop_reason,
+                "truncated": False,
+                "refused": False,
+                "clarifying": True,
+                "searches": searches,
+                "spoke": spoke,
+                "quota": ent.to_dict(),
+            })
+            logger.info(
+                "assistant clarified slug=%s spoke=%s clarify=%d cost_micro=%d month_micro=%s user=%s ms=%d",
+                slug, spoke, len(questions), cost, month, user_tag, int((time.monotonic() - started) * 1000),
+            )
+            return
 
         if stop_reason == "refusal":
             yield sse("error", {"code": "refused", "message": assistant.API_REFUSAL_TEXT})
@@ -334,6 +392,7 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
             "stop_reason": stop_reason,
             "truncated": final.truncated if final is not None else False,
             "refused": False,
+            "clarifying": False,
             "searches": searches,
             "spoke": spoke,
             "quota": ent.to_dict(),
