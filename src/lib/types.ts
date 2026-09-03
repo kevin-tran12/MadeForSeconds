@@ -59,6 +59,8 @@ export interface Recipe {
   receipt_urls?: string[]
   labels?: string[]
   secrets?: RecipeSecret[]
+  /** Owner-only guidance for the Sous Chef assistant. Only the admin API returns it. */
+  sous_chef_notes?: string | null
 }
 
 // Omit auto-generated fields when submitting from the form
