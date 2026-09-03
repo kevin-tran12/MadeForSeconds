@@ -78,6 +78,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
   )
   const [nutrition, setNutrition] = useState<NutritionEntry[]>(recipe?.nutrition ?? [])
   const [secrets, setSecrets] = useState<RecipeSecret[]>(recipe?.secrets ?? [])
+  const [sousChefNotes, setSousChefNotes] = useState(recipe?.sous_chef_notes ?? '')
 
   // Multi-component mode
   const hasExistingComponents = (recipe?.components?.length ?? 0) > 0
@@ -149,6 +150,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
       receipt_urls: receiptUrls,
       labels,
       secrets,
+      sous_chef_notes: sousChefNotes.trim() || null,
     }
   }
 
@@ -266,6 +268,7 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         receipt_urls: receiptUrls,
         labels,
         secrets,
+        sous_chef_notes: sousChefNotes.trim() || null,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -530,6 +533,22 @@ export function RecipeForm({ recipe, onSubmit, isSubmitting }: RecipeFormProps) 
         >
           + Add secret
         </Button>
+      </Section>
+
+      <Section title="Sous Chef notes (never shown to readers)">
+        <p className="text-xs text-gray-400 -mt-2">
+          Private guidance for the Sous Chef assistant: substitutions that work, ones that don't,
+          and the pitfalls readers hit. It answers from this before general cooking knowledge.
+        </p>
+        <textarea
+          rows={5}
+          aria-label="Sous Chef notes"
+          value={sousChefNotes}
+          onChange={(e) => setSousChefNotes(e.target.value)}
+          maxLength={10000}
+          placeholder="e.g. Thai basil works instead of holy basil; dried galangal does not. Halving the brine under-seasons the chicken…"
+          className="resize-y rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100"
+        />
       </Section>
 
       <Section title="Nutrition (optional)">

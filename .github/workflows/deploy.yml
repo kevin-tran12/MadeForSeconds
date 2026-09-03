@@ -215,6 +215,16 @@ jobs:
           # a running service, so it never surfaced there.
           TF_VAR_workos_authkit_domain: ${{ vars.WORKOS_AUTHKIT_DOMAIN }}
           TF_VAR_mcp_resource_url: ${{ vars.STAGING_MCP_RESOURCE_URL }}
+          # Sous Chef assistant — Anthropic Workload Identity Federation ids.
+          # Repository *variables*, not secrets: the runtime service account's
+          # identity token is the credential; these only name the rule. Unset
+          # (empty) leaves the assistant off. Set the three together, and only
+          # alongside STAGING_REDIS_CONFIGURED=true — the backend refuses to start
+          # with federation and no Redis (config.validate_production_settings).
+          TF_VAR_anthropic_federation_rule_id: ${{ vars.STAGING_ANTHROPIC_FEDERATION_RULE_ID }}
+          TF_VAR_anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          TF_VAR_anthropic_service_account_id: ${{ vars.STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          TF_VAR_anthropic_workspace_id: ${{ vars.STAGING_ANTHROPIC_WORKSPACE_ID }}
         run: |
           set -euo pipefail
           if [ "${{ vars.STAGING_REDIS_CONFIGURED }}" = "true" ]; then
@@ -445,6 +455,16 @@ jobs:
           # here at all.
           TF_VAR_workos_authkit_domain: ${{ vars.WORKOS_AUTHKIT_DOMAIN }}
           TF_VAR_mcp_resource_url: ${{ vars.PROD_MCP_RESOURCE_URL }}
+          # Sous Chef assistant — Anthropic Workload Identity Federation ids.
+          # Repository *variables*, not secrets: the runtime service account's
+          # identity token is the credential; these only name the rule. Unset
+          # (empty) leaves the assistant off. Set the three together, and only
+          # alongside PROD_REDIS_CONFIGURED=true — the backend refuses to start
+          # with federation and no Redis (config.validate_production_settings).
+          TF_VAR_anthropic_federation_rule_id: ${{ vars.PROD_ANTHROPIC_FEDERATION_RULE_ID }}
+          TF_VAR_anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          TF_VAR_anthropic_service_account_id: ${{ vars.PROD_ANTHROPIC_SERVICE_ACCOUNT_ID }}
+          TF_VAR_anthropic_workspace_id: ${{ vars.PROD_ANTHROPIC_WORKSPACE_ID }}
         run: |
           set -euo pipefail
           if [ "${{ vars.PROD_REDIS_CONFIGURED }}" = "true" ]; then

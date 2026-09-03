@@ -71,3 +71,8 @@ output "secret_pruner_canary_id" {
   description = "secret_id of the disposable canary secret used to validate secret-pruner's recovery drill (docs/DEPLOYMENT.md § Secret version pruning) without touching a real application secret. null in staging, where module.secret-maintenance doesn't exist."
   value       = try(module.secret-maintenance[0].canary_secret_id, null)
 }
+
+output "assistant_federation_env_names" {
+  description = "Anthropic federation env vars on the Cloud Run template (the Sous Chef assistant); empty means the assistant is off. See terraform/tests/assistant_federation.tftest.hcl."
+  value       = module.backend-service.assistant_federation_env_names
+}

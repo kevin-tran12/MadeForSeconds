@@ -111,31 +111,34 @@ resource "time_sleep" "wait_for_detection_metrics" {
   create_duration = "180s"
 }
 
+# This one alerts on the log entries directly rather than on the metric
+# above, because a condition_threshold filter must pin resource.type and this
+# alert is deliberately "any GCP service". SetIamPolicy entries arrive under
+# whichever monitored resource the target belongs to — 60 days of production
+# logs show audited_resource, service_account, project and cloud_run_revision,
+# and a service nobody has touched yet would add another. Enumerating them
+# with one_of() would work today and silently stop covering the next one,
+# which is the wrong failure mode for the broadest security alert here. A
+# log-match condition has no resource.type dimension at all, so it cannot
+# develop that blind spot. The metric above is kept: it still records a
+# chartable count of the same filter, it just is not what fires this alert.
 resource "google_monitoring_alert_policy" "iam_policy_changes" {
   project      = var.gcp_project_id
   display_name = "MFS IAM policy changed"
   combiner     = "OR"
 
-  depends_on = [time_sleep.wait_for_detection_metrics]
-
   conditions {
     display_name = "SetIamPolicy call"
 
-    condition_threshold {
-      filter          = "metric.type = \"logging.googleapis.com/user/${google_logging_metric.iam_policy_changes.name}\""
-      comparison      = "COMPARISON_GT"
-      threshold_value = 0
-      duration        = "0s"
+    condition_matched_log {
+      filter = "protoPayload.methodName:\"SetIamPolicy\""
+    }
+  }
 
-      aggregations {
-        alignment_period     = "300s"
-        per_series_aligner   = "ALIGN_COUNT"
-        cross_series_reducer = "REDUCE_SUM"
-      }
-
-      trigger {
-        count = 1
-      }
+  # Required for a log-match condition: without it every matching entry pages.
+  alert_strategy {
+    notification_rate_limit {
+      period = "300s"
     }
   }
 
@@ -153,7 +156,9 @@ resource "google_monitoring_alert_policy" "unusual_secret_access" {
     display_name = "Secret access by an unexpected principal"
 
     condition_threshold {
-      filter          = "metric.type = \"logging.googleapis.com/user/${google_logging_metric.unusual_secret_access.name}\""
+      # audited_resource is right here: every Secret Manager audit entry in 60
+      # days of production logs (75 of 75) carries that monitored resource.
+      filter          = "resource.type = \"audited_resource\" AND metric.type = \"logging.googleapis.com/user/${google_logging_metric.unusual_secret_access.name}\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "0s"
@@ -184,7 +189,10 @@ resource "google_monitoring_alert_policy" "receipts_bucket_config_changed" {
     display_name = "storage.buckets.update on the receipts bucket"
 
     condition_threshold {
-      filter          = "metric.type = \"logging.googleapis.com/user/${google_logging_metric.receipts_bucket_config_changed.name}\""
+      # gcs_bucket, not audited_resource: Cloud Storage audit entries carry the
+      # bucket as their monitored resource, so pinning audited_resource here
+      # would mean this alert never fires at all.
+      filter          = "resource.type = \"gcs_bucket\" AND metric.type = \"logging.googleapis.com/user/${google_logging_metric.receipts_bucket_config_changed.name}\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "0s"
