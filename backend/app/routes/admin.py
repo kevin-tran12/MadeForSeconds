@@ -10,7 +10,7 @@ from ..auth import require_admin
 from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
-from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
+from ..models import AdminRecipe, PageContent, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
 from ..routes.subscriptions import compute_public_listing
 from ..services import receipt_ledger
 from ..services import recipes as recipe_service
@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
 
-@router.get("/recipes", response_model=list[Recipe])
+@router.get("/recipes", response_model=list[AdminRecipe])
 async def admin_list_recipes():
     db = get_db()
     docs = db.collection("recipes").order_by("created_at", direction="DESCENDING").stream()
-    return [recipe_service.doc_to_recipe(doc) for doc in docs]
+    return [recipe_service.doc_to_admin_recipe(doc) for doc in docs]
 
 
-@router.post("/recipes", response_model=Recipe, status_code=201)
+@router.post("/recipes", response_model=AdminRecipe, status_code=201)
 async def admin_create_recipe(body: RecipeCreate):
     db = get_db()
     try:
@@ -47,7 +47,7 @@ async def admin_create_recipe(body: RecipeCreate):
         raise HTTPException(status_code=422, detail=f"Image could not be attached: {exc}")
 
 
-@router.put("/recipes/{recipe_id}", response_model=Recipe)
+@router.put("/recipes/{recipe_id}", response_model=AdminRecipe)
 async def admin_update_recipe(recipe_id: str, body: RecipeUpdate, request: Request):
     db = get_db()
     try:
@@ -386,3 +386,36 @@ async def toggle_name(collection: str, doc_id: str):
     })
     cache.clear()
     return {"name_enabled": new_name_enabled}
+
+
+# ── Sous Chef feedback ────────────────────────────────────────────────────────
+
+@router.get("/assistant/feedback")
+async def admin_list_assistant_feedback(limit: int = 50):
+    """Newest reader feedback on Sous Chef answers, thumbs-down first, so a
+    wrong answer can be turned into a recipe's sous_chef_notes. Never carries
+    an email — only the hashed reader key the feedback route stored."""
+    limit = max(1, min(limit, 200))
+    db = get_db()
+    docs = (
+        db.collection("assistant_feedback")
+        .order_by("created_at", direction="DESCENDING")
+        .limit(limit)
+        .stream()
+    )
+    rows = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        created = data.get("created_at")
+        rows.append({
+            "id": doc.id,
+            "slug": data.get("slug", ""),
+            "rating": data.get("rating", ""),
+            "question": data.get("question", ""),
+            "answer": data.get("answer", ""),
+            "comment": data.get("comment", ""),
+            "model": data.get("model", ""),
+            "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
+        })
+    rows.sort(key=lambda r: r["rating"] != "down")  # stable: down first, newest within each
+    return rows

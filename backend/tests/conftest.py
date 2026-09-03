@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from PIL import Image, PngImagePlugin
 from app.main import app
 from app.firestore import get_db
-from app.auth import require_admin
+from app.auth import UserIdentity, optional_user, require_admin, require_user
 from app.totp import require_totp_session
 
 
@@ -43,6 +43,8 @@ def mock_db():
         patch("app.routes.subscriptions.get_db", return_value=mock),
         patch("app.routes.expenses.get_db", return_value=mock),
         patch("app.routes.reports.get_db", return_value=mock),
+        patch("app.routes.me.get_db", return_value=mock),
+        patch("app.routes.assistant.get_db", return_value=mock),
         patch("app.totp.get_db", return_value=mock),
     ):
         app.dependency_overrides[get_db] = lambda: mock
@@ -67,6 +69,8 @@ def cleanup_overrides():
     yield
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(require_admin, None)
+    app.dependency_overrides.pop(require_user, None)
+    app.dependency_overrides.pop(optional_user, None)
     app.dependency_overrides.pop(require_totp_session, None)
 
 
@@ -104,6 +108,22 @@ def authenticated_client(client, mock_admin):
         request.state.admin_email = mock_admin
         return mock_admin
     app.dependency_overrides[require_admin] = override
+    yield client
+
+
+@pytest.fixture
+def mock_user():
+    """A signed-in, non-admin reader (the Sous Chef free tier)."""
+    return UserIdentity(email="reader@example.com", uid="uid-reader", is_admin=False)
+
+
+@pytest.fixture
+def user_client(client, mock_user):
+    """Provides a client that bypasses reader authentication as mock_user."""
+    def override(request: Request):
+        request.state.user = mock_user
+        return mock_user
+    app.dependency_overrides[require_user] = override
     yield client
 
 

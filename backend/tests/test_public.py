@@ -161,3 +161,15 @@ def test_feed_self_link_points_at_api_host(client, mock_db, sample_recipe_doc):
     body = response.text
     assert 'href="http://testserver/api/feed.xml" rel="self"' in body
     assert "<link>http://localhost:5173/recipes/test-recipe/</link>" in body
+
+
+def test_get_recipe_by_slug_never_exposes_sous_chef_notes(client, mock_db, mock_cache, sample_recipe_doc):
+    """The owner's assistant notes live on the same Firestore doc; the public
+    model must drop them by construction."""
+    mock_cache.get.return_value = None
+    doc = sample_recipe_doc(id="1", slug="carbonara", sous_chef_notes="private guidance")
+    mock_db.stream.return_value = iter([doc])
+
+    body = client.get("/api/recipes/carbonara").json()
+    assert "sous_chef_notes" not in body
+    assert "private guidance" not in client.get("/api/recipes/carbonara").text

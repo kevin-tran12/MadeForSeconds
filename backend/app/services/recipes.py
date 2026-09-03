@@ -7,13 +7,14 @@ domain exceptions to HTTPExceptions; MCP tools translate them to
 structured error dicts.
 """
 
+import json
 import re
 from datetime import datetime, timezone
 
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 from ..cache import cache
-from ..models import Recipe, RecipeCreate, RecipeUpdate
+from ..models import AdminRecipe, Recipe, RecipeCreate, RecipeUpdate
 from ..validation import get_invalid_categories
 from . import receipt_ledger, uploads
 
@@ -49,7 +50,7 @@ def generate_slug(title: str) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", title.lower()))
 
 
-def doc_to_recipe(doc) -> Recipe:
+def _recipe_data(doc) -> dict:
     data = doc.to_dict()
     data["id"] = doc.id
     # Migrate legacy nutrition dict {label: value} → list[{label, value, unit}]
@@ -60,7 +61,17 @@ def doc_to_recipe(doc) -> Recipe:
     # Strip any leftover premium_content from Firestore docs
     data.pop("premium_content", None)
     data.pop("has_premium_content", None)
-    return Recipe(**data)
+    return data
+
+
+def doc_to_recipe(doc) -> Recipe:
+    """The public view: owner-only fields (sous_chef_notes) are dropped."""
+    return Recipe(**_recipe_data(doc))
+
+
+def doc_to_admin_recipe(doc) -> AdminRecipe:
+    """The owner's view, for admin routes and MCP tools only."""
+    return AdminRecipe(**_recipe_data(doc))
 
 
 def find_by_slug(db, slug: str) -> dict | None:
@@ -85,6 +96,64 @@ def find_by_slug(db, slug: str) -> dict | None:
     }
 
 
+def _published_by_slug_query(db, slug: str):
+    return (
+        db.collection("recipes")
+        .where(filter=FieldFilter("slug", "==", slug))
+        .where(filter=FieldFilter("published", "==", True))
+        .limit(1)
+        .stream()
+    )
+
+
+def get_published_by_slug(db, slug: str) -> Recipe | None:
+    """Full published recipe by slug, or None — drafts are invisible here."""
+    doc = next(iter(_published_by_slug_query(db, slug)), None)
+    return doc_to_recipe(doc) if doc is not None else None
+
+
+def _json_default(value):
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def get_published_doc(db, slug: str) -> dict | None:
+    """Raw published recipe dict for the Sous Chef prompt.
+
+    Keeps the admin-only fields the public ``Recipe`` model drops (the owner's
+    ``sous_chef_notes``) and is JSON-safe (timestamps as ISO strings) so it can
+    sit in the versioned cache, where every recipe mutation's cache.clear()
+    invalidates it alongside the rendered responses.
+    """
+    key = f"assistant:recipe:{slug}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    doc = next(iter(_published_by_slug_query(db, slug)), None)
+    if doc is None:
+        return None
+    data = doc.to_dict() or {}
+    data["id"] = doc.id
+    data.pop("premium_content", None)
+    data.pop("has_premium_content", None)
+    safe = json.loads(json.dumps(data, default=_json_default))
+    cache.set(key, safe)
+    return safe
+
+
+def get_all_published(db, limit: int = 200) -> list[Recipe]:
+    """Newest-first published recipes — the same query main._warm_cache runs."""
+    docs = (
+        db.collection("recipes")
+        .where(filter=FieldFilter("published", "==", True))
+        .order_by("created_at", direction="DESCENDING")
+        .limit(limit)
+        .stream()
+    )
+    return [doc_to_recipe(doc) for doc in docs]
+
+
 def get_categories(db) -> list[str]:
     doc = db.collection("config").document("categories").get()
     return sorted(doc.to_dict().get("list", [])) if doc.exists else []
@@ -104,7 +173,7 @@ def _get_doc_or_raise(db, recipe_id: str):
     return doc_ref, doc
 
 
-def create_recipe(db, body: RecipeCreate, *, source: str) -> Recipe:
+def create_recipe(db, body: RecipeCreate, *, source: str) -> AdminRecipe:
     _validate_categories(db, body.categories)
 
     slug = generate_slug(body.title)
@@ -128,12 +197,12 @@ def create_recipe(db, body: RecipeCreate, *, source: str) -> Recipe:
     doc_ref.set(data)
     data["id"] = doc_ref.id
     cache.clear()
-    return Recipe(**data)
+    return AdminRecipe(**data)
 
 
 def update_recipe(
     db, recipe_id: str, body: RecipeUpdate, *, source: str, actor: str | None = None
-) -> Recipe:
+) -> AdminRecipe:
     if body.categories is not None:
         _validate_categories(db, body.categories)
     doc_ref, doc = _get_doc_or_raise(db, recipe_id)
@@ -183,7 +252,7 @@ def update_recipe(
     updated = doc_ref.get().to_dict()
     updated["id"] = recipe_id
     cache.clear()
-    return Recipe(**updated)
+    return AdminRecipe(**updated)
 
 
 def set_published(db, recipe_id: str, published: bool, *, source: str) -> tuple[Recipe, list[str]]:

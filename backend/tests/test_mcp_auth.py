@@ -228,3 +228,52 @@ class TestWorkOSTokenVerifier:
         )
         assert result is not None
         assert result.scopes == ["a", "b"]
+
+
+# ── Sous Chef settings ────────────────────────────────────────────────────────
+
+_REDIS = "rediss://default:t@example.upstash.io:6379"
+_FEDERATION = dict(
+    anthropic_federation_rule_id="fdrl_test",
+    anthropic_organization_id="00000000-0000-0000-0000-000000000000",
+    anthropic_service_account_id="svac_test",
+)
+
+
+def test_prod_rejects_a_static_anthropic_key():
+    """Production authenticates with Workload Identity Federation; a static key
+    would also silently shadow federation inside the SDK."""
+    with pytest.raises(RuntimeError, match="Workload Identity Federation"):
+        validate_production_settings(_settings(anthropic_api_key="sk-ant-test", redis_url=_REDIS))
+
+
+def test_prod_rejects_federation_without_redis():
+    """The monthly spend cap lives in Redis; an in-memory counter on a
+    scale-to-zero instance would reset every cold start and un-cap spend."""
+    with pytest.raises(RuntimeError, match="REDIS_URL"):
+        validate_production_settings(_settings(**_FEDERATION, redis_url=None))
+
+
+def test_prod_rejects_partial_federation_ids():
+    with pytest.raises(RuntimeError, match="set together"):
+        validate_production_settings(_settings(anthropic_federation_rule_id="fdrl_test", redis_url=_REDIS))
+
+
+def test_prod_accepts_federation_with_redis():
+    s = _settings(**_FEDERATION, redis_url=_REDIS)
+    validate_production_settings(s)
+    assert s.assistant_configured is True
+    assert s.assistant_federation_configured is True
+    assert s.assistant_federation_partial is False
+
+
+def test_dev_accepts_a_static_key():
+    s = _settings(environment="development", anthropic_api_key="sk-ant-test", redis_url=None)
+    validate_production_settings(s)
+    assert s.assistant_configured is True and s.assistant_federation_configured is False
+
+
+def test_blank_anthropic_key_means_feature_off_not_a_startup_failure():
+    s = _settings()
+    validate_production_settings(s)
+    assert s.assistant_configured is False

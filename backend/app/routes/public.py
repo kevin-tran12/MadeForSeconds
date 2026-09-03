@@ -12,6 +12,7 @@ from ..config import settings
 from ..firestore import get_db
 from ..models import CategoryGroup, GroupedRecipes, PaginatedRecipes, Recipe
 from ..services.recipes import doc_to_recipe as _doc_to_recipe
+from ..services.recipes import get_published_by_slug
 
 router = APIRouter(prefix="/api")
 
@@ -148,17 +149,9 @@ async def get_recipe(slug: str):
         return cached
 
     db = get_db()
-    docs = (
-        db.collection("recipes")
-        .where(filter=FieldFilter("slug", "==", slug))
-        .where(filter=FieldFilter("published", "==", True))
-        .limit(1)
-        .stream()
-    )
-    doc = next(docs, None)
-    if doc is None:
+    recipe = get_published_by_slug(db, slug)
+    if recipe is None:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    recipe = _doc_to_recipe(doc)
     cache.set(cache_key, recipe)
     return recipe
 

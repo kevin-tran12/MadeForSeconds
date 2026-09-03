@@ -43,6 +43,18 @@ end
 return count
 """
 
+# INCRBY variant for the Sous Chef spend/quota counters. The expiry is armed
+# when the key has no TTL (TTL < 0) rather than when the count equals the
+# increment, so a negative "refund" landing on a fresh key never re-arms it,
+# and a counter that was refunded back to zero keeps its original expiry.
+_INCRBY_WITH_TTL_LUA = """
+local count = redis.call('INCRBY', KEYS[1], ARGV[2])
+if redis.call('TTL', KEYS[1]) < 0 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+"""
+
 
 # ── Redis backend ──────────────────────────────────────────────────────────────
 
@@ -68,6 +80,7 @@ class RedisCache:
         )
         self._ttl = ttl
         self._incr_with_ttl_script = self._r.register_script(_INCR_WITH_TTL_LUA)
+        self._incr_by_with_ttl_script = self._r.register_script(_INCRBY_WITH_TTL_LUA)
 
     def _version(self) -> str:
         return self._r.get(f"{self._NS}:version") or "1"
@@ -115,6 +128,27 @@ class RedisCache:
         except Exception:
             return -1
 
+    def incr_by_with_ttl(self, key: str, amount: int, ttl_seconds: int) -> int | None:
+        """Atomically add `amount` (negative allowed — quota refunds) to a
+        counter, arming its expiry only if it has none. Same `mfs:rl:`
+        namespace as incr_with_ttl. Returns None on any backend error —
+        not -1, because a refunded counter can legitimately be negative.
+        """
+        try:
+            raw_key = f"{self._NS}:rl:{key}"
+            return int(self._incr_by_with_ttl_script(keys=[raw_key], args=[ttl_seconds, amount]))
+        except Exception:
+            return None
+
+    def get_counter(self, key: str) -> int | None:
+        """Read a counter without touching it: 0 when absent, None on any
+        backend error (kept distinct from 0 so callers can fail closed)."""
+        try:
+            raw = self._r.get(f"{self._NS}:rl:{key}")
+            return int(raw) if raw is not None else 0
+        except Exception:
+            return None
+
 
 # ── In-memory fallback ─────────────────────────────────────────────────────────
 
@@ -151,6 +185,9 @@ class MemoryCache:
         self._store.clear()
 
     def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:
+        return self.incr_by_with_ttl(key, 1, ttl_seconds)
+
+    def incr_by_with_ttl(self, key: str, amount: int, ttl_seconds: int) -> int | None:
         now = time.time()
         entry = self._counters.get(key)
         if entry is None or now >= entry[1]:
@@ -162,11 +199,17 @@ class MemoryCache:
                 self._counters = {k: v for k, v in self._counters.items() if now < v[1]}
                 if len(self._counters) > _MAX_COUNTERS:
                     self._counters.clear()
-            self._counters[key] = (1, now + ttl_seconds)
-            return 1
-        count = entry[0] + 1
+            self._counters[key] = (amount, now + ttl_seconds)
+            return amount
+        count = entry[0] + amount
         self._counters[key] = (count, entry[1])
         return count
+
+    def get_counter(self, key: str) -> int | None:
+        entry = self._counters.get(key)
+        if entry is None or time.time() >= entry[1]:
+            return 0
+        return entry[0]
 
 
 # ── Singleton ──────────────────────────────────────────────────────────────────

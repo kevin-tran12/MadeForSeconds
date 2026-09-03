@@ -1,6 +1,7 @@
 import { apiFetch, apiUpload } from './api-client'
 import type { Recipe, RecipeFormData, PaginatedRecipes, GroupedRecipes } from './types'
 import type { Expense, ExpenseCreate, ExpenseSummary } from './types-expense'
+import type { CookingExperience, CookingLevel, MeResponse } from './types-assistant'
 
 // ─── Public endpoints ───────────────────────────────────────────────────────
 
@@ -261,6 +262,40 @@ export const subscriberApi = {
       body: JSON.stringify({ token }),
     }),
 
+  /** Email a signed link that attaches a past donation (made with `email`) to the reader's account. */
+  linkRequest: (email: string) =>
+    apiFetch<{ message: string }>('/api/subscribe/link-request', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  /** Finish linking; the caller must be signed in (apiFetch attaches the token). */
+  linkConfirm: (token: string) =>
+    apiFetch<{ message: string; linked: number; supporter: boolean }>('/api/subscribe/link-confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
   listSupporters: () =>
     apiFetch<{ display_name: string; note?: string }[]>('/api/subscribe/supporters'),
+}
+
+// ─── Reader profile (any signed-in Google account) ─────────────────────────
+
+export const meApi = {
+  /** The caller's own profile, supporter status, and Sous Chef allowance. */
+  get: () => apiFetch<MeResponse>('/api/me'),
+
+  updateExperience: (level: CookingLevel, notes: string) =>
+    apiFetch<{ cooking_experience: CookingExperience }>('/api/me/experience', {
+      method: 'PUT',
+      body: JSON.stringify({ level, notes }),
+    }),
+
+  /** Delete-my-data: the reader record, feedback, and supporter uid links. */
+  deleteData: () =>
+    apiFetch<{ deleted: boolean; users_deleted: number; feedback_deleted: number; supporter_links_removed: number }>(
+      '/api/me/data',
+      { method: 'DELETE' }
+    ),
 }

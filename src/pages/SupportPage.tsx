@@ -1,10 +1,14 @@
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { subscriberApi } from '../lib/api'
+import { useAuth } from '../hooks/useAuth'
+import { GoogleSignInButton } from '../components/auth/GoogleSignInButton'
 
 const PRESETS = [1, 5, 10, 25]
 
 export function SupportPage() {
+  const { user, loginGoogle } = useAuth()
+  const [signingIn, setSigningIn] = useState(false)
   const [selected, setSelected] = useState(1)
   const [custom, setCustom] = useState('')
   const [isCustom, setIsCustom] = useState(false)
@@ -73,6 +77,18 @@ export function SupportPage() {
       setShowConfirm(true)
     } else {
       doCheckout()
+    }
+  }
+
+  async function handleSignIn() {
+    setSigningIn(true)
+    setError(null)
+    try {
+      await loginGoogle()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign-in failed')
+    } finally {
+      setSigningIn(false)
     }
   }
 
@@ -158,6 +174,21 @@ export function SupportPage() {
           )}
         </div>
 
+        {/* Account link — a signed-in donation is recorded against the reader's account */}
+        <div className="mb-4 rounded-lg border border-card-border bg-card-muted px-3 py-2.5 text-xs text-content-muted">
+          {user ? (
+            <p>
+              Donating as <span className="font-semibold text-content-body">{user.email ?? 'your account'}</span>.
+              This donation will be linked to your account.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p>Optional: sign in with Google first so this donation is linked to your account.</p>
+              <GoogleSignInButton onClick={handleSignIn} loading={signingIn} />
+            </div>
+          )}
+        </div>
+
         {error && (
           <div className="mb-4 rounded-lg bg-danger-surface border border-danger-border px-3 py-2 text-sm text-danger">
             {error}
@@ -189,6 +220,10 @@ export function SupportPage() {
               {' · Powered by Stripe'}
             </>
           )}
+        </p>
+        <p className="mt-2 text-center text-xs text-content-muted">
+          Already donated with a different email?{' '}
+          <Link to="/support/link/" className="underline hover:text-content-body">Link it to your account</Link>.
         </p>
       </div>
 
