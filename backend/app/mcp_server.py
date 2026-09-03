@@ -204,7 +204,8 @@ def list_recipes(published: bool | None = None, search: str = "", limit: int = 2
 def _lookup_recipe(recipe_id: str = "", slug: str = ""):
     """Fetch a recipe document by id or slug (drafts included).
 
-    Returns the parsed Recipe model. Raises RecipeNotFound / ValueError.
+    Returns the owner's AdminRecipe view (includes sous_chef_notes).
+    Raises RecipeNotFound / ValueError.
     """
     db = get_db()
     if recipe_id:
@@ -223,7 +224,7 @@ def _lookup_recipe(recipe_id: str = "", slug: str = ""):
             raise recipe_service.RecipeNotFound(slug)
     else:
         raise ValueError("Provide recipe_id or slug")
-    return recipe_service.doc_to_recipe(doc)
+    return recipe_service.doc_to_admin_recipe(doc)
 
 
 @mcp.tool()
@@ -259,6 +260,7 @@ def create_recipe(
     image_url: str | None = None,
     components: list[dict] | None = None,
     secrets: list[dict] = [],
+    sous_chef_notes: str | None = None,
 ) -> dict:
     """Create a new recipe draft on MadeForSeconds.
 
@@ -273,6 +275,9 @@ def create_recipe(
     categories: must come from list_categories. labels are free-form tags.
     about is optional cultural/historical context, richer than description.
     image_url is optional — a publicly accessible URL to the recipe photo.
+    sous_chef_notes is optional private guidance for the site's Sous Chef
+    assistant (substitutions that work, ones that don't, known pitfalls) —
+    it is never shown to readers.
 
     For multi-component dishes (e.g. Hainanese Chicken Rice with separate rice,
     sauces): pass components as up to 5 dicts, each with title (str), optional
@@ -301,6 +306,7 @@ def create_recipe(
         "published": False,
         "components": components[:5] if components else None,
         "secrets": secrets,
+        "sous_chef_notes": sous_chef_notes,
     })
 
     recipe = recipe_service.create_recipe(get_db(), body, source="mcp")
@@ -316,7 +322,7 @@ def create_recipe(
     }
 
 
-_CLEARABLE_FIELDS = {"about", "image_url", "components"}
+_CLEARABLE_FIELDS = {"about", "image_url", "components", "sous_chef_notes"}
 
 
 @mcp.tool()
@@ -339,6 +345,7 @@ def update_recipe(
     image_url: str | None = None,
     components: list[dict] | None = None,
     secrets: list[dict] | None = None,
+    sous_chef_notes: str | None = None,
     clear_fields: list[str] = [],
 ) -> dict:
     """Update fields of an existing recipe (draft or published).
@@ -349,8 +356,8 @@ def update_recipe(
     the title does. Published state cannot be set here — use
     publish_recipe/unpublish_recipe.
 
-    To null an optional field (about, image_url, components), name it in
-    clear_fields instead of passing null.
+    To null an optional field (about, image_url, components, sous_chef_notes),
+    name it in clear_fields instead of passing null.
     """
     provided = {
         "title": title,
@@ -369,6 +376,7 @@ def update_recipe(
         "image_url": image_url,
         "components": components,
         "secrets": secrets,
+        "sous_chef_notes": sous_chef_notes,
     }
     updates = {k: v for k, v in provided.items() if v is not None}
     for field in clear_fields:

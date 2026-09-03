@@ -78,3 +78,36 @@ def test_delete_my_data(user_client, mock_db):
 
 def test_delete_my_data_requires_a_signed_in_reader(client, mock_db):
     assert client.delete("/api/me/data").status_code == 401
+
+
+# ── cooking experience ───────────────────────────────────────────────────────
+
+def test_me_includes_cooking_experience(user_client, mock_db):
+    from datetime import datetime, timezone
+    mock_db.stream.side_effect = lambda *a, **k: iter([])
+    mock_db.get.return_value.exists = True
+    mock_db.get.return_value.to_dict.return_value = {
+        "cooking_experience": {"level": "beginner", "notes": "no oven",
+                               "updated_at": datetime(2026, 9, 1, tzinfo=timezone.utc)},
+    }
+    body = user_client.get("/api/me").json()
+    assert body["cooking_experience"] == {"level": "beginner", "notes": "no oven", "updated_at": "2026-09-01T00:00:00+00:00"}
+
+
+def test_update_experience_round_trip(user_client, mock_db):
+    response = user_client.put("/api/me/experience", json={"level": "confident", "notes": "  wok,  no oven "})
+    assert response.status_code == 200
+    saved = response.json()["cooking_experience"]
+    assert saved["level"] == "confident" and saved["notes"] == "wok, no oven"
+    args, kwargs = mock_db.set.call_args
+    assert kwargs == {"merge": True}
+    assert args[0]["cooking_experience"]["level"] == "confident"
+
+
+def test_update_experience_rejects_unknown_level(user_client, mock_db):
+    assert user_client.put("/api/me/experience", json={"level": "wizard"}).status_code == 422
+    mock_db.set.assert_not_called()
+
+
+def test_update_experience_requires_a_signed_in_reader(client, mock_db):
+    assert client.put("/api/me/experience", json={"level": "beginner"}).status_code == 401

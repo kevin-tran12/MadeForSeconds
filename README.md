@@ -178,7 +178,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (609 tests across 32 files)
+│   ├── tests/                  Pytest suite (627 tests across 32 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -281,7 +281,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (609 tests)
+npm run test:backend                    # Pytest (627 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -397,18 +397,18 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (609 tests, 32 files)
+### Backend — pytest (627 tests, 32 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
 ```
 Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, log redaction, reader identity and profile, Sous Chef spend metering and entitlements.
 
-### Frontend unit — vitest (108 tests, 17 files)
+### Frontend unit — vitest (110 tests, 18 files)
 ```bash
 npm run test:unit
 ```
-Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components, support and donation-link pages, auth context and admin route gating.
+Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components, admin recipe form, support and donation-link pages, auth context and admin route gating.
 
 ### E2E — Playwright (6 spec files)
 ```bash
@@ -559,6 +559,7 @@ Or push to `main` — [`.github/workflows/deploy.yml`](.github/workflows/deploy.
 | `STRIPE_PRODUCT_ID` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | 32+ char secret for cancel link JWTs |
 | `RESEND_API_KEY` | Resend API key (cancel emails) |
+| `ANTHROPIC_API_KEY` | (Optional, local only) Anthropic key for the Sous Chef assistant — production authenticates with Workload Identity Federation instead (`ANTHROPIC_FEDERATION_RULE_ID` + organization and service-account ids, no key; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)) |
 | `REDIS_URL` | Upstash Redis URL (optional — falls back to in-memory) |
 
 The MCP server needs no configuration locally — it runs unauthenticated in dev. In production `WORKOS_AUTHKIT_DOMAIN` and `MCP_RESOURCE_URL` are both required, and the backend refuses to start without them (see `validate_production_settings` in [`backend/app/config.py`](backend/app/config.py)). Full production variable reference: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).

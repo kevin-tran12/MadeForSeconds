@@ -612,3 +612,25 @@ class TestPublishRecipeToInstagram:
         db.stream.return_value = iter([])
         result = mcp_server.publish_recipe_to_instagram(slug="nonexistent")
         assert result["error"] == "not_found"
+
+
+# ── sous_chef_notes via MCP ───────────────────────────────────────────────────
+
+class TestSousChefNotesTools:
+    def test_create_stores_notes(self, db):
+        db.stream.return_value = iter([])
+        db.id = "new-id"
+        mcp_server.create_recipe(title="Laksa", sous_chef_notes="toast the rempah")
+        assert db.set.call_args[0][0]["sous_chef_notes"] == "toast the rempah"
+
+    def test_update_sets_and_clears_notes(self, db):
+        db.get.return_value = _doc()
+        result = mcp_server.update_recipe(recipe_id="doc-id", sous_chef_notes="new")
+        assert "sous_chef_notes" in result["updated_fields"]
+        assert db.update.call_args[0][0]["sous_chef_notes"] == "new"
+        mcp_server.update_recipe(recipe_id="doc-id", clear_fields=["sous_chef_notes"])
+        assert db.update.call_args[0][0]["sous_chef_notes"] is None
+
+    def test_get_recipe_returns_the_owner_view(self, db):
+        db.get.return_value = _doc(sous_chef_notes="use day-old rice")
+        assert mcp_server.get_recipe(recipe_id="doc-id")["sous_chef_notes"] == "use day-old rice"

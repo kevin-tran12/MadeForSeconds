@@ -10,7 +10,7 @@ from ..auth import require_admin
 from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
-from ..models import PageContent, Recipe, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
+from ..models import AdminRecipe, PageContent, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
 from ..routes.subscriptions import compute_public_listing
 from ..services import receipt_ledger
 from ..services import recipes as recipe_service
@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", dependencies=[Depends(require_admin)])
 
 
-@router.get("/recipes", response_model=list[Recipe])
+@router.get("/recipes", response_model=list[AdminRecipe])
 async def admin_list_recipes():
     db = get_db()
     docs = db.collection("recipes").order_by("created_at", direction="DESCENDING").stream()
-    return [recipe_service.doc_to_recipe(doc) for doc in docs]
+    return [recipe_service.doc_to_admin_recipe(doc) for doc in docs]
 
 
-@router.post("/recipes", response_model=Recipe, status_code=201)
+@router.post("/recipes", response_model=AdminRecipe, status_code=201)
 async def admin_create_recipe(body: RecipeCreate):
     db = get_db()
     try:
@@ -47,7 +47,7 @@ async def admin_create_recipe(body: RecipeCreate):
         raise HTTPException(status_code=422, detail=f"Image could not be attached: {exc}")
 
 
-@router.put("/recipes/{recipe_id}", response_model=Recipe)
+@router.put("/recipes/{recipe_id}", response_model=AdminRecipe)
 async def admin_update_recipe(recipe_id: str, body: RecipeUpdate, request: Request):
     db = get_db()
     try:

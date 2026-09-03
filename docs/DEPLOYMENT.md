@@ -49,6 +49,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `stripe_product_id` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `subscriber_jwt_secret` | 32+ character secret for cancel link JWTs |
 | `resend_api_key` | Resend API key for cancellation emails |
+| `anthropic_federation_rule_id`, `anthropic_organization_id`, `anthropic_service_account_id` | (Optional) The Sous Chef assistant's Anthropic Workload Identity Federation ids — plain values, not secrets. All blank keeps the feature off; set together, and only alongside `redis_url` (see [Sous Chef assistant](#sous-chef-assistant)). `anthropic_workspace_id` only when the rule spans more than one workspace |
 | `frontend_url` | Your production frontend URL (used in email links) |
 | `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
 | `billing_account` | GCP billing account ID, for the budget alert |
@@ -531,6 +532,10 @@ pushes new env vars to a running service, so it never surfaced there:
 | `WORKOS_AUTHKIT_DOMAIN` | Same value as your local root `terraform.tfvars` — one WorkOS environment typically serves both staging and production |
 | `STAGING_MCP_RESOURCE_URL` | Staging's Cloud Run URL + `/mcp` — `terraform output -raw cloud_run_url` from `terraform/environments/staging`, then append `/mcp` |
 | `PROD_MCP_RESOURCE_URL` | Same value as your local root `terraform.tfvars` |
+| `ANTHROPIC_ORGANIZATION_ID` | Optional, unlike the two above: the Anthropic organization UUID, shared by both environments. With the two below it switches the Sous Chef assistant on — see [Sous Chef assistant](#sous-chef-assistant) |
+| `PROD_ANTHROPIC_FEDERATION_RULE_ID` | Optional: the production federation rule (`fdrl_…`). Only alongside `PROD_REDIS_CONFIGURED=true`. Staging twin: `STAGING_ANTHROPIC_FEDERATION_RULE_ID` |
+| `PROD_ANTHROPIC_SERVICE_ACCOUNT_ID` | Optional: the Anthropic service account (`svac_…`) that rule targets. Staging twin: `STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID` |
+| `PROD_ANTHROPIC_WORKSPACE_ID` | Optional, and only when the rule is enabled for more than one workspace (`wrkspc_…`). Staging twin: `STAGING_ANTHROPIC_WORKSPACE_ID` |
 
 **Cloudflare Pages' staging alias tracks a `staging` git branch, not
 `main`.** The `staging-e2e` job fast-forwards `staging` to the commit being
@@ -1240,6 +1245,10 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `STRIPE_PRODUCT_ID` | GCP Secret Manager | Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | GCP Secret Manager | Secret for signing cancel link JWTs (32+ chars) |
 | `RESEND_API_KEY` | GCP Secret Manager | Resend API key for cancellation emails |
+| `ANTHROPIC_FEDERATION_RULE_ID` | Plain env (Terraform, optional) | Anthropic federation rule the Sous Chef assistant exchanges Cloud Run's identity token under; blank keeps the feature off |
+| `ANTHROPIC_ORGANIZATION_ID` | Plain env (Terraform, optional) | Anthropic organization UUID (with the rule and service-account ids) |
+| `ANTHROPIC_SERVICE_ACCOUNT_ID` | Plain env (Terraform, optional) | Anthropic service account the minted token acts as |
+| `ANTHROPIC_WORKSPACE_ID` | Plain env (Terraform, optional) | Anthropic workspace to scope the token to; only when the rule spans several workspaces |
 | `WORKOS_AUTHKIT_DOMAIN` | Plain env (Terraform) | WorkOS AuthKit domain — OAuth issuer for MCP auth |
 | `MCP_RESOURCE_URL` | Plain env (Terraform) | Public URL of the `/mcp` endpoint (OAuth resource) |
 | `REDIS_URL` | GCP Secret Manager (optional) | Upstash Redis URL for caching |
@@ -1352,6 +1361,97 @@ The backend reads `latest` at request time (short in-process cache), so
 rotation is fully hands-off. Residual risk: if the scheduler is disabled for
 60+ days the token lapses; a manual one-time re-auth (repeat step 2 above) is
 then required.
+
+---
+
+## Sous Chef assistant
+
+The Sous Chef is the on-page cooking assistant (Claude, via the Anthropic API)
+that lands over several PRs; this section covers only what touches
+infrastructure and operations.
+
+**There is no Anthropic secret.** Production authenticates with Anthropic
+**Workload Identity Federation**: Cloud Run's runtime service account
+(`mfs-backend`) asks the Google metadata server for an OIDC identity token
+(audience `https://api.anthropic.com`, `format=full` so the `email` claim is
+present), and the backend exchanges it under a federation rule for a
+short-lived Anthropic access token that the SDK refreshes before expiry
+(`backend/app/services/claude_auth.py`). Nothing to store in Secret Manager or
+GitHub, nothing to rotate, nothing to leak. What Terraform injects are three
+ids — `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID`,
+`ANTHROPIC_SERVICE_ACCOUNT_ID` (and `ANTHROPIC_WORKSPACE_ID` only when the
+rule spans more than one workspace) — as plain env vars from the tfvars of the
+same names; they identify the rule and authenticate nothing. All blank keeps
+the feature off: the endpoint answers 503 `not_configured`, which is what
+staging and E2E see. A partial set is refused at plan time (root variable
+validation, `terraform/tests/assistant_federation.tftest.hcl`) and again at
+startup (`validate_production_settings`), and so is a static
+`ANTHROPIC_API_KEY` in production: the key is for local development and the
+eval script only, and inside the SDK it would silently shadow federation.
+
+**Setting up the rule** (once per environment, in the Claude Console; the
+production and staging rules are separate so either can be archived alone):
+
+1. **Settings → Workload identity → Connect workload → Google Cloud.** The
+   wizard registers the issuer `https://accounts.google.com` (JWKS discovery —
+   one issuer covers every Google Cloud surface), creates an Anthropic service
+   account (`svac_…`, organization role `developer`), and creates the
+   federation rule (`fdrl_…`).
+2. **Rule match — pin all three; never a `subject_prefix` wildcard.** Google's
+   `sub` is an opaque numeric id with no stable prefix, so a trailing `*`
+   would match any service account in any project:
+   - `audience`: `https://api.anthropic.com`
+   - `claims.sub`: the runtime service account's unique id, from
+     `gcloud iam service-accounts describe mfs-backend@<project>.iam.gserviceaccount.com --format='value(uniqueId)'`
+     (production: `104761386942927811093`)
+   - `claims.email`: `mfs-backend@<project>.iam.gserviceaccount.com`
+3. **Scope `workspace:developer`, token lifetime 600 s (10 minutes).** The
+   wizard offers `workspace:developer` or `org:admin`; take the former — it
+   is what a workspace API key gets, and the assistant only ever calls
+   Messages. Never `org:admin`. (`workspace:inference`, narrower still, exists
+   in the Admin API but not in the wizard.) The 24-hour lifetime the field
+   allows is a maximum, not a suggestion. Bind the rule to the workspace whose spend should bound the
+   assistant and set a **monthly spend limit** on that workspace — the
+   provider-side second wall behind the app's own cap (below).
+4. **GitHub variables (not secrets)** — `ANTHROPIC_ORGANIZATION_ID` (shared),
+   `PROD_ANTHROPIC_FEDERATION_RULE_ID`, `PROD_ANTHROPIC_SERVICE_ACCOUNT_ID`
+   (staging: `STAGING_…`), and `PROD_ANTHROPIC_WORKSPACE_ID` only if the rule
+   spans workspaces — plus the same values in local `terraform/terraform.tfvars`
+   so a manual plan matches the pipeline's. **Only with
+   `PROD_REDIS_CONFIGURED=true`** (Redis, below).
+5. **Apply and verify.** The next `production-apply` writes the env vars and
+   the deploy promotes. The wizard's 15-minute "test the connection" window
+   listens for the first exchange, which happens on the first question asked;
+   the test can be re-run from the rule's page at any time. A failed exchange
+   reaches the backend as an opaque 401 (`upstream_error` on the drawer); the
+   deny reason is on **Workload identity → History** in the Console — a
+   missing `email` claim means the token was requested without `format=full`,
+   `match_subject_prefix`/claims mismatches mean the unique id or email in the
+   rule is wrong (a deleted and recreated `mfs-backend` has a new `sub`).
+   Google's identity tokens carry no `jti`, so the single-use replay check
+   never applies.
+
+**Redis is required alongside federation.** The assistant meters its own LLM
+spend against a hard monthly cap in Redis (`mfs:rl:llm:spend:YYYY-MM`); an
+in-memory counter on a scale-to-zero instance would reset on every cold start
+and silently un-cap spend. `validate_production_settings` refuses to start
+with the federation ids set and `REDIS_URL` blank — never set the
+`*_ANTHROPIC_*` variables for an environment whose `*_REDIS_CONFIGURED` is
+not `true`, or the next candidate revision crash-loops its startup probe (a
+safe failure, but it blocks the pipeline). LLM spend is outside the GCP
+budget breaker, which is why the app caps it itself.
+
+**Switching it off / revoking.** In the app: blank the three variables and
+let the next apply land (the following revision answers 503
+`not_configured`). At the provider: archive the federation rule in the
+Console — every exchange fails from that moment and the SDK's cached token
+dies within its 10-minute lifetime. Nothing to rotate: Google signs a fresh
+identity token for every exchange.
+
+**Cost.** No Secret Manager secret and no new Cloud Scheduler job. The only
+infrastructure addition is the `assistant_feedback` collection's 180-day
+Firestore TTL policy (`google_firestore_field.assistant_feedback_ttl`), with
+the same billed-delete caveat as `processed_events`.
 
 ---
 
