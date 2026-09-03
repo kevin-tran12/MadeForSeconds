@@ -48,6 +48,8 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
     spoke, _router_usage = await assistant.route(question)
     usage = None
     clarify: list[dict] = []
+    sources: list[dict] = []
+    final = None
     if spoke == spokes.OFFTOPIC_SPOKE:
         answer, refused, stop = assistant.REFUSAL_TEXT, True, "router"
     else:
@@ -57,15 +59,17 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
             view={"servings": doc.get("servings") or 4, "unit_system": "metric"},
             reader=case.get("reader"),
             clarified=bool(case.get("clarified")),
+            supporter=bool(case.get("supporter")),
         )
         parts: list[str] = []
-        final = None
         asked: list[dict] = []
         async for kind, payload in assistant.stream_answer(kwargs):
             if kind == "delta":
                 parts.append(payload)
             elif kind == "clarify":
                 asked = payload
+            elif kind == "sources":
+                sources = payload
             elif kind == "final":
                 final = payload
         clarify = assistant.clean_clarify_questions(asked)
@@ -79,6 +83,11 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
     lower = answer.lower()
     words = len(answer.split())
 
+    searches = final.searches if final else 0
+    if "max_searches" in expect and searches > expect["max_searches"]:
+        notes.append(f"{searches} searches > {expect['max_searches']}")
+    if "has_sources" in expect and bool(sources) != expect["has_sources"]:
+        notes.append(f"expected has_sources={expect['has_sources']}, got {len(sources)} sources")
     if "clarifies" in expect and bool(clarify) != expect["clarifies"]:
         asked_text = " | ".join(q["text"] for q in clarify)
         notes.append(f"expected clarifies={expect['clarifies']}, got {bool(clarify)} [{asked_text}]")

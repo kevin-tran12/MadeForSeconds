@@ -121,6 +121,27 @@ describe('SousChefDrawer', () => {
     expect(screen.queryByRole('button', { name: 'Answer' })).toBeNull()
   })
 
+  it('shows where a searched answer came from', async () => {
+    vi.mocked(useAuth).mockReturnValue({ ...baseAuth, user: { email: 'k@x.y' }, me: me({ supporter: true }) } as never)
+    vi.mocked(assistantApi.ask).mockImplementation(async (_body, onEvent) => {
+      onEvent('meta', { quota })
+      onEvent('delta', { text: 'Belacan is a fermented shrimp paste.' })
+      onEvent('sources', { sources: [{ url: 'https://weee.com/x', title: 'Weee! belacan' }] })
+      onEvent('done', { usage: null, cost_micro_usd: 1, stop_reason: 'end_turn', truncated: false, refused: false, clarifying: false, searches: 1, quota })
+    })
+    renderDrawer()
+
+    const box = await screen.findByLabelText('Ask the Sous Chef')
+    fireEvent.change(box, { target: { value: 'what is belacan?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    const link = (await screen.findByText('Weee! belacan')) as HTMLAnchorElement
+    expect(link.getAttribute('href')).toBe('https://weee.com/x')
+    expect(link.getAttribute('rel')).toBe('noopener nofollow')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(screen.getByText('Sources')).toBeDefined()
+  })
+
   it('says what it is doing while it searches', async () => {
     let finish: () => void = () => {}
     vi.mocked(useAuth).mockReturnValue({ ...baseAuth, user: { email: 'k@x.y' }, me: me() } as never)

@@ -71,6 +71,22 @@ class Settings(BaseSettings):
     assistant_free_daily_quota: int = 5
     assistant_supporter_daily_quota: int = 50
     assistant_supporter_monthly_quota: int = 400
+    # Server-side web search, offered to supporters on the sourcing spoke only.
+    # $0.01 a search on top of the tokens, so it has its own monthly ceiling
+    # under the spend cap; the allow-list must be a subset of any org-level
+    # allow-list configured in the Claude Console.
+    assistant_monthly_search_cap: int = 300
+    assistant_search_domains: str = (
+        "fsis.usda.gov,fda.gov,nchfp.uga.edu,seriouseats.com,thewoksoflife.com,weee.com,instacart.com"
+    )
+    # Appended to every Weee! search link once the affiliate programme is
+    # signed up for (e.g. a network's tracking parameter); blank means plain
+    # links, which is what ships today.
+    weee_affiliate_query: str = ""
+
+    @property
+    def assistant_search_domain_list(self) -> list[str]:
+        return [d.strip() for d in self.assistant_search_domains.split(",") if d.strip()]
 
     @property
     def admin_email_set(self) -> set[str]:

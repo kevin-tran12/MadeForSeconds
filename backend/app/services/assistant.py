@@ -19,6 +19,7 @@ import html
 import json
 import logging
 import re
+from urllib.parse import urlencode
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
@@ -108,6 +109,21 @@ CLARIFY_TOOL = {
         "required": ["questions"],
     },
 }
+
+# Weee! is an online Asian grocer with no public API; its search pages are
+# server-rendered, so a deep link is the honest way to point a reader at an
+# ingredient. Anything about price, stock, or delivery is theirs to show, not
+# ours to claim.
+WEEE_SEARCH_URL = "https://www.weee.com/en/search"
+MAX_STORE_LINKS = 12
+
+# The server-side search tool, offered to supporters on the sourcing spoke.
+# "direct" skips dynamic filtering's code execution: cheaper and faster for
+# one or two searches. user_location is the country and nothing else — a
+# clarified zip travels in the message text, so this stays byte-stable and
+# cacheable, and no city is ever derived from a reader.
+WEB_SEARCH_TOOL_TYPE = "web_search_20260209"
+MAX_WEB_SEARCHES = 2
 
 # A pause_turn means the server ran out of time mid tool use and wants the
 # turn continued. Continue once; a second pause is reported as truncated
@@ -370,6 +386,39 @@ def compact_recipe(doc: dict, keep: tuple[str, ...] | None = None) -> dict:
     return {k: v for k, v in compact.items() if v not in (None, [], "")}
 
 
+def weee_search_url(term: str) -> str:
+    """A Weee! search link for one ingredient. The affiliate parameter is
+    appended only once the owner has signed up; blank means a plain link."""
+    query = {"keyword": term}
+    url = f"{WEEE_SEARCH_URL}?{urlencode(query)}"
+    extra = settings.weee_affiliate_query.strip().lstrip("?&")
+    return f"{url}&{extra}" if extra else url
+
+
+def stores_block(doc: dict) -> str:
+    """One shop link per ingredient, deduped, in the recipe's own order."""
+    items: list[str] = []
+    for ing in (doc.get("ingredients") or []) + [
+        i for comp in (doc.get("components") or []) if isinstance(comp, dict) for i in (comp.get("ingredients") or [])
+    ]:
+        name = (ing.get("item") or "").strip() if isinstance(ing, dict) else ""
+        if name and name.lower() not in [i.lower() for i in items]:
+            items.append(name)
+    lines = [f"- {name}: {weee_search_url(name)}" for name in items[:MAX_STORE_LINKS]]
+    return "\n".join(lines)
+
+
+def web_search_tool() -> dict:
+    return {
+        "type": WEB_SEARCH_TOOL_TYPE,
+        "name": "web_search",
+        "max_uses": MAX_WEB_SEARCHES,
+        "allowed_callers": ["direct"],
+        "allowed_domains": settings.assistant_search_domain_list,
+        "user_location": {"type": "approximate", "country": "US"},
+    }
+
+
 def catalogue_index(recipes: list[Recipe]) -> str:
     """One deterministic line per recipe, sorted by slug — the bytes must be
     identical from one request to the next or the shared cache never hits."""
@@ -396,13 +445,14 @@ def get_catalogue_index(db) -> str:
 
 # ── Prompt assembly ───────────────────────────────────────────────────────────
 
-def _recipe_block(doc: dict, keep: tuple[str, ...] | None = None) -> dict:
+def _recipe_block(doc: dict, keep: tuple[str, ...] | None = None, stores: bool = False) -> dict:
     payload = json.dumps(compact_recipe(doc, keep), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return {
-        "type": "text",
-        "text": f"<recipe>\n{payload}\n</recipe>",
-        "cache_control": {"type": "ephemeral"},
-    }
+    text = f"<recipe>\n{payload}\n</recipe>"
+    if stores:
+        # Derived from this recipe's ingredients, so it is as stable as the
+        # recipe itself and sits inside the same cache entry.
+        text = f"{text}\n<stores>\n{stores_block(doc)}\n</stores>"
+    return {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
 
 
 def _context_block(view: dict, reader: dict | None, clarified: bool = False) -> dict:
@@ -439,6 +489,8 @@ def build_request(
     view: dict,
     reader: dict | None = None,
     clarified: bool = False,
+    supporter: bool = False,
+    can_search: bool = True,
 ) -> dict:
     """Assemble the Messages API call for one spoke.
 
@@ -452,7 +504,7 @@ def build_request(
     """
     chosen = spoke if isinstance(spoke, spokes.Spoke) else spokes.get(spoke)
     history = list(history)
-    recipe_block = _recipe_block(recipe_doc, chosen.keep)
+    recipe_block = _recipe_block(recipe_doc, chosen.keep, chosen.include_stores)
     spoke_block = _spoke_block(chosen, catalogue)
     context_block = _context_block(view, reader, clarified)
     question_block = {"type": "text", "text": question}
@@ -477,18 +529,25 @@ def build_request(
     else:
         messages = [{"role": "user", "content": [recipe_block, context_block, question_block]}]
 
+    tools: list[dict] = [CLARIFY_TOOL]
+    if chosen.web_search and supporter and can_search:
+        tools.append(web_search_tool())
+
     request = {
         "model": settings.assistant_model,
         "max_tokens": chosen.max_tokens,
         "thinking": {"type": "adaptive"},
         "output_config": {"effort": chosen.effort},
-        "tools": [CLARIFY_TOOL],
+        "tools": tools,
         "system": [
             {"type": "text", "text": CORE_RULES, "cache_control": {"type": "ephemeral"}},
             spoke_block,
         ],
         "messages": messages,
     }
+    if chosen.timeout_seconds:
+        # A searched answer is several round-trips inside one API call.
+        request["timeout"] = chosen.timeout_seconds
     if clarified:
         # One round of questions per thread. (This costs the message-block
         # cache entry for the second turn — a tool_choice change invalidates

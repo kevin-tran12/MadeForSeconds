@@ -235,6 +235,12 @@ async def ask(
 
     kwargs = None
     if spoke != spokes.OFFTOPIC_SPOKE:
+        # Web search is a supporter perk on the one spoke that needs it, and
+        # only while the month has room: at $0.01 a search it is ~50x an
+        # ordinary answer, so it has its own ceiling under the spend cap.
+        can_search = (
+            spokes.get(spoke).web_search and ent.supporter and llm_budget.searches_available()
+        )
         try:
             kwargs = assistant.build_request(
                 spoke=spoke,
@@ -245,6 +251,8 @@ async def ask(
                 view=body.context.model_dump(),
                 reader=reader,
                 clarified=body.context.clarified,
+                supporter=ent.supporter,
+                can_search=can_search,
             )
         except assistant.PromptTooLong:
             raise HTTPException(status_code=413, detail={"code": "prompt_too_long", "message": "That's a long one — start a fresh chat."})
@@ -299,6 +307,7 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
     # the tool switched off, so the reader gets an answer either way.
     final = None
     questions: list[dict] = []
+    sources: list[dict] = []
     usage = llm_budget.empty_usage()
     try:
         for attempt in range(2):
@@ -314,6 +323,8 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
                         yield sse("status", {"state": payload})
                     elif kind == "clarify":
                         asked = payload
+                    elif kind == "sources":
+                        sources = payload
                     elif kind == "final":
                         final = payload
                     # "sources" reaches the client once a spoke can search.
@@ -336,6 +347,7 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
 
             if final is not None:
                 usage = llm_budget.add_usage(usage, final.usage)
+                llm_budget.add_searches(final.searches)
             questions = assistant.clean_clarify_questions(asked)
             if asked and not questions and attempt == 0:
                 logger.warning("assistant: clarifying questions all refused slug=%s spoke=%s", slug, spoke)
@@ -385,6 +397,10 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
             await anyio.to_thread.run_sync(users.increment_answers, get_db(), user.uid)
         except Exception:
             logger.warning("assistant: could not increment answers_total", exc_info=True)
+
+        if sources:
+            # Shown under the answer: a searched claim has to say where it came from.
+            yield sse("sources", {"sources": sources})
 
         u = _usage_dict(usage) or {}
         yield sse("done", {

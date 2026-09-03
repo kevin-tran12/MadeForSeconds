@@ -401,6 +401,64 @@ class TestRouter:
         assert "and for 12 people?" in call["messages"][0]["content"]
 
 
+# ── Sourcing: shop links and web search ───────────────────────────────────────
+
+class TestStoreLinks:
+    def test_a_search_link_per_ingredient_deduped_and_capped(self):
+        doc = {
+            "ingredients": [{"item": "holy basil"}, {"item": "fish sauce"}, {"item": "Holy Basil"}],
+            "components": [{"ingredients": [{"item": "palm sugar"}]}],
+        }
+        lines = assistant.stores_block(doc).splitlines()
+        assert lines == [
+            "- holy basil: https://www.weee.com/en/search?keyword=holy+basil",
+            "- fish sauce: https://www.weee.com/en/search?keyword=fish+sauce",
+            "- palm sugar: https://www.weee.com/en/search?keyword=palm+sugar",
+        ]
+        many = {"ingredients": [{"item": f"item {i}"} for i in range(30)]}
+        assert len(assistant.stores_block(many).splitlines()) == assistant.MAX_STORE_LINKS
+
+    def test_the_affiliate_parameter_is_appended_once_it_exists(self, monkeypatch):
+        assert "?" in assistant.weee_search_url("belacan") and "&" not in assistant.weee_search_url("belacan")
+        monkeypatch.setattr(settings, "weee_affiliate_query", "?utm_source=mfs")
+        assert assistant.weee_search_url("belacan") == "https://www.weee.com/en/search?keyword=belacan&utm_source=mfs"
+
+
+class TestWebSearchTool:
+    def _kwargs(self, spoke="sourcing", supporter=True, can_search=True):
+        return assistant.build_request(
+            spoke=spoke, recipe_doc=RECIPE_DOC, catalogue=CATALOGUE, question="where do I buy belacan?",
+            history=[], view=VIEW, reader=None, supporter=supporter, can_search=can_search,
+        )
+
+    def _tools(self, **kw):
+        return [t.get("type", t.get("name")) for t in self._kwargs(**kw)["tools"]]
+
+    def test_supporters_get_the_search_tool_on_the_sourcing_spoke_only(self):
+        assert assistant.WEB_SEARCH_TOOL_TYPE in self._tools()
+        assert assistant.WEB_SEARCH_TOOL_TYPE not in self._tools(spoke="ingredients")
+        assert assistant.WEB_SEARCH_TOOL_TYPE not in self._tools(supporter=False)
+        assert assistant.WEB_SEARCH_TOOL_TYPE not in self._tools(can_search=False)
+
+    def test_the_tool_is_bounded_and_never_carries_a_reader_location(self):
+        tool = self._kwargs()["tools"][-1]
+        assert tool["max_uses"] == assistant.MAX_WEB_SEARCHES == 2
+        assert tool["allowed_callers"] == ["direct"]
+        assert tool["user_location"] == {"type": "approximate", "country": "US"}
+        assert tool["allowed_domains"] == settings.assistant_search_domain_list
+        assert "weee.com" in tool["allowed_domains"]
+
+    def test_the_shop_links_ride_inside_the_cached_recipe_block(self):
+        block = self._kwargs()["messages"][0]["content"][0]["text"]
+        assert "<stores>" in block and "weee.com/en/search?keyword=whole+chicken" in block
+        assert self._kwargs()["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+        assert "<stores>" not in self._kwargs(spoke="ingredients")["messages"][0]["content"][0]["text"]
+
+    def test_a_searched_answer_gets_a_longer_per_call_timeout(self):
+        assert self._kwargs()["timeout"] == 90.0
+        assert "timeout" not in self._kwargs(spoke="ingredients")
+
+
 # ── Clarifying questions ──────────────────────────────────────────────────────
 
 class TestClarifyBackstop:
@@ -669,6 +727,48 @@ def test_ask_marks_truncated_answers(user_client, recipe_db, configured):
     with patch("app.services.assistant._get_client", return_value=client):
         _, body = _ask(user_client)
     assert _parse_sse(body)[-1][1]["truncated"] is True
+
+
+def _supporter():
+    return patch("app.services.entitlements.is_supporter", return_value=True)
+
+
+def test_ask_offers_search_to_supporters_and_shows_the_sources(user_client, recipe_db, configured):
+    cited = [_text_block("Belacan is a fermented shrimp paste.",
+                         [_citation("https://weee.com/x", "Weee!"), _citation("https://weee.com/x", "again")])]
+    client = FakeAnthropic(label="sourcing", turns=[
+        ([_search_event(), _text_event("Belacan is a fermented shrimp paste.")],
+         _final(usage=_usage(web_search_requests=1), content=cited)),
+    ])
+    with _supporter(), patch("app.services.assistant._get_client", return_value=client):
+        _, body = _ask(user_client, {**ASK, "question": "where do I buy belacan?"})
+
+    events = _parse_sse(body)
+    assert [e for e, _ in events] == ["meta", "status", "delta", "sources", "done"]
+    assert events[3][1] == {"sources": [{"url": "https://weee.com/x", "title": "Weee!"}]}
+    assert events[-1][1]["searches"] == 1
+    tools = client.stream_calls[0]["tools"]
+    assert any(t.get("type") == assistant.WEB_SEARCH_TOOL_TYPE for t in tools)
+    assert llm_budget.get_month_searches() == 1
+
+
+def test_ask_never_offers_search_to_a_free_reader(user_client, recipe_db, configured):
+    client = FakeAnthropic(label="sourcing")
+    with patch("app.services.assistant._get_client", return_value=client):
+        _, body = _ask(user_client, {**ASK, "question": "where do I buy belacan?"})
+    tools = client.stream_calls[0]["tools"]
+    assert [t["name"] for t in tools] == [assistant.CLARIFY_TOOL_NAME]
+    assert "<stores>" in client.stream_calls[0]["messages"][0]["content"][0]["text"]  # links, always
+
+
+def test_ask_stops_searching_once_the_month_is_spent(user_client, recipe_db, configured, monkeypatch):
+    monkeypatch.setattr(settings, "assistant_monthly_search_cap", 2)
+    llm_budget.add_searches(2)
+    client = FakeAnthropic(label="sourcing")
+    with _supporter(), patch("app.services.assistant._get_client", return_value=client):
+        _, body = _ask(user_client, {**ASK, "question": "where do I buy belacan?"})
+    assert [t["name"] for t in client.stream_calls[0]["tools"]] == [assistant.CLARIFY_TOOL_NAME]
+    assert _parse_sse(body)[-1][0] == "done"  # still answered, just without searching
 
 
 def test_ask_routes_to_a_spoke_and_reports_it(user_client, recipe_db, configured):

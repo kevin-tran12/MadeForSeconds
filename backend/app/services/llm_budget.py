@@ -74,6 +74,11 @@ def month_key(now: datetime | None = None) -> str:
     return f"llm:spend:{_now(now):%Y-%m}"
 
 
+def search_key(now: datetime | None = None) -> str:
+    """Counter for server-side searches in the UTC month containing `now`."""
+    return f"llm:searches:{_now(now):%Y-%m}"
+
+
 def resets_at(now: datetime | None = None) -> datetime:
     """First instant of the next UTC month."""
     n = _now(now)
@@ -178,6 +183,39 @@ def add_spend_micro(amount: int, now: datetime | None = None) -> int:
     if total is None:
         raise BudgetUnavailable("the spend counter backend is unavailable")
     return total
+
+
+def get_month_searches(now: datetime | None = None) -> int:
+    if not _durable_backend():
+        raise BudgetUnavailable("the search counter needs Redis in production")
+    value = cache.get_counter(search_key(now))
+    if value is None:
+        raise BudgetUnavailable("the search counter backend is unavailable")
+    return value
+
+
+def add_searches(count: int, now: datetime | None = None) -> None:
+    """Count the searches an answer ran. Best-effort: the spend counter is the
+    hard stop, this one only decides whether to keep offering the tool."""
+    if count <= 0:
+        return
+    try:
+        if _durable_backend():
+            cache.incr_by_with_ttl(search_key(now), count, SPEND_TTL_SECONDS)
+    except Exception:
+        logger.warning("assistant: could not count %d web searches", count, exc_info=True)
+
+
+def searches_available(now: datetime | None = None) -> bool:
+    """Whether the month has room for more searches. A search is ~50x an
+    ordinary answer's cost, so it gets its own ceiling under the spend cap;
+    an unreadable counter means no search rather than an uncounted one."""
+    if settings.assistant_monthly_search_cap <= 0:
+        return False
+    try:
+        return get_month_searches(now) < settings.assistant_monthly_search_cap
+    except BudgetUnavailable:
+        return False
 
 
 def is_paused(now: datetime | None = None) -> bool:

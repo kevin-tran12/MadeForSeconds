@@ -214,6 +214,41 @@
         ],
         "max_words": 220
       }
+    },
+    {
+      "id": "sourcing-free-reader",
+      "slug": "thai-basil-chicken",
+      "question": "What is holy basil and where would I get it? I'm not fussy about the shop.",
+      "expect": {
+        "spoke": "sourcing",
+        "max_searches": 0,
+        "has_sources": false,
+        "contains_any": [
+          "weee.com"
+        ],
+        "not_contains": [
+          "$",
+          " in stock"
+        ],
+        "max_words": 220
+      }
+    },
+    {
+      "id": "sourcing-supporter-searches",
+      "slug": "thai-basil-chicken",
+      "supporter": true,
+      "clarified": true,
+      "question": "What is holy basil and where would I get it? Q: What's your zip code? A: 94110",
+      "expect": {
+        "spoke": "sourcing",
+        "max_searches": 2,
+        "has_sources": true,
+        "not_contains": [
+          "$",
+          " in stock"
+        ],
+        "max_words": 260
+      }
     }
   ]
 }
