@@ -37,6 +37,7 @@ from .routes import (  # noqa: E402
     admin,
     expenses,
     internal,
+    me,
     public,
     reports,
     subscriptions,
@@ -136,6 +137,7 @@ app.include_router(expenses.router)
 app.include_router(reports.router)
 app.include_router(totp.router)
 app.include_router(internal.router)
+app.include_router(me.router)
 
 
 

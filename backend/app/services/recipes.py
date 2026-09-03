@@ -7,6 +7,7 @@ domain exceptions to HTTPExceptions; MCP tools translate them to
 structured error dicts.
 """
 
+import json
 import re
 from datetime import datetime, timezone
 
@@ -83,6 +84,64 @@ def find_by_slug(db, slug: str) -> dict | None:
         "published": data.get("published", False),
         "updated_at": updated.isoformat() if hasattr(updated, "isoformat") else updated,
     }
+
+
+def _published_by_slug_query(db, slug: str):
+    return (
+        db.collection("recipes")
+        .where(filter=FieldFilter("slug", "==", slug))
+        .where(filter=FieldFilter("published", "==", True))
+        .limit(1)
+        .stream()
+    )
+
+
+def get_published_by_slug(db, slug: str) -> Recipe | None:
+    """Full published recipe by slug, or None — drafts are invisible here."""
+    doc = next(iter(_published_by_slug_query(db, slug)), None)
+    return doc_to_recipe(doc) if doc is not None else None
+
+
+def _json_default(value):
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def get_published_doc(db, slug: str) -> dict | None:
+    """Raw published recipe dict for the Sous Chef prompt.
+
+    Keeps the admin-only fields the public ``Recipe`` model drops (the owner's
+    ``sous_chef_notes``) and is JSON-safe (timestamps as ISO strings) so it can
+    sit in the versioned cache, where every recipe mutation's cache.clear()
+    invalidates it alongside the rendered responses.
+    """
+    key = f"assistant:recipe:{slug}"
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    doc = next(iter(_published_by_slug_query(db, slug)), None)
+    if doc is None:
+        return None
+    data = doc.to_dict() or {}
+    data["id"] = doc.id
+    data.pop("premium_content", None)
+    data.pop("has_premium_content", None)
+    safe = json.loads(json.dumps(data, default=_json_default))
+    cache.set(key, safe)
+    return safe
+
+
+def get_all_published(db, limit: int = 200) -> list[Recipe]:
+    """Newest-first published recipes — the same query main._warm_cache runs."""
+    docs = (
+        db.collection("recipes")
+        .where(filter=FieldFilter("published", "==", True))
+        .order_by("created_at", direction="DESCENDING")
+        .limit(limit)
+        .stream()
+    )
+    return [doc_to_recipe(doc) for doc in docs]
 
 
 def get_categories(db) -> list[str]:
