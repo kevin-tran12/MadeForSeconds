@@ -92,6 +92,29 @@ def test_first_personal_info_reports_the_first_hit_across_texts():
     assert pii.first_personal_info([]) is None
 
 
+def test_a_wall_of_whitespace_cannot_make_the_guard_slow():
+    """Replayed history and feedback reach the guard raw, so a reader controls
+    its input length. Collapsing whitespace keeps every pattern linear —
+    without it "apt<n spaces>#<n spaces>x" backtracked quadratically."""
+    import time
+
+    def elapsed(n):
+        probe = "apt" + " " * n + "#" + " " * n + "x"
+        start = time.perf_counter()
+        pii.find_personal_info(probe)
+        return time.perf_counter() - start
+
+    assert elapsed(8000) < 0.05  # was ~0.55s before the collapse
+    # Quadrupling the input must not quadruple the work.
+    assert elapsed(16000) < max(elapsed(4000) * 4, 0.05)
+
+
+def test_collapsing_whitespace_does_not_change_what_is_found():
+    assert pii.find_personal_info("apt.   4") == "address"
+    assert pii.find_personal_info("I  live   at 12  Main  St") == "address"
+    assert pii.find_personal_info("use   350  g   flour") is None
+
+
 def test_the_refusal_body_names_the_kind_and_never_the_text():
     detail = pii.refusal_detail("phone")
     assert detail == {"code": "personal_info", "kind": "phone", "message": pii.REFUSAL_MESSAGE}
