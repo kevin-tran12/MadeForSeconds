@@ -1,7 +1,7 @@
-import { apiFetch, apiUpload } from './api-client'
+import { apiFetch, apiStream, apiUpload } from './api-client'
 import type { Recipe, RecipeFormData, PaginatedRecipes, GroupedRecipes } from './types'
 import type { Expense, ExpenseCreate, ExpenseSummary } from './types-expense'
-import type { CookingExperience, CookingLevel, MeResponse } from './types-assistant'
+import type { AskRequest, AssistantStatus, CookingExperience, CookingLevel, MeResponse } from './types-assistant'
 
 // ─── Public endpoints ───────────────────────────────────────────────────────
 
@@ -298,4 +298,33 @@ export const meApi = {
       '/api/me/data',
       { method: 'DELETE' }
     ),
+}
+
+// ─── Sous Chef assistant ────────────────────────────────────────────────────
+
+export const assistantApi = {
+  /** Public: off / paused / quotas, so the drawer can explain itself before sign-in. */
+  status: () => apiFetch<AssistantStatus>('/api/assistant/status'),
+
+  /** Streams `meta`, `delta`…, then `done` or `error` events; rejects with ApiError on a non-2xx. */
+  ask: (body: AskRequest, onEvent: (event: string, data: unknown) => void, signal?: AbortSignal) =>
+    apiStream('/api/assistant/ask', body, onEvent, signal),
+
+  feedback: (body: { slug: string; question: string; answer: string; rating: 'up' | 'down'; comment?: string }) =>
+    apiFetch<{ recorded: boolean }>('/api/assistant/feedback', { method: 'POST', body: JSON.stringify(body) }),
+}
+
+export interface AssistantFeedbackRow {
+  id: string
+  slug: string
+  rating: 'up' | 'down' | string
+  question: string
+  answer: string
+  comment: string
+  model: string
+  created_at: string | null
+}
+
+export const adminAssistantApi = {
+  listFeedback: (limit = 50) => apiFetch<AssistantFeedbackRow[]>(`/api/admin/assistant/feedback?limit=${limit}`),
 }

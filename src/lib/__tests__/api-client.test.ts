@@ -72,3 +72,76 @@ describe('api-client', () => {
     expect(dispatchSpy).toHaveBeenCalledWith(expect.objectContaining({ type: 'totp-session-expired' }))
   })
 })
+
+// ─── apiStream / ApiError ───────────────────────────────────────────────────
+
+import { apiStream, ApiError } from '../api-client'
+
+function sseBody(text: string): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder()
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(text))
+      controller.close()
+    },
+  })
+}
+
+describe('apiStream', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sessionStorage.clear()
+    setTokenGetter(async () => 'reader-token')
+  })
+
+  it('POSTs JSON with the auth header and Accept: text/event-stream, then dispatches parsed events', async () => {
+    ;(global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: sseBody('event: meta\ndata: {"quota":{"remaining":4}}\n\nevent: delta\ndata: {"text":"Hi"}\n\nevent: done\ndata: {"refused":false}\n\n'),
+    })
+    const events: [string, unknown][] = []
+    await apiStream('/api/assistant/ask', { slug: 'x' }, (e, d) => events.push([e, d]))
+
+    const [url, init] = (global.fetch as any).mock.calls[0]
+    expect(url).toContain('/api/assistant/ask')
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe('{"slug":"x"}')
+    expect(init.headers['Authorization']).toBe('Bearer reader-token')
+    expect(init.headers['Accept']).toBe('text/event-stream')
+    expect(events).toEqual([
+      ['meta', { quota: { remaining: 4 } }],
+      ['delta', { text: 'Hi' }],
+      ['done', { refused: false }],
+    ])
+  })
+
+  it('throws an ApiError carrying the backend code on a non-2xx before any event', async () => {
+    ;(global.fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      json: () => Promise.resolve({ detail: { code: 'quota_exhausted', message: 'Used up', supporter: false } }),
+    })
+    const onEvent = vi.fn()
+    await expect(apiStream('/api/assistant/ask', {}, onEvent)).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 429,
+      code: 'quota_exhausted',
+      message: 'Used up',
+    })
+    expect(onEvent).not.toHaveBeenCalled()
+  })
+
+  it('apiFetch keeps string details as the message and exposes the status', async () => {
+    ;(global.fetch as any).mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: () => Promise.resolve({ detail: 'Recipe not found' }),
+    })
+    const err = await apiFetch('/api/recipes/ghost').catch((e) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.message).toBe('Recipe not found')
+    expect(err.status).toBe(404)
+    expect(err.code).toBeUndefined()
+  })
+})
