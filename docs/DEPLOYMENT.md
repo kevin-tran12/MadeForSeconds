@@ -1405,9 +1405,12 @@ production and staging rules are separate so either can be archived alone):
      `gcloud iam service-accounts describe mfs-backend@<project>.iam.gserviceaccount.com --format='value(uniqueId)'`
      (production: `104761386942927811093`)
    - `claims.email`: `mfs-backend@<project>.iam.gserviceaccount.com`
-3. **Scope `workspace:inference`, `token_lifetime_seconds` 600.** The
-   assistant only ever calls Messages; it never needs Files, Skills, or any
-   admin surface. Bind the rule to the workspace whose spend should bound the
+3. **Scope `workspace:developer`, token lifetime 600 s (10 minutes).** The
+   wizard offers `workspace:developer` or `org:admin`; take the former — it
+   is what a workspace API key gets, and the assistant only ever calls
+   Messages. Never `org:admin`. (`workspace:inference`, narrower still, exists
+   in the Admin API but not in the wizard.) The 24-hour lifetime the field
+   allows is a maximum, not a suggestion. Bind the rule to the workspace whose spend should bound the
    assistant and set a **monthly spend limit** on that workspace — the
    provider-side second wall behind the app's own cap (below).
 4. **GitHub variables (not secrets)** — `ANTHROPIC_ORGANIZATION_ID` (shared),
