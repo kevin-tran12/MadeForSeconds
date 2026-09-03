@@ -335,6 +335,24 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
                 logger.warning("assistant: upstream rate limited slug=%s user=%s", slug, user_tag)
                 yield sse("error", {"code": "upstream_busy", "message": "The Sous Chef is slammed right now — try again in a moment."})
                 return
+            except anthropic.WorkloadIdentityError:
+                # The federation exchange itself failed — a rule that no longer
+                # matches, an archived rule, a workspace-scoped rule with no
+                # workspace id. It subclasses AnthropicError, not
+                # APIStatusError, so without this clause it escapes the
+                # generator, tears the SSE stream mid-response, and the reader
+                # is left with an empty bubble and a consumed question. Logged
+                # at ERROR because no amount of retrying fixes it.
+                finished = True
+                if not sent_any:
+                    entitlements.refund_quota(ent)
+                _record_spend(router_cost)
+                logger.error(
+                    "assistant: federation token exchange failed slug=%s user=%s — check the deny reason "
+                    "on Workload identity → History in the Claude Console", slug, user_tag, exc_info=True,
+                )
+                yield sse("error", {"code": "upstream_error", "message": "The Sous Chef dropped the pan — try again."})
+                return
             except (anthropic.APIStatusError, anthropic.APIConnectionError, anthropic.APITimeoutError):
                 finished = True
                 if not sent_any:
