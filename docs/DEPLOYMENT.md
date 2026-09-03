@@ -1249,6 +1249,9 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `ANTHROPIC_ORGANIZATION_ID` | Plain env (Terraform, optional) | Anthropic organization UUID (with the rule and service-account ids) |
 | `ANTHROPIC_SERVICE_ACCOUNT_ID` | Plain env (Terraform, optional) | Anthropic service account the minted token acts as |
 | `ANTHROPIC_WORKSPACE_ID` | Plain env (Terraform, optional) | Anthropic workspace to scope the token to; only when the rule spans several workspaces |
+| `ASSISTANT_SEARCH_DOMAINS` | Plain env (optional) | Comma-separated allow-list the Sous Chef's web search may read. Defaults to USDA/FDA/NCHFP/Serious Eats/Woks of Life/Weee!/Instacart; must be a subset of any org-level allow-list in the Claude Console |
+| `ASSISTANT_MONTHLY_SEARCH_CAP` | Plain env (optional) | Web searches allowed per UTC month (default 300). Past it the sourcing spoke answers without searching |
+| `WEEE_AFFILIATE_QUERY` | Plain env (optional) | Tracking parameter appended to every Weee! search link. Blank until the affiliate programme accepts the site, which is what ships today |
 | `WORKOS_AUTHKIT_DOMAIN` | Plain env (Terraform) | WorkOS AuthKit domain — OAuth issuer for MCP auth |
 | `MCP_RESOURCE_URL` | Plain env (Terraform) | Public URL of the `/mcp` endpoint (OAuth resource) |
 | `REDIS_URL` | GCP Secret Manager (optional) | Upstash Redis URL for caching |
@@ -1447,6 +1450,23 @@ let the next apply land (the following revision answers 503
 Console — every exchange fails from that moment and the SDK's cached token
 dies within its 10-minute lifetime. Nothing to rotate: Google signs a fresh
 identity token for every exchange.
+
+**Web search (supporters only).** The sourcing spoke — and only that spoke —
+offers supporters Anthropic's server-side `web_search_20260209`, capped at two
+searches per answer over a curated `ASSISTANT_SEARCH_DOMAINS` allow-list. Two
+things have to hold on the provider side or every search fails: web search
+must stay **enabled for the organization** in the Claude Console, and if an
+org-level domain allow-list is configured there it must **contain** every
+domain in `ASSISTANT_SEARCH_DOMAINS` — a request's list has to be a subset of
+the org's, not a superset. A search costs $0.01 plus the tokens its results
+add, roughly fifty times an ordinary answer, so it has its own monthly ceiling
+(`ASSISTANT_MONTHLY_SEARCH_CAP`, default 300, counted in Redis under
+`mfs:rl:llm:searches:YYYY-MM`) beneath the $10 spend cap. Once that is spent
+the tool is simply not offered and the spoke answers without it; an unreadable
+counter means no search rather than an uncounted one. Free readers never get
+the tool at all, but every reader gets the Weee! shop links, which cost
+nothing — `WEEE_AFFILIATE_QUERY` stays blank until the affiliate programme
+accepts the site, and plain links work in the meantime.
 
 **Cost.** No Secret Manager secret and no new Cloud Scheduler job. The only
 infrastructure addition is the `assistant_feedback` collection's 180-day

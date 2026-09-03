@@ -186,7 +186,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (802 tests across 35 files)
+│   ├── tests/                  Pytest suite (814 tests across 35 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -289,7 +289,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (802 tests)
+npm run test:backend                    # Pytest (814 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -422,14 +422,14 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (802 tests, 35 files)
+### Backend — pytest (814 tests, 35 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
 ```
 Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, log redaction, reader identity and profile, Sous Chef spend metering, entitlements, prompt assembly, the spoke router, streaming routes, and the personal-information guard.
 
-### Frontend unit — vitest (136 tests, 21 files)
+### Frontend unit — vitest (137 tests, 21 files)
 ```bash
 npm run test:unit
 ```
