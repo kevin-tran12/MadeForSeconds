@@ -136,6 +136,13 @@ module "backend-service" {
   instagram_user_id      = var.instagram_user_id
   instagram_access_token = var.instagram_access_token
 
+  # Sous Chef assistant — Anthropic Workload Identity Federation ids (plain
+  # env, not secrets; validated together in terraform/variables.tf).
+  anthropic_federation_rule_id = var.anthropic_federation_rule_id
+  anthropic_organization_id    = var.anthropic_organization_id
+  anthropic_service_account_id = var.anthropic_service_account_id
+  anthropic_workspace_id       = var.anthropic_workspace_id
+
   backend_sa_email = module.security.backend_sa_email
   backend_sa_name  = module.security.backend_sa_name
   deploy_sa_email  = module.security.deploy_sa_email

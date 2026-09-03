@@ -78,6 +78,17 @@ subscriber_jwt_secret = ""   # min 32 chars; production startup aborts if short
 # Cancellation confirmation emails.
 resend_api_key = ""
 
+# Sous Chef assistant (Claude). Authenticates with Anthropic Workload Identity
+# Federation — these are ids, not secrets; the Cloud Run service account's own
+# identity token is the credential. All three blank keeps the feature off.
+# Set them together, and only alongside redis_url: the backend refuses to
+# start with federation and no Redis (the monthly spend cap lives in Redis).
+# Runbook: docs/DEPLOYMENT.md § Sous Chef assistant.
+anthropic_federation_rule_id = "" # fdrl_…
+anthropic_organization_id    = "" # the organization UUID
+anthropic_service_account_id = "" # svac_…
+anthropic_workspace_id       = "" # only when the rule spans more than one workspace
+
 # Instagram publishing via MCP. The token seeds the secret and is then rotated
 # automatically by a weekly scheduler job. Setting a token creates that job —
 # note Cloud Scheduler's free tier is 3 jobs per billing account, and two are
