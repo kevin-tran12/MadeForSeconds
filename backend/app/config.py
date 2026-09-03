@@ -51,9 +51,19 @@ class Settings(BaseSettings):
     instagram_refresh_audience: str = ""  # Expected OIDC audience for the refresh endpoint
     usage_report_audience: str = ""  # Expected OIDC audience for the weekly usage report endpoint
     alert_email: str = ""  # Destination for the weekly usage report (same address as budget/uptime alerts)
-    # Sous Chef assistant (Claude API). A blank key switches the feature off —
-    # the endpoint answers 503 not_configured — rather than failing startup,
-    # so staging/E2E run without a key. See docs/DEPLOYMENT.md § Sous Chef.
+    # Sous Chef assistant (Claude API). Production authenticates with Anthropic
+    # Workload Identity Federation: Cloud Run's service account presents a
+    # Google-signed OIDC token and the SDK exchanges it for a short-lived
+    # access token under the rule below — no static key exists anywhere
+    # (services/claude_auth.py). All three ids blank switches the feature off
+    # — the endpoint answers 503 not_configured — rather than failing startup,
+    # so staging/E2E run without it. See docs/DEPLOYMENT.md § Sous Chef.
+    anthropic_federation_rule_id: str = ""  # fdrl_… — the rule matching mfs-backend's identity token
+    anthropic_organization_id: str = ""  # the Anthropic organization UUID
+    anthropic_service_account_id: str = ""  # svac_… — the rule's target
+    anthropic_workspace_id: str = ""  # wrkspc_…; only needed when the rule spans several workspaces
+    # Static key for local development and the eval script only —
+    # validate_production_settings refuses it in production.
     anthropic_api_key: str = ""
     assistant_model: str = "claude-sonnet-5"
     assistant_classifier_model: str = "claude-haiku-4-5"
@@ -67,8 +77,27 @@ class Settings(BaseSettings):
         return {e.strip() for e in self.admin_emails.split(",") if e.strip()}
 
     @property
+    def assistant_federation_configured(self) -> bool:
+        return bool(
+            self.anthropic_federation_rule_id
+            and self.anthropic_organization_id
+            and self.anthropic_service_account_id
+        )
+
+    @property
+    def assistant_federation_partial(self) -> bool:
+        """Some but not all of the three federation ids — a misconfiguration,
+        never a valid 'off'."""
+        present = (
+            bool(self.anthropic_federation_rule_id),
+            bool(self.anthropic_organization_id),
+            bool(self.anthropic_service_account_id),
+        )
+        return any(present) and not all(present)
+
+    @property
     def assistant_configured(self) -> bool:
-        return bool(self.anthropic_api_key)
+        return self.assistant_federation_configured or bool(self.anthropic_api_key)
 
     @property
     def instagram_configured(self) -> bool:
@@ -189,11 +218,24 @@ def validate_production_settings(s: "Settings") -> None:
             "STRIPE_WEBHOOK_SECRET must be set in production — without it /api/subscribe/webhook "
             "rejects every event with an invalid-signature error, and payments silently stop recording"
         )
-    if s.anthropic_api_key and not s.redis_url:
+    if s.anthropic_api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is set but REDIS_URL is not — the Sous Chef monthly spend cap needs a "
-            "counter that survives scale-to-zero (the in-memory fallback resets on every cold start, "
-            "which would silently un-cap LLM spend). Set REDIS_URL or unset ANTHROPIC_API_KEY."
+            "ANTHROPIC_API_KEY is set — production authenticates to Anthropic with Workload Identity "
+            "Federation (Cloud Run's service account, no static key anywhere). Unset it and set "
+            "ANTHROPIC_FEDERATION_RULE_ID, ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_SERVICE_ACCOUNT_ID "
+            "instead — docs/DEPLOYMENT.md § Sous Chef assistant."
+        )
+    if s.assistant_federation_partial:
+        raise RuntimeError(
+            "ANTHROPIC_FEDERATION_RULE_ID, ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_SERVICE_ACCOUNT_ID "
+            "must be set together — all three switch the Sous Chef on, all blank keeps it off; "
+            "only some of them is a misconfiguration."
+        )
+    if s.assistant_federation_configured and not s.redis_url:
+        raise RuntimeError(
+            "Anthropic federation is configured but REDIS_URL is not — the Sous Chef monthly spend cap "
+            "needs a counter that survives scale-to-zero (the in-memory fallback resets on every cold "
+            "start, which would silently un-cap LLM spend). Set REDIS_URL or clear the ANTHROPIC_* ids."
         )
 
 
