@@ -81,6 +81,24 @@ describe('SousChefDrawer', () => {
     expect(screen.getByText('Link that donation').getAttribute('href')).toBe('/support/link/')
   })
 
+  it('warns about personal details and puts the question back in the composer', async () => {
+    const { ApiError } = await import('../../../lib/api-client')
+    vi.mocked(useAuth).mockReturnValue({ ...baseAuth, user: { email: 'k@x.y' }, me: me() } as never)
+    vi.mocked(assistantApi.ask).mockRejectedValue(
+      new ApiError(400, { code: 'personal_info', kind: 'phone', message: 'Please don’t share personal details like phone numbers.' })
+    )
+    renderDrawer()
+
+    const box = (await screen.findByLabelText('Ask the Sous Chef')) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: 'call me on 415-555-0100 about the laksa' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    expect(await screen.findByText(/don.t share personal details/i)).toBeDefined()
+    await waitFor(() => expect(box.value).toBe('call me on 415-555-0100 about the laksa'))
+    // Not left in the transcript: the starter chips are still what's on screen.
+    expect(screen.getByText(/I don't have rice noodles/)).toBeDefined()
+  })
+
   it('greets a returning reader, streams an answer from a starter chip, and takes feedback', async () => {
     vi.mocked(useAuth).mockReturnValue({ ...baseAuth, user: { email: 'k@x.y' }, me: me() } as never)
     vi.mocked(assistantApi.ask).mockImplementation(async (body, onEvent) => {

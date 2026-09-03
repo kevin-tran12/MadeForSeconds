@@ -104,6 +104,15 @@ def test_update_experience_round_trip(user_client, mock_db):
     assert args[0]["cooking_experience"]["level"] == "confident"
 
 
+def test_update_experience_refuses_personal_details_in_the_notes(user_client, mock_db):
+    """The notes ride into every prompt, so they follow the same rule as a question."""
+    response = user_client.put("/api/me/experience", json={"level": "confident", "notes": "reach me on 415-555-0100"})
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "personal_info" and detail["kind"] == "phone"
+    assert mock_db.set.called is False and mock_db.update.called is False
+
+
 def test_update_experience_rejects_unknown_level(user_client, mock_db):
     assert user_client.put("/api/me/experience", json={"level": "wizard"}).status_code == 422
     mock_db.set.assert_not_called()

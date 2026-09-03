@@ -240,6 +240,8 @@ export function SousChefDrawer({ recipe, servings, unitSystem, onClose }: Props)
                 streaming={chef.phase === 'streaming'}
                 onSend={(q) => void chef.send(q)}
                 onStop={chef.stop}
+                restoreText={chef.rejectedText}
+                onRestored={chef.clearRejectedText}
               />
             </div>
           )}

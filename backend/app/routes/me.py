@@ -4,14 +4,14 @@ you keep on me."""
 from typing import Literal
 
 import anyio
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..auth import UserIdentity, require_user
 from ..firestore import get_db
 from ..log_redaction import keyed_hash
 from ..rate_limit import rate_limit
-from ..services import entitlements, users
+from ..services import entitlements, pii, users
 
 router = APIRouter(prefix="/api")
 
@@ -56,6 +56,12 @@ async def update_experience(
 ) -> dict:
     """Save the reader's cooking experience — the Sous Chef pitches its answers
     to it, and it is remembered on the account until changed or erased."""
+    # The notes ride into every prompt as reader-written context, so they are
+    # held to the same rule as a question: nothing personal, ever.
+    kind = pii.find_personal_info(body.notes)
+    if kind:
+        raise HTTPException(status_code=400, detail=pii.refusal_detail(kind, pii.NOTES_REFUSAL_MESSAGE))
+
     db = get_db()
     result = await anyio.to_thread.run_sync(
         users.set_cooking_experience, db, user.uid, body.level, body.notes

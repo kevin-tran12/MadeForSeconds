@@ -24,7 +24,7 @@ from ..config import settings
 from ..firestore import get_db
 from ..log_redaction import keyed_hash
 from ..rate_limit import rate_limit
-from ..services import assistant, entitlements, llm_budget, users
+from ..services import assistant, entitlements, llm_budget, pii, users
 from ..services.entitlements import Entitlement
 from ..services.recipes import get_published_doc
 from ..services.users import clean_text
@@ -177,6 +177,14 @@ async def ask(
             status_code=400,
             detail={"code": "invalid_question", "message": "Ask that in plain words and I'm happy to help."},
         )
+
+    # Before anything else: no personal details reach the model, a log line,
+    # or Firestore. History is checked too — a crafted client can replay what
+    # was refused a turn ago. Nothing is consumed and nothing is stored.
+    kind = pii.first_personal_info([question, *(m.content for m in body.history)])
+    if kind:
+        logger.info("assistant refused personal_info kind=%s user=%s", kind, keyed_hash(user.email)[:12])
+        raise HTTPException(status_code=400, detail=pii.refusal_detail(kind))
 
     db = get_db()
 
@@ -342,6 +350,11 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
 async def feedback(body: FeedbackRequest, user: UserIdentity = Depends(require_user)) -> dict:
     """A thumbs up/down on an answer. The only place reader text is stored,
     opt-in per answer, keyed by hashed email, and expired after 180 days."""
+    kind = pii.first_personal_info([body.question, body.answer, body.comment])
+    if kind:
+        logger.info("assistant feedback refused personal_info kind=%s user=%s", kind, keyed_hash(user.email)[:12])
+        raise HTTPException(status_code=400, detail=pii.refusal_detail(kind))
+
     now = datetime.now(timezone.utc)
     doc = {
         "slug": body.slug,

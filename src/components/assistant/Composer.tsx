@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { Button } from '../ui/Button'
 
 interface Props {
@@ -7,12 +7,21 @@ interface Props {
   onSend: (question: string) => void
   onStop: () => void
   placeholder?: string
+  /** Text handed back after a refusal, so the reader edits instead of retyping. */
+  restoreText?: string | null
+  onRestored?: () => void
 }
 
 const MAX_CHARS = 2000
 
-export function Composer({ disabled, streaming, onSend, onStop, placeholder }: Props) {
+export function Composer({ disabled, streaming, onSend, onStop, placeholder, restoreText, onRestored }: Props) {
   const [value, setValue] = useState('')
+
+  useEffect(() => {
+    if (!restoreText) return
+    setValue(restoreText)
+    onRestored?.()
+  }, [restoreText, onRestored])
 
   function submit() {
     const question = value.trim()

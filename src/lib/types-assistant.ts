@@ -80,6 +80,7 @@ export type AskErrorCode =
   | 'budget_unavailable'
   | 'rate_limited'
   | 'invalid_question'
+  | 'personal_info'
   | 'prompt_too_long'
   | 'recipe_not_found'
   | 'upstream_busy'
