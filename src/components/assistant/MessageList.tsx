@@ -1,13 +1,17 @@
 import { useEffect, useRef } from 'react'
-import type { ChatMessage } from '../../lib/types-assistant'
+import { ClarifyForm } from './ClarifyForm'
+import type { ChatMessage, ClarifyAnswer, ClarifyQuestion } from '../../lib/types-assistant'
 
 interface Props {
   messages: ChatMessage[]
   onRate: (messageId: string, rating: 'up' | 'down') => void
+  onClarify?: (questions: ClarifyQuestion[], answers: ClarifyAnswer[]) => void
+  /** What the chef is doing before any text arrives, e.g. "Checking sources…". */
+  activity?: string | null
 }
 
 /** Plain-text bubbles. Never markdown or HTML: model output is rendered as text only. */
-export function MessageList({ messages, onRate }: Props) {
+export function MessageList({ messages, onRate, onClarify, activity }: Props) {
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -28,16 +32,22 @@ export function MessageList({ messages, onRate }: Props) {
           <div key={m.id} className="mr-8 self-start">
             <div className="rounded-2xl rounded-bl-sm bg-surface-dark px-4 py-2.5 text-sm text-content-body whitespace-pre-wrap">
               {m.content}
-              {m.pending && (
-                <span className="ml-1 inline-block animate-pulse" aria-label="Thinking">
-                  ▍
-                </span>
-              )}
+              {m.pending &&
+                (activity ? (
+                  <span className="text-content-muted">{activity}</span>
+                ) : (
+                  <span className="ml-1 inline-block animate-pulse" aria-label="Thinking">
+                    ▍
+                  </span>
+                ))}
             </div>
             {m.truncated && (
               <p className="mt-1 px-1 text-xs text-content-muted">…that got cut short — ask me to continue.</p>
             )}
-            {!m.pending && !m.refused && m.content.trim() && (
+            {m.clarify?.length && onClarify ? (
+              <ClarifyForm questions={m.clarify} onSubmit={(answers) => onClarify(m.clarify!, answers)} />
+            ) : null}
+            {!m.pending && !m.refused && !m.clarify?.length && m.content.trim() && (
               <div className="mt-1 flex items-center gap-1 px-1">
                 <button
                   type="button"

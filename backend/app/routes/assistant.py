@@ -311,6 +311,7 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
                         yield sse("delta", {"text": payload})
                     elif kind == "status":
                         searches_seen += 1  # billed even if the reader leaves mid-search
+                        yield sse("status", {"state": payload})
                     elif kind == "clarify":
                         asked = payload
                     elif kind == "final":
