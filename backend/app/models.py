@@ -67,6 +67,9 @@ class RecipeCreate(BaseModel):
     receipt_urls: Annotated[list[Url], Field(max_length=20)] = []
     labels: Annotated[list[str], Field(max_length=30)] = []
     secrets: Annotated[list[RecipeSecret], Field(max_length=20)] = []
+    # Owner-only guidance for the Sous Chef assistant (substitutions that work,
+    # ones that don't, known pitfalls). Never rendered publicly — see AdminRecipe.
+    sous_chef_notes: LongText | None = None
 
 
 class RecipeUpdate(BaseModel):
@@ -88,6 +91,7 @@ class RecipeUpdate(BaseModel):
     receipt_urls: Annotated[list[Url], Field(max_length=20)] | None = None
     labels: Annotated[list[str], Field(max_length=30)] | None = None
     secrets: Annotated[list[RecipeSecret], Field(max_length=20)] | None = None
+    sous_chef_notes: LongText | None = None
 
 
 class Recipe(BaseModel):
@@ -113,6 +117,19 @@ class Recipe(BaseModel):
     receipt_urls: list[str] = []
     labels: list[str] = []
     secrets: list[RecipeSecret] = []
+
+
+class AdminRecipe(Recipe):
+    """The recipe as the owner sees it: everything in ``Recipe`` plus fields
+    that must never reach a reader.
+
+    ``Recipe`` is the public model and pydantic drops unknown keys, so a
+    Firestore doc carrying ``sous_chef_notes`` serialises without it on every
+    public route by construction — only admin routes and MCP tools use this
+    subclass. The Sous Chef prompt reads the raw doc instead.
+    """
+
+    sous_chef_notes: str | None = None
 
 
 class PaginatedRecipes(BaseModel):
