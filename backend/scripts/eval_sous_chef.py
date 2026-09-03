@@ -2,7 +2,7 @@
 """Golden-question eval for the Sous Chef — runs against the REAL model.
 
 Not part of CI (it costs money, roughly a cent per case). Run it before any
-change to SYSTEM_RULES or CLASSIFIER_RULES and paste the table into the PR:
+change to CORE_RULES, a spoke's rules, or ROUTER_RULES, and paste the table into the PR:
 
     docker compose exec backend python scripts/eval_sous_chef.py
     docker compose exec backend python scripts/eval_sous_chef.py --only doneness-chicken,canning-refused
@@ -10,8 +10,10 @@ change to SYSTEM_RULES or CLASSIFIER_RULES and paste the table into the PR:
 Needs ANTHROPIC_API_KEY in the environment (a personal key — the static key is
 for local runs only; production federates) and the recipes the fixture names
 published in whatever Firestore the environment points at (the emulator +
-seed.py locally). Each case goes through the same topic gate and
-build_request the endpoint uses, then rule-based checks run on the answer.
+seed.py locally). Each case goes through the same router and build_request
+the endpoint uses, then rule-based checks run on the answer. A case may name
+the spoke it should route to ("expect": {"spoke": "safety"}), and routing
+accuracy is reported on its own line.
 Exit status is non-zero if any check fails — a check that cannot run counts
 as a failure, never as a pass.
 """
@@ -29,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import settings  # noqa: E402
 from app.firestore import get_db  # noqa: E402
-from app.services import assistant  # noqa: E402
+from app.services import assistant, spokes  # noqa: E402
 from app.services.recipes import get_all_published, get_published_doc  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "sous_chef_eval.json"
@@ -43,12 +45,13 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
         return {"id": case["id"], "ok": False, "notes": [f"recipe {case['slug']} not published here"], "answer": ""}
 
     question = assistant.sanitize_question(case["question"])
-    verdict, gate_usage = await assistant.classify_topic(question)
+    spoke, _router_usage = await assistant.route(question)
     usage = None
-    if verdict == "OFF":
-        answer, refused, stop = assistant.REFUSAL_TEXT, True, "gate"
+    if spoke == spokes.OFFTOPIC_SPOKE:
+        answer, refused, stop = assistant.REFUSAL_TEXT, True, "router"
     else:
         kwargs = assistant.build_request(
+            spoke=spoke,
             recipe_doc=doc, catalogue=catalogue, question=question, history=[],
             view={"servings": doc.get("servings") or 4, "unit_system": "metric"},
             reader=case.get("reader"),
@@ -70,8 +73,10 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
     lower = answer.lower()
     words = len(answer.split())
 
+    if "spoke" in expect and spoke != expect["spoke"]:
+        notes.append(f"routed to {spoke}, expected {expect['spoke']}")
     if "refused" in expect and refused != expect["refused"]:
-        notes.append(f"expected refused={expect['refused']}, got {refused} (gate={verdict})")
+        notes.append(f"expected refused={expect['refused']}, got {refused} (spoke={spoke})")
     if expect.get("refuses_topic") and not any(m in lower for m in ("can't", "cannot", "won't", "not able", "outside")):
         notes.append("expected a decline-with-redirect")
     for needle in expect.get("mentions_temp", []):
@@ -98,6 +103,7 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
             notes.append("no catalogue title mentioned")
     if expect.get("cache_read_after_first"):
         second_kwargs = assistant.build_request(
+            spoke=spoke,
             recipe_doc=doc, catalogue=catalogue, question=question, history=[],
             view={"servings": doc.get("servings") or 4, "unit_system": "metric"}, reader=case.get("reader"),
         )
@@ -114,7 +120,8 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
 
     return {
         "id": case["id"], "ok": not [n for n in notes if not n.startswith("cache_read_input_tokens=")],
-        "gate": verdict, "stop": stop, "words": words, "notes": notes, "answer": answer,
+        "spoke": spoke, "expected_spoke": expect.get("spoke"), "stop": stop, "words": words,
+        "notes": notes, "answer": answer,
         "usage": usage,
     }
 
@@ -143,15 +150,19 @@ async def main() -> int:
     results = [await run_case(db, case, catalogue, titles) for case in cases]
 
     width = max(len(r["id"]) for r in results) if results else 4
-    print(f"{'case'.ljust(width)}  ok    gate  stop      words  notes")
+    print(f"{'case'.ljust(width)}  ok    spoke        stop      words  notes")
     for r in results:
-        print(f"{r['id'].ljust(width)}  {'PASS' if r['ok'] else 'FAIL'}  {str(r.get('gate')).ljust(4)}  {str(r.get('stop')).ljust(8)}  {str(r.get('words', '')).rjust(5)}  {'; '.join(r['notes'])}")
+        print(f"{r['id'].ljust(width)}  {'PASS' if r['ok'] else 'FAIL'}  {str(r.get('spoke')).ljust(11)}  {str(r.get('stop')).ljust(8)}  {str(r.get('words', '')).rjust(5)}  {'; '.join(r['notes'])}")
     if args.transcripts:
         for r in results:
             print(f"\n=== {r['id']} ===\n{r['answer']}")
     failed = [r for r in results if not r["ok"]]
     total = sum((r.get("usage") or {}).get("output_tokens", 0) for r in results)
+    routed = [r for r in results if r.get("expected_spoke")]
+    hits = [r for r in routed if r["spoke"] == r["expected_spoke"]]
     print(f"\n{len(results) - len(failed)}/{len(results)} passed; ~{total} output tokens")
+    if routed:
+        print(f"routing: {len(hits)}/{len(routed)} correct ({100 * len(hits) // len(routed)}%)")
     return 1 if failed else 0
 
 

@@ -69,6 +69,8 @@ export interface AskDoneEvent {
   refused: boolean
   /** Server-side web searches the answer ran; billed per search, not per token. */
   searches: number
+  /** Which specialist answered: technique, ingredients, safety, scaling, sourcing, catalogue, general, offtopic. */
+  spoke: string
   quota: QuotaInfo
 }
 
