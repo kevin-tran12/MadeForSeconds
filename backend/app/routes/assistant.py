@@ -7,7 +7,6 @@ therefore never burns a question, and an anonymous caller never reaches the
 budget check.
 """
 
-import asyncio
 import json
 import logging
 import time

@@ -13,6 +13,7 @@ import { NotFoundPage } from './pages/NotFoundPage'
 import { SupportPage } from './pages/SupportPage'
 import { SupportSuccessPage } from './pages/SupportSuccessPage'
 import { SupportCancelPage } from './pages/SupportCancelPage'
+import { SupportLinkPage } from './pages/SupportLinkPage'
 
 // Admin pages are lazy-loaded so the editor/expenses/reports code never ships
 // to public visitors
@@ -64,6 +65,7 @@ const router = createBrowserRouter([
           { path: 'support/', element: <SupportPage /> },
           { path: 'support/success/', element: <SupportSuccessPage /> },
           { path: 'support/cancel/', element: <SupportCancelPage /> },
+          { path: 'support/link/', element: <SupportLinkPage /> },
           {
             path: 'admin/',
             element: <AdminRoute />,
