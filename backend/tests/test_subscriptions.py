@@ -970,3 +970,136 @@ def test_checkout_rate_limited_after_twenty_attempts(client, mock_stripe):
 
     response = client.post("/api/subscribe/checkout", json=payload)
     assert response.status_code == 429
+
+
+# ── Account linking: checkout prefill + webhook uid ─────────────────────────
+
+_CHECKOUT = {
+    "success_url": "https://madeforseconds.com/success",
+    "cancel_url": "https://madeforseconds.com/cancel",
+    "amount_cents": 500,
+    "one_time": True,
+}
+
+
+def _as_reader(email="reader@example.com", uid="uid-reader"):
+    from app.auth import UserIdentity, optional_user
+    from app.main import app
+    app.dependency_overrides[optional_user] = lambda: UserIdentity(email, uid, False)
+
+
+def test_create_checkout_prefills_signed_in_reader(client, mock_stripe):
+    _as_reader()
+    mock_stripe.checkout.Session.create.return_value = MagicMock(url="https://stripe.com/checkout")
+    assert client.post("/api/subscribe/checkout", json=_CHECKOUT).status_code == 200
+    args = mock_stripe.checkout.Session.create.call_args[1]
+    assert args["customer_email"] == "reader@example.com"
+    assert args["client_reference_id"] == "uid-reader"
+
+
+def test_create_checkout_anonymous_has_no_prefill(client, mock_stripe):
+    mock_stripe.checkout.Session.create.return_value = MagicMock(url="https://stripe.com/checkout")
+    assert client.post("/api/subscribe/checkout", json={**_CHECKOUT, "one_time": False}).status_code == 200
+    args = mock_stripe.checkout.Session.create.call_args[1]
+    assert "customer_email" not in args and "client_reference_id" not in args
+
+
+def test_create_checkout_skips_prefill_for_dev_placeholder_email(client, mock_stripe):
+    """Stripe rejects "dev@local"; a prefilled dev checkout would fail outright."""
+    _as_reader(email="dev@local", uid="dev-admin")
+    mock_stripe.checkout.Session.create.return_value = MagicMock(url="https://stripe.com/checkout")
+    assert client.post("/api/subscribe/checkout", json=_CHECKOUT).status_code == 200
+    assert "customer_email" not in mock_stripe.checkout.Session.create.call_args[1]
+
+
+def test_apply_subscription_checkout_stores_uid_from_client_reference_id():
+    from app.routes.subscriptions import _apply_subscription_checkout
+    base = {"customer": "cus_1", "subscription": "sub_1", "customer_details": {"email": "a@b.com"}, "amount_total": 1000}
+    txn = FakeTransaction()
+    _apply_subscription_checkout(txn, FakeDb(subscribers=FakeCollection()), {**base, "client_reference_id": "uid-1"}, None, _NOW)
+    assert txn.set_calls[0][1]["uid"] == "uid-1"
+    txn = FakeTransaction()
+    _apply_subscription_checkout(txn, FakeDb(subscribers=FakeCollection()), base, None, _NOW)
+    assert "uid" not in txn.set_calls[0][1]
+
+
+def test_apply_donation_checkout_stores_uid_on_new_and_repeat_records():
+    from app.routes.subscriptions import _apply_donation_checkout
+    data = {"customer_details": {"email": "donor@example.com"}, "amount_total": 300, "id": "sess_1", "client_reference_id": "uid-1"}
+    txn = FakeTransaction()
+    _apply_donation_checkout(txn, FakeDb(donations=FakeCollection()), data, None, _NOW)
+    assert txn.set_calls[1][1]["uid"] == "uid-1"  # [0] is the ledger row
+    txn = FakeTransaction()
+    _apply_donation_checkout(txn, FakeDb(), data, FakeSnapshot(exists=True), _NOW)
+    assert txn.update_calls[0][1]["uid"] == "uid-1"
+    txn = FakeTransaction()
+    _apply_donation_checkout(txn, FakeDb(donations=FakeCollection()), {"customer_details": {}, "amount_total": 200, "id": "sess_2"}, None, _NOW)
+    assert "uid" not in txn.set_calls[1][1]
+
+
+# ── Account linking: link-request / link-confirm ─────────────────────────────
+
+def test_link_request_is_generic_when_no_record_exists(client, mock_db):
+    from unittest.mock import AsyncMock
+    mock_db.stream.side_effect = lambda *a, **k: iter([])
+    with patch("app.routes.subscriptions.send_email", new_callable=AsyncMock) as send:
+        response = client.post("/api/subscribe/link-request", json={"email": "Nobody@Example.com"})
+    assert response.status_code == 200
+    assert response.json()["message"].startswith("If a donation exists")
+    send.assert_not_awaited()
+
+
+def test_link_request_emails_a_signed_link_when_a_record_exists(client, mock_db):
+    from unittest.mock import AsyncMock
+    mock_db.stream.side_effect = lambda *a, **k: iter([MagicMock()])
+    with patch("app.routes.subscriptions.send_email", new_callable=AsyncMock) as send:
+        response = client.post("/api/subscribe/link-request", json={"email": "Donor@Example.com"})
+    assert response.status_code == 200
+    assert response.json()["message"].startswith("If a donation exists")  # same body either way
+    send.assert_awaited_once()
+    to, subject, html = send.await_args[0]
+    assert to == "donor@example.com"
+    assert "/support/link/?token=" in html
+
+
+def test_link_confirm_requires_a_signed_in_reader(client, mock_db):
+    assert client.post("/api/subscribe/link-confirm", json={"token": "t"}).status_code == 401
+
+
+def test_link_confirm_attaches_uid_and_refreshes_supporter_status(user_client, mock_db):
+    from app.cache import cache
+    cache.clear()
+    record = MagicMock()
+    record.to_dict.return_value = {"email": "donor@example.com", "status": "active"}
+    mock_db.stream.side_effect = lambda *a, **k: iter([record])
+    with patch("app.routes.subscriptions.verify_link_token", return_value="donor@example.com"):
+        response = user_client.post("/api/subscribe/link-confirm", json={"token": "t"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["linked"] == 2  # the chained mock answers for subscribers and donations alike
+    assert body["supporter"] is True
+    assert record.reference.update.call_args[0][0]["uid"] == "uid-reader"
+    cache.clear()
+
+
+def test_link_confirm_404_when_the_email_has_no_records(user_client, mock_db):
+    mock_db.stream.side_effect = lambda *a, **k: iter([])
+    with patch("app.routes.subscriptions.verify_link_token", return_value="donor@example.com"):
+        assert user_client.post("/api/subscribe/link-confirm", json={"token": "t"}).status_code == 404
+
+
+def test_link_and_cancel_tokens_are_not_interchangeable():
+    from fastapi import HTTPException
+    from app.subscriber_auth import (
+        create_cancel_token, create_link_token, verify_cancel_token, verify_link_token,
+    )
+    assert verify_link_token(create_link_token("a@b.com")) == "a@b.com"
+    assert verify_cancel_token(create_cancel_token("a@b.com")) == "a@b.com"
+    with pytest.raises(HTTPException) as exc:
+        verify_link_token(create_cancel_token("a@b.com"))
+    assert exc.value.status_code == 400
+    with pytest.raises(HTTPException):
+        verify_cancel_token(create_link_token("a@b.com"))
+    with pytest.raises(HTTPException) as exc:
+        verify_link_token("not-a-token")
+    assert exc.value.detail == "Invalid link"

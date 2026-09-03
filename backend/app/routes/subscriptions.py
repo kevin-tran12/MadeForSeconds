@@ -7,14 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from google.cloud.firestore import Increment, transactional
 from pydantic import BaseModel, Field
 
+from ..auth import UserIdentity, optional_user, require_user
 from ..cache import cache
 from ..config import settings
 from ..firestore import get_db
 from ..log_redaction import keyed_hash
 from ..rate_limit import rate_limit
-from ..services import donation_ledger
+from ..services import donation_ledger, entitlements
 from ..services.email import send_email
-from ..subscriber_auth import create_cancel_token, verify_cancel_token
+from ..subscriber_auth import (
+    create_cancel_token,
+    create_link_token,
+    verify_cancel_token,
+    verify_link_token,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/subscribe")
@@ -111,6 +117,12 @@ def _apply_subscription_checkout(transaction, db, data: dict, existing_doc, now,
         "total_donated_cents": amount_total,
         "updated_at": now,
     }
+    # A signed-in donor's Firebase uid rides through Checkout as
+    # client_reference_id (see create_checkout) so supporter status can be
+    # matched by account, not just by whatever email Stripe collected.
+    uid = data.get("client_reference_id")
+    if uid:
+        subscriber_data["uid"] = uid
 
     # Logged by event_id, not email/customer/subscription id — Cloud Logging
     # is this project's log sink, and log access shouldn't double as
@@ -255,18 +267,22 @@ def _apply_donation_checkout(
         now=now,
     )
 
+    uid = data.get("client_reference_id")  # signed-in donor, see create_checkout
+
     if email and existing_doc:
-        transaction.update(existing_doc.reference, {
+        update = {
             "total_donated_cents": Increment(amount_total),
             "last_donation_cents": amount_total,
             "last_donated_at": now,
             "updated_at": now,
-        })
+        }
+        if uid:
+            update["uid"] = uid
+        transaction.update(existing_doc.reference, update)
         logger.info("Repeat donation: +%d cents (event=%s)", amount_total, event_id)
         return "processed"
 
-    new_ref = db.collection("donations").document()
-    transaction.set(new_ref, {
+    new_doc = {
         "email": email or "anonymous",
         "amount_cents": amount_total,
         "total_donated_cents": amount_total,
@@ -275,7 +291,11 @@ def _apply_donation_checkout(
         # No display_name yet — excluded from the public listing until
         # setup_profile sets one.
         "public_listing": False,
-    })
+    }
+    if uid:
+        new_doc["uid"] = uid
+    new_ref = db.collection("donations").document()
+    transaction.set(new_ref, new_doc)
     logger.info("New donation recorded: %d cents (event=%s)", amount_total, event_id)
     return "processed"
 
@@ -451,6 +471,14 @@ class SetupProfileResponse(BaseModel):
     note_is_public: bool
 
 
+class LinkRequest(BaseModel):
+    email: str
+
+
+class LinkConfirmRequest(BaseModel):
+    token: str
+
+
 class CancelRequest(BaseModel):
     email: str
 
@@ -476,12 +504,28 @@ def _validate_redirect_url(url: str) -> None:
     raise HTTPException(status_code=400, detail="Invalid redirect URL")
 
 
+def _account_link_kwargs(user: UserIdentity | None) -> dict:
+    """Checkout params that attach the session to a signed-in reader.
+
+    ``customer_email`` prefills (and locks) Stripe's email field so the record
+    the webhook writes carries the same address as the Google account, and
+    ``client_reference_id`` carries the Firebase uid through
+    checkout.session.completed so the record can be matched by account. An
+    anonymous checkout is still allowed — the link-request flow covers it.
+    Skipped for the dev-bypass user: "dev@local" is not an address Stripe
+    accepts, and a rejected checkout would break local testing.
+    """
+    if user is None or "." not in user.email.rsplit("@", 1)[-1]:
+        return {}
+    return {"customer_email": user.email, "client_reference_id": user.uid}
+
+
 @router.post(
     "/checkout",
     response_model=CheckoutResponse,
     dependencies=[Depends(rate_limit("checkout", 20, 3600))],
 )
-async def create_checkout(body: CheckoutRequest):
+async def create_checkout(body: CheckoutRequest, user: UserIdentity | None = Depends(optional_user)):
     """Create a Stripe Checkout session for a subscription or one-time donation."""
 
     if not settings.stripe_secret_key:
@@ -497,6 +541,7 @@ async def create_checkout(body: CheckoutRequest):
     idempotency = (
         {"idempotency_key": f"checkout-{body.idempotency_key}"} if body.idempotency_key else {}
     )
+    account = _account_link_kwargs(user)
 
     try:
         if body.one_time:
@@ -517,6 +562,7 @@ async def create_checkout(body: CheckoutRequest):
                 }],
                 success_url=body.success_url,
                 cancel_url=body.cancel_url,
+                **account,
                 **idempotency,
             )
         else:
@@ -539,6 +585,7 @@ async def create_checkout(body: CheckoutRequest):
                 }],
                 success_url=body.success_url,
                 cancel_url=body.cancel_url,
+                **account,
                 **idempotency,
             )
     except stripe.StripeError as e:
@@ -852,6 +899,84 @@ async def cancel_confirm(body: CancelConfirmRequest):
     # about the same person still correlate without logging their email.
     logger.info("Subscription canceled via email confirmation (donor=%s)", keyed_hash(email))
     return {"message": "Your subscription has been canceled. Thank you for your support!"}
+
+
+# ── Linking a past donation to a Google account ──────────────────────────────
+# Donation records are keyed by the email Stripe collected, which is often
+# not the reader's Google email. Same shape as cancellation: prove control of
+# the checkout email via a signed link, then (signed in) attach the uid.
+
+def _has_donation_record(db, email: str) -> bool:
+    for collection in ("subscribers", "donations"):
+        docs = db.collection(collection).where("email", "==", email).limit(1).stream()
+        if next(docs, None) is not None:
+            return True
+    return False
+
+
+@router.post("/link-request", dependencies=[Depends(rate_limit("link_request", 3, 600))])
+async def link_request(body: LinkRequest):
+    """Email a signed link that attaches a past donation to the reader's account."""
+    email = body.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
+
+    # Always the same message — no donor enumeration.
+    generic_msg = {"message": "If a donation exists for this email, a link has been sent."}
+    if not _has_donation_record(get_db(), email):
+        return generic_msg
+
+    token = create_link_token(email)
+    link_url = f"{settings.frontend_url}/support/link/?token={token}"
+    try:
+        await send_email(
+            email,
+            "Link your MadeForSeconds donation to your account",
+            f"""
+                <p>Hi,</p>
+                <p>Someone asked to link the donation made with this email to a
+                MadeForSeconds account.</p>
+                <p>Click the link below while signed in with Google to finish (expires in 1 hour):</p>
+                <p><a href="{link_url}">Link my donation</a></p>
+                <p>If you didn't request this, you can safely ignore this email.</p>
+                <p>— MadeForSeconds</p>
+            """,
+        )
+    except Exception:
+        logger.exception("Failed to send donation link email")
+        raise HTTPException(status_code=500, detail="Failed to send the link. Please try again.")
+
+    return generic_msg
+
+
+@router.post("/link-confirm", dependencies=[Depends(rate_limit("link_confirm", 5, 600))])
+async def link_confirm(body: LinkConfirmRequest, user: UserIdentity = Depends(require_user)):
+    """Attach the donation records behind a link token to the signed-in reader."""
+    email = verify_link_token(body.token)
+
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    linked = 0
+    for collection in ("subscribers", "donations"):
+        for doc in db.collection(collection).where("email", "==", email).stream():
+            doc.reference.update({"uid": user.uid, "updated_at": now})
+            linked += 1
+    if not linked:
+        raise HTTPException(status_code=404, detail="No donation found for that email")
+
+    # The supporter verdict is cached per reader for 5 minutes; refresh it so
+    # the perk shows up on the very next /api/me.
+    entitlements.forget_supporter(user.email, user.uid)
+    supporter = entitlements.is_supporter(db, user.email, user.uid)
+    logger.info(
+        "Donation linked to account (donor=%s, reader=%s, records=%d)",
+        keyed_hash(email), keyed_hash(user.email), linked,
+    )
+    return {
+        "message": "Your donation is now linked to your account.",
+        "linked": linked,
+        "supporter": supporter,
+    }
 
 
 _SUPPORTERS_MAX_LIMIT = 100

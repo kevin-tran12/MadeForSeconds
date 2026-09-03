@@ -261,6 +261,20 @@ export const subscriberApi = {
       body: JSON.stringify({ token }),
     }),
 
+  /** Email a signed link that attaches a past donation (made with `email`) to the reader's account. */
+  linkRequest: (email: string) =>
+    apiFetch<{ message: string }>('/api/subscribe/link-request', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+
+  /** Finish linking; the caller must be signed in (apiFetch attaches the token). */
+  linkConfirm: (token: string) =>
+    apiFetch<{ message: string; linked: number; supporter: boolean }>('/api/subscribe/link-confirm', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
   listSupporters: () =>
     apiFetch<{ display_name: string; note?: string }[]>('/api/subscribe/supporters'),
 }
