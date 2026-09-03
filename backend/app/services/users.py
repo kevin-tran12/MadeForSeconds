@@ -40,15 +40,20 @@ def _as_utc(value) -> datetime | None:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def clean_notes(text: str | None) -> str:
+def clean_text(text: str | None, limit: int) -> str:
     """Reader-written free text: NFC-normalise, drop control and zero-width
-    characters, collapse whitespace, cap the length."""
+    characters, collapse whitespace, cap the length. Shared by the cooking
+    notes here and by the Sous Chef's question/history sanitiser."""
     if not text:
         return ""
     text = unicodedata.normalize("NFC", text)
     text = _CONTROL_RE.sub("", text)
     text = re.sub(r"\s+", " ", text).strip()
-    return text[:MAX_EXPERIENCE_NOTES]
+    return text[:limit]
+
+
+def clean_notes(text: str | None) -> str:
+    return clean_text(text, MAX_EXPERIENCE_NOTES)
 
 
 def cooking_experience_from(data: dict | None) -> dict | None:
