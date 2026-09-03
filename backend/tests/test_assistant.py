@@ -717,6 +717,23 @@ def test_ask_upstream_busy_refunds_the_question(user_client, recipe_db, configur
     assert ent.day_used == 0
 
 
+def test_ask_reports_a_failed_federation_exchange_instead_of_tearing_the_stream(user_client, recipe_db, configured, caplog):
+    """WorkloadIdentityError subclasses AnthropicError, not APIStatusError, so
+    it escaped the upstream handler: the stream died mid-response, the reader
+    got an empty bubble, and the question was still consumed."""
+    caplog.set_level(logging.ERROR)
+    failure = anthropic.WorkloadIdentityError("Token exchange failed (HTTP 401)")
+    client = FakeAnthropic(stream_error=failure)
+    with patch("app.services.assistant._get_client", return_value=client):
+        _, body = _ask(user_client)
+
+    events = _parse_sse(body)
+    assert events[-1] == ("error", {"code": "upstream_error", "message": "The Sous Chef dropped the pan — try again."})
+    ent = entitlements.peek_entitlement(recipe_db, "reader@example.com", "uid-reader")
+    assert ent.day_used == 0  # nothing was answered, so nothing is owed
+    assert "Workload identity" in caplog.text  # points the operator at the deny reason
+
+
 def test_ask_upstream_error_event(user_client, recipe_db, configured):
     client = FakeAnthropic(stream_error=_connection_error())
     with patch("app.services.assistant._get_client", return_value=client):
