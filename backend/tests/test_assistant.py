@@ -446,11 +446,14 @@ class TestWebSearchTool:
         assert tool["allowed_callers"] == ["direct"]
         assert tool["user_location"] == {"type": "approximate", "country": "US"}
         assert tool["allowed_domains"] == settings.assistant_search_domain_list
-        assert "weee.com" in tool["allowed_domains"]
+        # .count(), not `in`: an `in` against a URL-ish value reads to CodeQL as
+        # substring sanitisation (py/incomplete-url-substring-sanitization).
+        assert tool["allowed_domains"].count("weee.com") == 1
 
     def test_the_shop_links_ride_inside_the_cached_recipe_block(self):
         block = self._kwargs()["messages"][0]["content"][0]["text"]
-        assert "<stores>" in block and "weee.com/en/search?keyword=whole+chicken" in block
+        assert "<stores>" in block
+        assert f"- whole chicken: {assistant.weee_search_url('whole chicken')}" in block
         assert self._kwargs()["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
         assert "<stores>" not in self._kwargs(spoke="ingredients")["messages"][0]["content"][0]["text"]
 
