@@ -22,6 +22,25 @@
 # <image>` against a fresh build past the expiry date; drop whichever
 # entries Debian has since fixed, re-date the rest with updated
 # justification if they're somehow still open.
+#
+# A second, categorically different kind of entry starts below: a source
+# package match. Debian builds many binary packages from one source package,
+# and a CVE is filed against the source. Trivy therefore flags every binary
+# package built from it, whether or not the defective program is one of them.
+# libsystemd0 and libudev1 are built from the systemd source and ship exactly
+# one shared library each (libsystemd.so.0, libudev.so.1); apt, coreutils,
+# util-linux, bsdutils and libpam-modules link against them for journald
+# support, which is the only reason they are in the image. The systemd
+# binaries themselves — systemctl, systemd-homed, homectl, userdbctl, PID 1 —
+# are not installed at all (`docker run <image> command -v ...` finds none of
+# them, and there is no /sbin/init; the only other systemd content is a few
+# inert unit files dropped by apt and util-linux with no service manager to
+# read them). So a systemd CVE in a daemon we do not ship is a false positive
+# here, not an accepted risk, and expect this to recur: every future systemd
+# CVE will flag these same two libraries for as long as the base image ships
+# them. Verify the claim before adding one — check which binary package the
+# defect actually lives in, and confirm it is absent from the image — rather
+# than assuming every systemd CVE is harmless.
 CVE-2026-41992  # gzip — no fix published — added 2026-09-01, expires 2026-10-01
 CVE-2026-54369  # libacl1 — no fix published — added 2026-09-01, expires 2026-10-01
 CVE-2025-69720  # ncurses (libncursesw6/libtinfo6/ncurses-base/ncurses-bin) — no fix published — added 2026-09-01, expires 2026-10-01
@@ -35,3 +54,5 @@ CVE-2026-48962  # perl-base (perl-IO-Compress) — no fix published — added 20
 CVE-2026-57432  # perl-base — no fix published — added 2026-09-01, expires 2026-10-01
 CVE-2026-57433  # perl-base (Storable) — no fix published — added 2026-09-01, expires 2026-10-01
 CVE-2026-9538   # perl-base (perl-Archive-Tar) — no fix published — added 2026-09-01, expires 2026-10-01
+# Source-package match, not a reachable defect — see the note above.
+CVE-2026-16742  # libsystemd0/libudev1 — the bug is in systemd-homed, which this image does not install; local privesc needing a homed-managed user, an unlocked home and a writable ~/.identity, none of which exist here — added 2026-09-03, expires 2026-10-01
