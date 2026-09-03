@@ -26,7 +26,9 @@ _EMAIL_RE = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]*[a-z]{2,}\b", re.I)
 _SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 _ID_PHRASE_RE = re.compile(
     r"\b(?:social\s+security|ssn|passport|driver'?s?\s+licen[cs]e|licen[cs]e\s+(?:number|no)|"
-    r"national\s+id|id\s+number)\b[^.\n]{0,24}?[A-Z0-9][A-Z0-9-]{4,}",
+    # The id itself has to contain a digit, or "passport number check" reads
+    # as an id number.
+    r"national\s+id|id\s+number)\b[^.\n]{0,24}?(?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]{4,}",
     re.I,
 )
 

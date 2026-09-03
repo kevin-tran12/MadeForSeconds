@@ -54,6 +54,7 @@ def test_finds_personal_information(text, kind):
         "12 ct eggs",
         "2 hours drive from the market",
         "1 unit of rennet",
+        "do I need a passport number check for this cheese",
         "I have 2 Le Creuset Dutch ovens",
         "step 1 2 3 4 5 6 7 8 9 10 11 12 13 14",
         "cook 3 whole chickens way more often",
