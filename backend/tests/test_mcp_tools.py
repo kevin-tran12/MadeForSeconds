@@ -634,3 +634,50 @@ class TestSousChefNotesTools:
     def test_get_recipe_returns_the_owner_view(self, db):
         db.get.return_value = _doc(sous_chef_notes="use day-old rice")
         assert mcp_server.get_recipe(recipe_id="doc-id")["sous_chef_notes"] == "use day-old rice"
+
+# ── Social kit ────────────────────────────────────────────────────────────────
+
+def _pages_doc(exists=True, **data):
+    doc = MagicMock()
+    doc.exists = exists
+    doc.to_dict.return_value = data
+    return doc
+
+
+class TestSocialKit:
+    def test_defaults_apply_when_no_social_page_exists(self, db):
+        db.get.side_effect = [_doc(id="r1", published=True, categories=["Mains"], labels=["Chicken Rice"]), _pages_doc(exists=False)]
+        with patch("app.mcp_server.settings") as s:
+            s.frontend_url = "https://madeforseconds.com/"
+            kit = mcp_server.get_social_kit(recipe_id="r1")
+        assert kit["recipe"]["url"] == "https://madeforseconds.com/recipes/test-recipe/"
+        assert kit["recipe"]["key_ingredients"] == ["Water"]
+        assert kit["hashtags"]["brand"][0] == "madeforseconds"
+        assert kit["hashtags"]["recipe"] == ["mains", "chickenrice"]
+        assert "Authentic" in kit["brand_voice"]["tone"]
+        assert kit["platforms"]["instagram"]["max_hashtags"] == 30
+        assert kit["platforms"]["tiktok"]["note"].startswith("Draft only")
+        assert any("approval" in step for step in kit["workflow"])
+
+    def test_owner_overrides_from_the_social_page_win_and_tags_are_normalised(self, db):
+        db.get.side_effect = [
+            _doc(id="r1", published=True),
+            _pages_doc(tone="Cheeky and warm", hashtags_brand="MadeForSeconds, #Home Cooking, madeforseconds, ", do=""),
+        ]
+        with patch("app.mcp_server.settings") as s:
+            s.frontend_url = "https://madeforseconds.com"
+            kit = mcp_server.get_social_kit(slug="test-recipe") if False else mcp_server.get_social_kit(recipe_id="r1")
+        assert kit["brand_voice"]["tone"] == "Cheeky and warm"
+        assert kit["brand_voice"]["do"].startswith("Lead with the dish")  # blank override falls back
+        assert kit["hashtags"]["brand"] == ["madeforseconds", "homecooking"]
+
+    def test_unknown_recipe_is_a_structured_error(self, db):
+        db.get.return_value = _doc(exists=False)
+        result = mcp_server.get_social_kit(recipe_id="ghost")
+        assert "error" in result
+
+    def test_social_status_passes_through_the_refresh_record(self, db):
+        with patch("app.mcp_server.social.status", return_value={"instagram": {"configured": True, "expires_at": "2026-11-01T00:00:00+00:00"}}):
+            result = mcp_server.social_status()
+        assert result["platforms"]["instagram"]["expires_at"].startswith("2026-11-01")
+        assert "1st and the 15th" in result["refresh_schedule"]

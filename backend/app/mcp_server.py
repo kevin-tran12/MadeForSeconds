@@ -41,6 +41,7 @@ from .models_expense import (
 )
 from .routes.expenses import _write_revision_in_transaction
 from .services import instagram
+from .services import social
 from .services import recipes as recipe_service
 from .services import uploads
 
@@ -59,6 +60,14 @@ update_recipe to iterate → request_image_upload + update_recipe(image_url=...)
 to attach a photo → publish_recipe. Use list_recipes/get_recipe to inspect
 existing content before creating — duplicate titles are rejected with a
 pointer to the existing recipe.
+
+Social workflow (after publish_recipe): call get_social_kit(slug=...) for the
+recipe summary, brand voice, hashtag tiers, and per-platform limits. Draft an
+Instagram caption and a TikTok caption + 15-second shot list, show both to the
+operator, and only after explicit approval call
+publish_recipe_to_instagram(slug, caption=...). TikTok is draft-only — hand
+the draft over for manual posting. If a post fails with an auth error, call
+social_status() and report when the token expires or last failed.
 
 Note: the backend scales to zero; the first call after idle may take ~10s.
 If a call times out, retry once before reporting an error."""
@@ -620,6 +629,142 @@ def publish_recipe_to_instagram(
     result = instagram.publish_image(recipe.image_url, text)
     logger.info("MCP publish_recipe_to_instagram: recipe=%s media=%s", recipe.slug, result.get("id"))
     return {**result, "slug": recipe.slug, "title": recipe.title, "message": "Posted to Instagram."}
+
+
+# ── Social kit ────────────────────────────────────────────────────────────────
+# Everything Claude needs to draft posts consistently. Brand voice and hashtag
+# tiers live on Firestore pages/social (editable from the admin Pages UI —
+# see src/pages/AdminPageEditPage.tsx); these defaults apply until the owner
+# writes their own. No server-side LLM call anywhere in this flow: the MCP
+# client is the model that drafts.
+
+_SOCIAL_KIT_DEFAULTS = {
+    "tone": (
+        "Authentic, approachable, personal, culturally respectful. Teach something "
+        "in every post; sound like a friend who cooks, not a brand."
+    ),
+    "do": (
+        "Lead with the dish and the moment; name the cuisine and the technique; "
+        "give one concrete tip; end by inviting a question."
+    ),
+    "dont": (
+        "No clickbait, no 'secret hack', no all-caps, at most one emoji per line, "
+        "no health or nutrition claims."
+    ),
+    "cta": "Full recipe on madeforseconds.com — link in bio.",
+    "hashtags_brand": "madeforseconds, homecooking",
+    "hashtags_cuisine": "asianfood, malaysianfood, singaporefood, vietnamesefood, chinesefood, thaifood",
+    "hashtags_niche": "laksa, hainanesechickenrice, bakkutteh, rendang, satay",
+}
+
+_SOCIAL_PLATFORMS = {
+    "instagram": {
+        "max_caption_chars": instagram.MAX_CAPTION_CHARS,
+        "max_hashtags": instagram.MAX_HASHTAGS,
+        "posts_per_day": 25,
+        "image": "public https JPEG — the recipe's GCS image works as-is",
+        "publish_with": "publish_recipe_to_instagram(slug, caption=...) or publish_instagram_post(image_url, caption)",
+    },
+    "tiktok": {
+        "max_caption_chars": 2200,
+        "note": (
+            "Draft only. TikTok's Content Posting API needs an audited app and photo/video "
+            "served from a verified domain (backlogged) — hand the caption and shot list to "
+            "the operator to post manually."
+        ),
+    },
+}
+
+
+def _social_settings(db) -> dict:
+    doc = db.collection("pages").document("social").get()
+    data = (doc.to_dict() or {}) if getattr(doc, "exists", False) else {}
+    overrides = {k: v for k, v in data.items() if isinstance(v, str) and v.strip()}
+    return {**_SOCIAL_KIT_DEFAULTS, **overrides}
+
+
+def _tag_list(csv: str) -> list[str]:
+    tags: list[str] = []
+    for raw in csv.split(","):
+        tag = _hashtag(raw.strip().lstrip("#"))
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+@mcp.tool()
+@_tool_errors
+def get_social_kit(recipe_id: str = "", slug: str = "") -> dict:
+    """Everything needed to draft social posts for a recipe.
+
+    Returns {recipe, brand_voice, hashtags, platforms, workflow}: a recipe
+    summary with its public URL, image, key ingredients and "Chef's Secrets"
+    titles; the site's brand voice (tone / do / don't / call to action);
+    hashtag tiers (brand — always; recipe — from its categories and labels;
+    cuisine and niche — pick a few); per-platform limits; and the steps to
+    follow. Draft, show the operator, and only publish after approval.
+    """
+    recipe = _lookup_recipe(recipe_id=recipe_id, slug=slug)
+    voice = _social_settings(get_db())
+
+    ingredients = recipe.ingredients or [ing for comp in (recipe.components or []) for ing in comp.ingredients]
+    key_ingredients = [ing.item for ing in ingredients if ing.item][:8]
+    recipe_tags: list[str] = []
+    for raw in [*recipe.categories, *recipe.labels]:
+        tag = _hashtag(raw)
+        if tag and tag not in recipe_tags:
+            recipe_tags.append(tag)
+
+    return {
+        "recipe": {
+            "id": recipe.id,
+            "slug": recipe.slug,
+            "title": recipe.title,
+            "url": f"{settings.frontend_url.rstrip('/')}/recipes/{recipe.slug}/",
+            "description": recipe.description,
+            "about": (recipe.about or "")[:600] or None,
+            "image_url": recipe.image_url,
+            "categories": recipe.categories,
+            "labels": recipe.labels,
+            "servings": recipe.servings,
+            "prep_time_minutes": recipe.prep_time_minutes,
+            "cook_time_minutes": recipe.cook_time_minutes,
+            "difficulty": recipe.difficulty,
+            "key_ingredients": key_ingredients,
+            "secret_titles": [s.title for s in recipe.secrets],
+        },
+        "brand_voice": {k: voice[k] for k in ("tone", "do", "dont", "cta")},
+        "hashtags": {
+            "brand": _tag_list(voice["hashtags_brand"]),
+            "recipe": recipe_tags,
+            "cuisine": _tag_list(voice["hashtags_cuisine"]),
+            "niche": _tag_list(voice["hashtags_niche"]),
+        },
+        "platforms": _SOCIAL_PLATFORMS,
+        "workflow": [
+            "Draft an Instagram caption: a hook line, two or three lines on the dish or the "
+            "technique, one concrete tip, then the call to action; hashtags last — brand + recipe "
+            "+ a few cuisine/niche, at most 30 in total.",
+            "Draft a TikTok caption (<= 2200 chars) plus a 15-second shot list of five or six shots.",
+            "Show both drafts to the operator and wait for explicit approval — never post unasked.",
+            "After approval: publish_recipe_to_instagram(slug, caption=<approved caption>) — the "
+            "recipe must have an image. TikTok is draft-only: hand it over for manual posting.",
+            "Report the Instagram permalink back.",
+        ],
+    }
+
+
+@mcp.tool()
+@_tool_errors
+def social_status() -> dict:
+    """Per-platform social publishing health: configured?, last successful
+    refresh, token expiry, and the last error — as recorded by the
+    twice-monthly social-token-refresh job. Use it to tell the operator when
+    a token has lapsed and a re-auth is needed."""
+    return {
+        "platforms": social.status(get_db()),
+        "refresh_schedule": "04:00 UTC on the 1st and the 15th (Cloud Scheduler job social-token-refresh)",
+    }
 
 
 # ── Expense helpers ───────────────────────────────────────────────────────────

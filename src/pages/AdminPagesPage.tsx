@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 const PAGES = [
   { id: 'home', label: 'Home', description: 'Hero title and subtitle shown on the landing page.' },
   { id: 'about', label: 'About', description: 'Heading, body paragraphs, callout box, and sidebar text.' },
+  { id: 'social', label: 'Social kit', description: 'Brand voice and hashtag tiers the MCP get_social_kit tool hands to Claude when drafting posts.' },
 ]
 
 export function AdminPagesPage() {
