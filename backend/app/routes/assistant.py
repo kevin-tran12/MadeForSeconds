@@ -124,13 +124,11 @@ def _record_spend(cost_micro: int) -> int | None:
         return None
 
 
-def _usage_dict(usage) -> dict | None:
+def _usage_dict(usage: dict | None) -> dict | None:
+    """The token counters the client sees; searches ride in `searches`."""
     if usage is None:
         return None
-    return {
-        field: int(getattr(usage, field, None) or 0)
-        for field in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
-    }
+    return {field: int(usage.get(field, 0)) for field in llm_budget.TOKEN_FIELDS}
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -230,6 +228,7 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
     sent_any = False
     finished = False
     answer_parts: list[str] = []
+    searches_seen = 0
     prompt_chars = len(assistant.SYSTEM_RULES) + sum(len(json.dumps(m)) for m in kwargs["messages"])
 
     yield sse("meta", {"quota": ent.to_dict()})
@@ -266,8 +265,12 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
                     answer_parts.append(payload)
                     sent_any = True
                     yield sse("delta", {"text": payload})
-                else:
+                elif kind == "status":
+                    searches_seen += 1  # billed even if the reader leaves mid-search
+                elif kind == "final":
                     final = payload
+                # "clarify" and "sources" reach the client once the spokes that
+                # can produce them exist; the model has no tools to call yet.
         except anthropic.RateLimitError:
             finished = True
             if not sent_any:
@@ -291,6 +294,7 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
         cost = gate_cost + (llm_budget.cost_micro_usd(usage, settings.assistant_model) if usage is not None else 0)
         month = _record_spend(cost)
         stop_reason = final.stop_reason if final is not None else None
+        searches = final.searches if final is not None else 0
 
         if stop_reason == "refusal":
             yield sse("error", {"code": "refused", "message": assistant.API_REFUSAL_TEXT})
@@ -311,14 +315,15 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
             "usage": _usage_dict(usage),
             "cost_micro_usd": cost,
             "stop_reason": stop_reason,
-            "truncated": stop_reason == "max_tokens",
+            "truncated": final.truncated if final is not None else False,
             "refused": False,
+            "searches": searches,
             "quota": ent.to_dict(),
         })
         logger.info(
-            "assistant answered slug=%s gate=ON in=%d cache_read=%d cache_write=%d out=%d cost_micro=%d month_micro=%s stop=%s req=%s user=%s ms=%d",
+            "assistant answered slug=%s gate=ON in=%d cache_read=%d cache_write=%d out=%d searches=%d cost_micro=%d month_micro=%s stop=%s req=%s user=%s ms=%d",
             slug, u.get("input_tokens", 0), u.get("cache_read_input_tokens", 0),
-            u.get("cache_creation_input_tokens", 0), u.get("output_tokens", 0), cost, month,
+            u.get("cache_creation_input_tokens", 0), u.get("output_tokens", 0), searches, cost, month,
             stop_reason, final.request_id if final is not None else None, user_tag,
             int((time.monotonic() - started) * 1000),
         )
@@ -326,7 +331,9 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
         if not finished:
             # The client went away mid-stream: the usage never arrived, so
             # charge a conservative estimate rather than leave spend unaccounted.
-            estimate = gate_cost + llm_budget.estimate_micro(prompt_chars, sum(len(p) for p in answer_parts), settings.assistant_model)
+            estimate = gate_cost + llm_budget.estimate_micro(
+                prompt_chars, sum(len(p) for p in answer_parts), settings.assistant_model, searches=searches_seen
+            )
             _record_spend(estimate)
             logger.info("assistant: client disconnected slug=%s user=%s estimated_micro=%d", slug, user_tag, estimate)
 

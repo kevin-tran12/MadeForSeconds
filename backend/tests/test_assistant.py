@@ -3,6 +3,7 @@
 in for both the topic gate (messages.create) and the answer (messages.stream)."""
 
 import json
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -12,23 +13,61 @@ import pytest
 
 from app.cache import MemoryCache, cache
 from app.config import settings
-from app.services import assistant, entitlements
+from app.services import assistant, entitlements, llm_budget
 
 # ── Fakes ─────────────────────────────────────────────────────────────────────
 
 def _usage(**counts):
+    """The SDK's Usage object: four token counters, plus a nested
+    server_tool_use only when the answer actually searched."""
     base = {"input_tokens": 412, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 3180, "output_tokens": 221}
+    searches = counts.pop("web_search_requests", None)
     base.update(counts)
-    return SimpleNamespace(**base)
+    usage = SimpleNamespace(**base)
+    usage.server_tool_use = (
+        None if searches is None else SimpleNamespace(web_search_requests=searches, web_fetch_requests=0)
+    )
+    return usage
 
 
-def _final(stop_reason="end_turn", usage=None):
-    return SimpleNamespace(usage=usage or _usage(), stop_reason=stop_reason, _request_id="req_test")
+def _text_event(text):
+    return SimpleNamespace(type="text", text=text, snapshot=text)
+
+
+def _thinking_event(text="weighing the poach time"):
+    return SimpleNamespace(type="thinking", thinking=text, snapshot=text)
+
+
+def _search_event():
+    """content_block_start for a server-side search."""
+    block = SimpleNamespace(type="server_tool_use", name="web_search", input={"query": "belacan"})
+    return SimpleNamespace(type="content_block_start", index=0, content_block=block)
+
+
+def _citation(url, title="A source"):
+    return SimpleNamespace(type="web_search_result_location", url=url, title=title, cited_text="…", encrypted_index="i")
+
+
+def _text_block(text, citations=None):
+    return SimpleNamespace(type="text", text=text, citations=citations)
+
+
+def _clarify_block(questions):
+    return SimpleNamespace(type="tool_use", id="tu_1", name=assistant.CLARIFY_TOOL_NAME, input={"questions": questions})
+
+
+def _final(stop_reason="end_turn", usage=None, content=None):
+    return SimpleNamespace(
+        usage=usage or _usage(),
+        stop_reason=stop_reason,
+        _request_id="req_test",
+        content=[_text_block("Sear it hard, then rest it.")] if content is None else content,
+    )
 
 
 class _FakeStream:
-    def __init__(self, chunks, final, error=None):
-        self._chunks, self._final, self._error = chunks, final, error
+    def __init__(self, events, final, error=None):
+        self._events, self._final, self._error = events, final, error
 
     async def __aenter__(self):
         if self._error is not None:
@@ -38,11 +77,10 @@ class _FakeStream:
     async def __aexit__(self, *exc):
         return False
 
-    @property
-    def text_stream(self):
+    def __aiter__(self):
         async def gen():
-            for chunk in self._chunks:
-                yield chunk
+            for event in self._events:
+                yield event
         return gen()
 
     async def get_final_message(self):
@@ -50,9 +88,15 @@ class _FakeStream:
 
 
 class FakeAnthropic:
-    def __init__(self, *, chunks=("Sear it hard, ", "then rest it."), final=None, verdict="ON",
-                 stream_error=None, classify_error=None):
-        self.chunks, self.final, self.verdict = chunks, final or _final(), verdict
+    """Stands in for both Claude calls: messages.create (the topic gate) and
+    messages.stream (the answer). `turns` is a queue of (events, final) pairs
+    so a pause_turn can be followed by its continuation; the last pair is
+    reused if the stream is opened again."""
+
+    def __init__(self, *, chunks=("Sear it hard, ", "then rest it."), final=None, turns=None,
+                 verdict="ON", stream_error=None, classify_error=None):
+        self.turns = deque(turns or [([_text_event(c) for c in chunks], final or _final())])
+        self.verdict = verdict
         self.stream_error, self.classify_error = stream_error, classify_error
         self.stream_calls: list[dict] = []
         self.create_calls: list[dict] = []
@@ -60,7 +104,8 @@ class FakeAnthropic:
 
     def _stream(self, **kwargs):
         self.stream_calls.append(kwargs)
-        return _FakeStream(self.chunks, self.final, self.stream_error)
+        events, final = self.turns[0] if len(self.turns) == 1 else self.turns.popleft()
+        return _FakeStream(events, final, self.stream_error)
 
     async def _create(self, **kwargs):
         self.create_calls.append(kwargs)
@@ -250,6 +295,87 @@ class TestBuildRequest:
         assert all(sentinel in rules for sentinel in assistant.LEAK_SENTINELS)
 
 
+# ── Streaming ─────────────────────────────────────────────────────────────────
+
+class TestStreamAnswer:
+    """The event iterator behind every answer: text, server-side searches,
+    tool calls, citations, and the single pause_turn continuation."""
+
+    @staticmethod
+    async def _drain(client, kwargs=None):
+        with patch("app.services.assistant._get_client", return_value=client):
+            return [pair async for pair in assistant.stream_answer(kwargs or {"model": "m", "messages": []})]
+
+    @pytest.mark.asyncio
+    async def test_streams_text_and_never_thinking(self):
+        client = FakeAnthropic(turns=[([_thinking_event(), _text_event("Poach "), _text_event("gently.")], _final())])
+        events = await self._drain(client)
+        assert [kind for kind, _ in events] == ["delta", "delta", "final"]
+        assert "".join(p for kind, p in events if kind == "delta") == "Poach gently."
+
+    @pytest.mark.asyncio
+    async def test_announces_every_server_side_search(self):
+        client = FakeAnthropic(turns=[
+            ([_search_event(), _text_event("Weee! carries it."), _search_event()], _final(usage=_usage(web_search_requests=2))),
+        ])
+        events = await self._drain(client)
+        assert [kind for kind, _ in events] == ["status", "delta", "status", "final"]
+        assert events[0][1] == "searching"
+        final = events[-1][1]
+        assert final.searches == 2 and final.usage["web_search_requests"] == 2
+
+    @pytest.mark.asyncio
+    async def test_yields_the_clarifying_questions_the_model_asked(self):
+        asked = [{"text": "What's your zip code?", "kind": "location"}, {"text": "Wok or skillet?"}, {"kind": "other"}, {"text": 5}]
+        client = FakeAnthropic(turns=[([], _final(stop_reason="tool_use", content=[_clarify_block(asked)]))])
+        events = await self._drain(client)
+        assert [kind for kind, _ in events] == ["clarify", "final"]
+        assert events[0][1] == [
+            {"text": "What's your zip code?", "kind": "location"},
+            {"text": "Wok or skillet?", "kind": "other"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_yields_sources_deduped_by_url(self):
+        content = [
+            _text_block("Belacan is shrimp paste.", [_citation("https://a.example/1", "A"), _citation("https://b.example/2", None)]),
+            _text_block(" It keeps for months.", [_citation("https://a.example/1", "A again")]),
+        ]
+        client = FakeAnthropic(turns=[([_text_event("Belacan is shrimp paste.")], _final(content=content))])
+        events = await self._drain(client)
+        assert [kind for kind, _ in events] == ["delta", "sources", "final"]
+        assert events[1][1] == [
+            {"url": "https://a.example/1", "title": "A"},
+            {"url": "https://b.example/2", "title": "https://b.example/2"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_continues_once_after_a_pause_turn_and_sums_the_usage(self):
+        paused = _final(stop_reason="pause_turn", usage=_usage(output_tokens=100, web_search_requests=1),
+                        content=[_text_block("Looking that up…")])
+        done = _final(usage=_usage(output_tokens=50, web_search_requests=1))
+        client = FakeAnthropic(turns=[([_text_event("Looking that up…")], paused), ([_text_event(" Weee! carries it.")], done)])
+        events = await self._drain(client, {"model": "m", "messages": [{"role": "user", "content": "where do I buy belacan?"}]})
+
+        assert [kind for kind, _ in events] == ["delta", "delta", "final"]
+        assert len(client.stream_calls) == 2
+        replayed = client.stream_calls[1]["messages"]
+        assert replayed[0] == {"role": "user", "content": "where do I buy belacan?"}
+        assert replayed[1] == {"role": "assistant", "content": paused.content}
+        final = events[-1][1]
+        assert final.stop_reason == "end_turn" and final.truncated is False
+        assert final.usage["output_tokens"] == 150 and final.usage["input_tokens"] == 824
+        assert final.searches == 2  # both calls are billed
+
+    @pytest.mark.asyncio
+    async def test_a_second_pause_is_truncated_rather_than_continued_again(self):
+        paused = _final(stop_reason="pause_turn", content=[_text_block("…")])
+        client = FakeAnthropic(turns=[([], paused), ([], paused)])
+        final = (await self._drain(client))[-1][1]
+        assert len(client.stream_calls) == 2
+        assert final.stop_reason == "pause_turn" and final.truncated is True
+
+
 # ── Route: /ask ───────────────────────────────────────────────────────────────
 
 def _parse_sse(raw: bytes) -> list[tuple[str, dict]]:
@@ -387,6 +513,20 @@ def test_ask_marks_truncated_answers(user_client, recipe_db, configured):
     with patch("app.services.assistant._get_client", return_value=client):
         _, body = _ask(user_client)
     assert _parse_sse(body)[-1][1]["truncated"] is True
+
+
+def test_ask_reports_and_charges_for_server_side_searches(user_client, recipe_db, configured):
+    client = FakeAnthropic(turns=[
+        ([_search_event(), _text_event("Weee! carries it.")], _final(usage=_usage(web_search_requests=2))),
+    ])
+    with patch("app.services.assistant._get_client", return_value=client):
+        _, body = _ask(user_client)
+    events = _parse_sse(body)
+    assert [e for e, _ in events] == ["meta", "delta", "done"]  # "searching" is not a client event yet
+    done = events[-1][1]
+    assert done["searches"] == 2
+    assert done["cost_micro_usd"] == 3670 + 65 + 2 * llm_budget.WEB_SEARCH_MICRO_PER_REQUEST
+    assert set(done["usage"]) == set(llm_budget.TOKEN_FIELDS)
 
 
 def test_ask_api_refusal_and_rule_leak_are_replaced(user_client, recipe_db, configured):
