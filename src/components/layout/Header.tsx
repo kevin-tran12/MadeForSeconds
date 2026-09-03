@@ -6,7 +6,7 @@ import { Button } from '../ui/Button'
 import { SearchWithSuggestions } from '../search/SearchWithSuggestions'
 
 export function Header() {
-  const { isAdmin, logout } = useAuth()
+  const { user, isAdmin, firstName, logout } = useAuth()
   const { isDark, toggle: toggleDark } = useDarkMode()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -134,10 +134,17 @@ export function Header() {
             Donate
           </Link>
 
-          {isAdmin && (
-            <Button variant="ghost" size="sm" onClick={logout}>
-              Log out
-            </Button>
+          {user && (
+            <>
+              {firstName && (
+                <span className="text-xs text-content-muted" title={user.email ?? undefined}>
+                  Hi, {firstName}
+                </span>
+              )}
+              <Button variant="ghost" size="sm" onClick={logout}>
+                Log out
+              </Button>
+            </>
           )}
         </div>
 
@@ -204,10 +211,13 @@ export function Header() {
               >
                 Donate
               </Link>
-              {isAdmin && (
-                <Button variant="ghost" size="sm" onClick={logout}>
-                  Log out
-                </Button>
+              {user && (
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-content-muted">{firstName ? `Hi, ${firstName}` : user.email}</span>
+                  <Button variant="ghost" size="sm" onClick={logout}>
+                    Log out
+                  </Button>
+                </div>
               )}
             </div>
           </nav>
