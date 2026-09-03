@@ -21,10 +21,11 @@ def _usage(**counts):
     return SimpleNamespace(**base)
 
 
-def _settings(is_dev=True, cap=10.0):
+def _settings(is_dev=True, cap=10.0, search_cap=300):
     s = MagicMock()
     s.is_dev = is_dev
     s.assistant_monthly_cap_usd = cap
+    s.assistant_monthly_search_cap = search_cap
     return s
 
 
@@ -88,6 +89,31 @@ def test_add_usage_sums_every_counter_across_calls():
         "output_tokens": 150, "web_search_requests": 2,
     }
     assert budget.add_usage(budget.empty_usage(), None) == budget.empty_usage()
+
+
+def test_the_month_has_its_own_ceiling_for_searches(monkeypatch):
+    """A search is ~50x an ordinary answer, so it is capped under the cap."""
+    from app.cache import cache
+    monkeypatch.setattr(budget, "settings", _settings(search_cap=3))
+    cache.clear()
+    if hasattr(cache, "_counters"):
+        cache._counters.clear()
+
+    assert budget.searches_available() is True
+    budget.add_searches(2)
+    assert budget.get_month_searches() == 2 and budget.searches_available() is True
+    budget.add_searches(1)
+    assert budget.searches_available() is False
+
+    budget.settings.assistant_monthly_search_cap = 0
+    assert budget.searches_available() is False  # switched off entirely
+
+
+def test_searches_are_not_counted_when_the_counter_is_unavailable(monkeypatch):
+    monkeypatch.setattr(budget, "settings", _settings(is_dev=False))
+    monkeypatch.setattr(budget, "cache", MemoryCache(ttl=60))  # not durable in production
+    budget.add_searches(2)  # never raises: the spend cap is the hard stop
+    assert budget.searches_available() is False
 
 
 def test_estimate_micro_bills_the_searches_a_cut_off_stream_announced():

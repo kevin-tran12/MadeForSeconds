@@ -44,6 +44,25 @@ export function MessageList({ messages, onRate, onClarify, activity }: Props) {
             {m.truncated && (
               <p className="mt-1 px-1 text-xs text-content-muted">…that got cut short — ask me to continue.</p>
             )}
+            {m.sources?.length ? (
+              <div className="mt-1 px-1 text-xs text-content-muted">
+                <span className="font-medium">Sources</span>
+                <ul className="mt-0.5 flex flex-col gap-0.5">
+                  {m.sources.map((s) => (
+                    <li key={s.url}>
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener nofollow"
+                        className="underline decoration-dotted underline-offset-2 hover:text-brand"
+                      >
+                        {s.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             {m.clarify?.length && onClarify ? (
               <ClarifyForm questions={m.clarify} onSubmit={(answers) => onClarify(m.clarify!, answers)} />
             ) : null}

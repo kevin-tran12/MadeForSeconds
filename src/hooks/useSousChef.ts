@@ -4,7 +4,7 @@ import { ApiError } from '../lib/api-client'
 import type { Recipe } from '../lib/types'
 import type { UnitSystem } from '../lib/units'
 import type {
-  AskDoneEvent, AskErrorCode, AssistantStatus, ChatMessage, ClarifyAnswer, ClarifyQuestion, QuotaInfo,
+  AnswerSource, AskDoneEvent, AskErrorCode, AssistantStatus, ChatMessage, ClarifyAnswer, ClarifyQuestion, QuotaInfo,
 } from '../lib/types-assistant'
 
 export interface SousChefError {
@@ -132,6 +132,8 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
               patchPending((m) => ({ content: m.content + text }))
             } else if (event === 'status') {
               setActivity((data as { state?: string }).state === 'searching' ? 'Checking sources…' : null)
+            } else if (event === 'sources') {
+              patchPending({ sources: (data as { sources: AnswerSource[] }).sources })
             } else if (event === 'clarify') {
               receivedAnything = true
               clarifiedRef.current = true

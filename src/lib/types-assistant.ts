@@ -60,6 +60,12 @@ export interface ClarifyAnswer {
   text: string
 }
 
+/** A web page behind a searched answer. Shown to the reader, always. */
+export interface AnswerSource {
+  url: string
+  title: string
+}
+
 export interface AskRequest {
   slug: string
   question: string
@@ -121,4 +127,6 @@ export interface ChatMessage {
   rated?: 'up' | 'down'
   /** Present while this bubble is waiting on the reader's answers. */
   clarify?: ClarifyQuestion[]
+  /** Where a searched answer got its facts; rendered under the bubble. */
+  sources?: AnswerSource[]
 }
