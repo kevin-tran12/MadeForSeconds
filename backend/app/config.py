@@ -51,10 +51,24 @@ class Settings(BaseSettings):
     instagram_refresh_audience: str = ""  # Expected OIDC audience for the refresh endpoint
     usage_report_audience: str = ""  # Expected OIDC audience for the weekly usage report endpoint
     alert_email: str = ""  # Destination for the weekly usage report (same address as budget/uptime alerts)
+    # Sous Chef assistant (Claude API). A blank key switches the feature off —
+    # the endpoint answers 503 not_configured — rather than failing startup,
+    # so staging/E2E run without a key. See docs/DEPLOYMENT.md § Sous Chef.
+    anthropic_api_key: str = ""
+    assistant_model: str = "claude-sonnet-5"
+    assistant_classifier_model: str = "claude-haiku-4-5"
+    assistant_monthly_cap_usd: float = 10.0  # hard stop for LLM spend, metered in Redis
+    assistant_free_daily_quota: int = 5
+    assistant_supporter_daily_quota: int = 50
+    assistant_supporter_monthly_quota: int = 400
 
     @property
     def admin_email_set(self) -> set[str]:
         return {e.strip() for e in self.admin_emails.split(",") if e.strip()}
+
+    @property
+    def assistant_configured(self) -> bool:
+        return bool(self.anthropic_api_key)
 
     @property
     def instagram_configured(self) -> bool:
@@ -174,6 +188,12 @@ def validate_production_settings(s: "Settings") -> None:
         raise RuntimeError(
             "STRIPE_WEBHOOK_SECRET must be set in production — without it /api/subscribe/webhook "
             "rejects every event with an invalid-signature error, and payments silently stop recording"
+        )
+    if s.anthropic_api_key and not s.redis_url:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is set but REDIS_URL is not — the Sous Chef monthly spend cap needs a "
+            "counter that survives scale-to-zero (the in-memory fallback resets on every cold start, "
+            "which would silently un-cap LLM spend). Set REDIS_URL or unset ANTHROPIC_API_KEY."
         )
 
 

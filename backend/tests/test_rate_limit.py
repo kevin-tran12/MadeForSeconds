@@ -60,8 +60,9 @@ def test_redis_cache_init_registers_incr_with_ttl_script():
         mock_client = MagicMock()
         mock_from_url.return_value = mock_client
         RedisCache("redis://localhost:6379", ttl=100)
-        mock_client.register_script.assert_called_once()
-        script_text = mock_client.register_script.call_args[0][0]
+        # Both counter scripts: INCR (rate limits) and INCRBY (Sous Chef spend/quota).
+        assert mock_client.register_script.call_count == 2
+        script_text = mock_client.register_script.call_args_list[0][0][0]
         assert "INCR" in script_text and "EXPIRE" in script_text
 
 

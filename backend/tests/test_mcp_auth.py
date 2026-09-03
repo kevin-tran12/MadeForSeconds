@@ -228,3 +228,24 @@ class TestWorkOSTokenVerifier:
         )
         assert result is not None
         assert result.scopes == ["a", "b"]
+
+
+# ── Sous Chef settings ────────────────────────────────────────────────────────
+
+def test_prod_rejects_anthropic_key_without_redis():
+    """The monthly spend cap lives in Redis; an in-memory counter on a
+    scale-to-zero instance would reset every cold start and un-cap spend."""
+    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+        validate_production_settings(_settings(anthropic_api_key="sk-ant-test", redis_url=None))
+
+
+def test_prod_accepts_anthropic_key_with_redis():
+    s = _settings(anthropic_api_key="sk-ant-test", redis_url="rediss://default:t@example.upstash.io:6379")
+    validate_production_settings(s)
+    assert s.assistant_configured is True
+
+
+def test_blank_anthropic_key_means_feature_off_not_a_startup_failure():
+    s = _settings()
+    validate_production_settings(s)
+    assert s.assistant_configured is False
