@@ -100,6 +100,10 @@ jobs:
             export TF_VAR_anthropic_service_account_id="${{ vars.STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID }}"
             export TF_VAR_anthropic_workspace_id="${{ vars.STAGING_ANTHROPIC_WORKSPACE_ID }}"
           fi
+          if [ "${{ vars.PROD_INSTAGRAM_CONFIGURED }}" = "true" ]; then
+            export TF_VAR_instagram_user_id="ci-plan-placeholder-not-real"
+            export TF_VAR_instagram_access_token="ci-plan-placeholder-not-real"
+          fi
 
           terraform init -input=false
 

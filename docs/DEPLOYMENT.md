@@ -55,8 +55,8 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `billing_account` | GCP billing account ID, for the budget alert |
 | `monthly_budget_amount` | Budget cap in USD (default `15`) — see [Cost circuit breaker](#cost-circuit-breaker) |
 | `alert_email` | Address that receives budget and uptime alerts |
-| `instagram_user_id` | Instagram Creator account numeric ID (deprecated for now — leave blank; see [MCP server § Instagram publishing](#mcp-server-recipeexpense-automation)) |
-| `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; auto-rotated weekly after first deploy, if ever re-enabled — currently left blank) |
+| `instagram_user_id` | Instagram Creator account numeric ID (see [MCP server § Instagram publishing](#mcp-server-recipeexpense-automation)); in the pipeline this comes from the `PROD_INSTAGRAM_USER_ID` variable |
+| `instagram_access_token` | Initial long-lived Instagram token (sensitive — seeds Secret Manager; then rotated on the 1st and 15th by the `social-token-refresh` job, a 4th Scheduler job at ~$0.10/mo). Run that job by hand right after seeding — see § Instagram publishing |
 | `environment` | `production` or `development` — only these two are meaningful, injected as `ENVIRONMENT`. Defaults to `production`; leave unset unless you know why you're changing it |
 | `deployment_target` | `production` or `staging` — which GCP project's infra topology this apply is for. Distinct from `environment` above: staging still runs the app in `production` mode (real auth, TOTP, Stripe test-mode webhooks), this only gates which infra exists (Cloud Scheduler jobs, Firestore backups, the budget breaker, the secret pruner, the state bucket resource). Defaults to `production` |
 | `staging_gcp_project_id` | The staging project id, once it exists — `mfs-terraform`'s Workload Identity Federation grants extend to this project too, so one WIF pool/SA applies Terraform against both environments. Blank skips those cross-project grants |
@@ -508,6 +508,7 @@ merging anything that reaches `production-apply` for the first time:
 | `PROD_SUBSCRIBER_JWT_SECRET` | The real value from `terraform.tfvars` |
 | `PROD_REDIS_URL` | Only if `PROD_REDIS_CONFIGURED` variable is `true` |
 | `PROD_RESEND_API_KEY` | Only if `PROD_RESEND_CONFIGURED` variable is `true` |
+| `PROD_INSTAGRAM_ACCESS_TOKEN` | Only if `PROD_INSTAGRAM_CONFIGURED` variable is `true` — the initial long-lived Instagram token (rotated in Secret Manager afterwards; the GitHub copy is only the seed) |
 
 **This is not optional plumbing — `production-apply` fails its own guard
 step and refuses to run rather than apply with these blank**, specifically
@@ -536,6 +537,7 @@ pushes new env vars to a running service, so it never surfaced there:
 | `PROD_ANTHROPIC_FEDERATION_RULE_ID` | Optional: the production federation rule (`fdrl_…`). Only alongside `PROD_REDIS_CONFIGURED=true`. Staging twin: `STAGING_ANTHROPIC_FEDERATION_RULE_ID` |
 | `PROD_ANTHROPIC_SERVICE_ACCOUNT_ID` | Optional: the Anthropic service account (`svac_…`) that rule targets. Staging twin: `STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID` |
 | `PROD_ANTHROPIC_WORKSPACE_ID` | Optional, and only when the rule is enabled for more than one workspace (`wrkspc_…`). Staging twin: `STAGING_ANTHROPIC_WORKSPACE_ID` |
+| `PROD_INSTAGRAM_CONFIGURED` / `PROD_INSTAGRAM_USER_ID` | Optional, unlike the two above: `true` plus the Creator account's numeric id once `PROD_INSTAGRAM_ACCESS_TOKEN` is set. Anything else leaves Instagram publishing off and creates neither the secret nor the refresh job |
 
 **Cloudflare Pages' staging alias tracks a `staging` git branch, not
 `main`.** The `staging-e2e` job fast-forwards `staging` to the commit being
@@ -1130,12 +1132,14 @@ mechanism in this project that puts a hard ceiling on the numbers in this
 table — they're bounded by the modeled scenarios above and by the operator
 noticing the alert email, not by anything automatic.
 
-**If Instagram publishing is re-enabled later:** setting `instagram_access_token`
-back in tfvars recreates the secret and its weekly-rotating scheduler job,
-which also makes secret-pruner a genuine 4th (paid, ~$0.10/month) Scheduler
-job again, and reintroduces the "never settles at a clean 2" per-secret
-overhead this doc used to describe for it — re-derive the numbers above
-rather than assuming they still hold.
+**Instagram publishing is re-enabled** by setting `instagram_access_token`
+(via `PROD_INSTAGRAM_CONFIGURED` in the pipeline): that recreates the secret
+and the `social-token-refresh` Scheduler job, an accepted 4th job at
+~$0.10/month. The job now runs on the 1st and 15th rather than weekly
+precisely to keep the per-secret version churn down — two new versions a
+month, each aging out over the 7-day `version_destroy_ttl`, so
+`instagram-access-token` settles at roughly 2–3 active versions rather than
+the old weekly cadence's 4–5. Re-derive the totals above with that in mind.
 
 ### Removing an optional secret
 
@@ -1336,12 +1340,12 @@ require the `iamcredentials` API and the backend SA's
 `terraform apply` once after upgrading). `upload_image_from_url` copies an
 already-hosted https image instead.
 
-**Instagram publishing** (currently deprecated — not a complete feature, and
-its token-refresh scheduler job was failing; `instagram_access_token` is
-blanked in tfvars, which tears down the secret and that job entirely — see
-[Secret version pruning § Cost](#secret-version-pruning) for what re-enabling
-it would change). The tools and code below still exist and work; they're
-just unreachable without a token configured:
+**Instagram publishing** is optional and off until `instagram_access_token`
+is set (in the pipeline: `PROD_INSTAGRAM_CONFIGURED=true` plus the
+`PROD_INSTAGRAM_USER_ID` variable and `PROD_INSTAGRAM_ACCESS_TOKEN` secret).
+Setting it creates the `instagram-access-token` secret and the
+`social-token-refresh` Scheduler job — an accepted 4th job at ~$0.10/month,
+see [GCP free tier summary](#gcp-free-tier-summary). The tools:
 
 `publish_recipe_to_instagram(slug)` posts the
 recipe's GCS image to Instagram and auto-builds a caption from the title,
@@ -1355,15 +1359,40 @@ posts/24h; PNG/WebP may be rejected by Instagram — prefer JPEG.
 > 2. Complete the OAuth exchange once to obtain the Creator account's numeric user ID and an initial long-lived token (short-lived → exchange via `GET graph.instagram.com/v23.0/access_token`).
 > 3. Set `instagram_user_id` + `instagram_access_token` in `terraform.tfvars` and run `terraform apply`.
 
-**Automatic token rotation**: The Instagram long-lived token expires after
-60 days. After the first `terraform apply` with the token set, a Cloud
-Scheduler job runs every Monday at 04:00 UTC, calling
-`POST /api/internal/instagram/refresh-token`. The endpoint exchanges the
-current token for a fresh one and writes it as a new Secret Manager version.
-The backend reads `latest` at request time (short in-process cache), so
-rotation is fully hands-off. Residual risk: if the scheduler is disabled for
-60+ days the token lapses; a manual one-time re-auth (repeat step 2 above) is
-then required.
+> 4. **Immediately** run the refresh job once by hand so the seeded token is
+>    exchanged for a fresh 60-day one before it can lapse:
+>    `gcloud scheduler jobs run social-token-refresh --location us-central1`,
+>    then confirm `gcloud secrets versions list instagram-access-token` shows a
+>    second version and the MCP `social_status` tool reports an `expires_at`.
+
+**Automatic token rotation**: the Instagram long-lived token expires after
+60 days. The `social-token-refresh` Cloud Scheduler job runs at 04:00 UTC on
+the 1st and the 15th, calling `POST /api/internal/social/refresh-tokens`. The
+endpoint refreshes every configured platform independently (Instagram today;
+the platform list lives in `backend/app/services/social.py`), writes the new
+token as a Secret Manager version, and records `last_refresh_at`,
+`expires_at`, and any `last_error` on the Firestore `config/social` doc. The
+backend reads `latest` at request time (short in-process cache), so rotation
+needs no redeploy. Twice a month rather than weekly is a cost choice: each
+refresh is a new secret version, and Meta only needs the token to be ≥ 24 h
+old and still valid, so the 1st/15th cadence keeps 45+ days of margin.
+
+**Why the first attempt at this failed, and what changed.** The original
+weekly `instagram-token-refresh` job returned HTTP 500 on every attempt
+(Cloud Logging, Aug 17 and Aug 24 2026: four retries each, all
+`InstagramError: Error validating access token: Session has expired on
+Sunday, 16-Aug-26`). A refresh can only extend a token that is still valid,
+and the seeded token had been minted near the end of its life — it expired a
+few hours before the first scheduled run. Nothing alerted, so it failed
+silently until the feature was switched off. Three things follow: step 4
+above (exchange the seed immediately), two alert policies
+(`terraform/modules/backend-service/social_alerts.tf`: one on the
+`SOCIAL_REFRESH_FAILED` log marker the endpoint writes per platform, one on
+Scheduler attempts that never reach the backend), and the `config/social`
+status doc so expiry is visible from the MCP `social_status` tool without
+opening Cloud Logging. Recovery from a lapsed token is the same as first
+setup: repeat step 2, add the new token with `gcloud secrets versions add
+instagram-access-token --data-file=-`, then step 4.
 
 ---
 
@@ -1487,7 +1516,7 @@ the same billed-delete caveat as `processed_events`.
 | Identity Platform | 49,999 MAU/mo | 1 admin user |
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
 | Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded |
-| Cloud Scheduler | 3 free jobs per billing account | 3 jobs in use (weekly usage report, secret pruning, budget-breaker reset) — all free. Instagram's token-refresh job would have been a genuine 4th (~$0.10/month) had it stayed; see [Secret version pruning § Cost](#secret-version-pruning) for what re-enabling Instagram would change |
+| Cloud Scheduler | 3 free jobs per billing account | 3 jobs in use (weekly usage report, secret pruning, budget-breaker reset) — all free. With Instagram publishing enabled, `social-token-refresh` is a genuine 4th job at ~$0.10/month — accepted; see [Secret version pruning § Cost](#secret-version-pruning) |
 
 ### Artifact Registry: gcf-artifacts has no cleanup policy
 

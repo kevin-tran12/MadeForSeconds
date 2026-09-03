@@ -158,6 +158,7 @@ module "backend-service" {
   staging_bucket_name  = module.storage.staging_bucket_name
 
   scheduler_agent_email = google_project_service_identity.cloudscheduler.email
+  notification_channel  = google_monitoring_notification_channel.budget_email.name
 
   depends_on = [google_project_service.required_apis, time_sleep.wait_for_secret_accessors]
 }

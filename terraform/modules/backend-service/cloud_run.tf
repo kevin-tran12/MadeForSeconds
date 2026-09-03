@@ -233,6 +233,10 @@ resource "google_cloud_run_v2_service" "backend" {
         name  = "INSTAGRAM_REFRESH_AUDIENCE"
         value = local.instagram_refresh_url
       }
+      env {
+        name  = "SOCIAL_REFRESH_AUDIENCE"
+        value = local.social_refresh_url
+      }
 
       # Sous Chef assistant — the federation ids (see local.assistant_federation_env).
       # No Anthropic secret exists anywhere: the identity is the service account.

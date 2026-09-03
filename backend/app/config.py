@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     instagram_refresh_invoker_email: str = ""  # SA allowed to call the refresh endpoint (OIDC)
     instagram_refresh_audience: str = ""  # Expected OIDC audience for the refresh endpoint
     usage_report_audience: str = ""  # Expected OIDC audience for the weekly usage report endpoint
+    social_refresh_audience: str = ""  # Expected OIDC audience for the social token-refresh endpoint
     alert_email: str = ""  # Destination for the weekly usage report (same address as budget/uptime alerts)
     # Sous Chef assistant (Claude API). Production authenticates with Anthropic
     # Workload Identity Federation: Cloud Run's service account presents a
