@@ -752,6 +752,22 @@ def test_ask_offers_search_to_supporters_and_shows_the_sources(user_client, reci
     assert llm_budget.get_month_searches() == 1
 
 
+def test_ask_counts_the_searches_of_every_call_it_made(user_client, recipe_db, configured):
+    """A clarify re-issue is a second billed call; done reports both calls' searches."""
+    refused = [{"text": "What's your email address?", "kind": "other"}]
+    client = FakeAnthropic(label="sourcing", turns=[
+        ([_search_event()], _final(stop_reason="tool_use", usage=_usage(web_search_requests=2),
+                                   content=[_clarify_block(refused)])),
+        ([_text_event("Weee! carries it.")], _final(usage=_usage(web_search_requests=1))),
+    ])
+    with _supporter(), patch("app.services.assistant._get_client", return_value=client):
+        _, body = _ask(user_client, {**ASK, "question": "where do I buy belacan?"})
+
+    done = _parse_sse(body)[-1][1]
+    assert done["searches"] == 3  # not just the second call's 1
+    assert done["cost_micro_usd"] == 65 + 2 * 3670 + 3 * llm_budget.WEB_SEARCH_MICRO_PER_REQUEST
+
+
 def test_ask_never_offers_search_to_a_free_reader(user_client, recipe_db, configured):
     client = FakeAnthropic(label="sourcing")
     with patch("app.services.assistant._get_client", return_value=client):

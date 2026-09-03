@@ -327,7 +327,6 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
                         sources = payload
                     elif kind == "final":
                         final = payload
-                    # "sources" reaches the client once a spoke can search.
             except anthropic.RateLimitError:
                 finished = True
                 if not sent_any:
@@ -360,7 +359,9 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
         cost = router_cost + llm_budget.cost_micro_usd(usage, settings.assistant_model)
         month = _record_spend(cost)
         stop_reason = final.stop_reason if final is not None else None
-        searches = final.searches if final is not None else 0
+        # From the accumulated usage, not the last final: a clarify re-issue is
+        # a second call, and both calls' searches are billed.
+        searches = usage["web_search_requests"]
 
         if questions:
             # The chef asked, not the reader: give the question back, keep the
@@ -371,7 +372,7 @@ async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitl
                 "usage": _usage_dict(usage),
                 "cost_micro_usd": cost,
                 "stop_reason": stop_reason,
-                "truncated": False,
+                "truncated": final.truncated if final is not None else False,
                 "refused": False,
                 "clarifying": True,
                 "searches": searches,
