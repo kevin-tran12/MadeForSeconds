@@ -1,7 +1,11 @@
-"""Reader profile: who am I, what may I ask, and erase what you keep on me."""
+"""Reader profile: who am I, what may I ask, how do I cook, and erase what
+you keep on me."""
+
+from typing import Literal
 
 import anyio
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
 from ..auth import UserIdentity, require_user
 from ..firestore import get_db
@@ -10,6 +14,13 @@ from ..rate_limit import rate_limit
 from ..services import entitlements, users
 
 router = APIRouter(prefix="/api")
+
+
+class CookingExperienceBody(BaseModel):
+    level: Literal["beginner", "home_cook", "confident", "professional"]
+    # Accepts a little more than is stored; users.clean_notes normalises and
+    # caps it at MAX_EXPERIENCE_NOTES so the reader can paste freely.
+    notes: str = Field(default="", max_length=1000)
 
 
 @router.get("/me", dependencies=[Depends(rate_limit("me", 60, 60))])
@@ -34,8 +45,22 @@ async def me(user: UserIdentity = Depends(require_user)) -> dict:
         "supporter": ent.supporter,
         "returning": touched["returning"],
         "answers_total": touched["answers_total"],
+        "cooking_experience": touched["cooking_experience"],
         "assistant": ent.to_dict(),
     }
+
+
+@router.put("/me/experience", dependencies=[Depends(rate_limit("me_experience", 20, 3600))])
+async def update_experience(
+    body: CookingExperienceBody, user: UserIdentity = Depends(require_user)
+) -> dict:
+    """Save the reader's cooking experience — the Sous Chef pitches its answers
+    to it, and it is remembered on the account until changed or erased."""
+    db = get_db()
+    result = await anyio.to_thread.run_sync(
+        users.set_cooking_experience, db, user.uid, body.level, body.notes
+    )
+    return {"cooking_experience": result}
 
 
 @router.delete("/me/data", dependencies=[Depends(rate_limit("me_delete", 5, 3600))])

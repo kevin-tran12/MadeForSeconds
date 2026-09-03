@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 from ..cache import cache
-from ..models import Recipe, RecipeCreate, RecipeUpdate
+from ..models import AdminRecipe, Recipe, RecipeCreate, RecipeUpdate
 from ..validation import get_invalid_categories
 from . import receipt_ledger, uploads
 
@@ -50,7 +50,7 @@ def generate_slug(title: str) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", title.lower()))
 
 
-def doc_to_recipe(doc) -> Recipe:
+def _recipe_data(doc) -> dict:
     data = doc.to_dict()
     data["id"] = doc.id
     # Migrate legacy nutrition dict {label: value} → list[{label, value, unit}]
@@ -61,7 +61,17 @@ def doc_to_recipe(doc) -> Recipe:
     # Strip any leftover premium_content from Firestore docs
     data.pop("premium_content", None)
     data.pop("has_premium_content", None)
-    return Recipe(**data)
+    return data
+
+
+def doc_to_recipe(doc) -> Recipe:
+    """The public view: owner-only fields (sous_chef_notes) are dropped."""
+    return Recipe(**_recipe_data(doc))
+
+
+def doc_to_admin_recipe(doc) -> AdminRecipe:
+    """The owner's view, for admin routes and MCP tools only."""
+    return AdminRecipe(**_recipe_data(doc))
 
 
 def find_by_slug(db, slug: str) -> dict | None:
@@ -163,7 +173,7 @@ def _get_doc_or_raise(db, recipe_id: str):
     return doc_ref, doc
 
 
-def create_recipe(db, body: RecipeCreate, *, source: str) -> Recipe:
+def create_recipe(db, body: RecipeCreate, *, source: str) -> AdminRecipe:
     _validate_categories(db, body.categories)
 
     slug = generate_slug(body.title)
@@ -187,12 +197,12 @@ def create_recipe(db, body: RecipeCreate, *, source: str) -> Recipe:
     doc_ref.set(data)
     data["id"] = doc_ref.id
     cache.clear()
-    return Recipe(**data)
+    return AdminRecipe(**data)
 
 
 def update_recipe(
     db, recipe_id: str, body: RecipeUpdate, *, source: str, actor: str | None = None
-) -> Recipe:
+) -> AdminRecipe:
     if body.categories is not None:
         _validate_categories(db, body.categories)
     doc_ref, doc = _get_doc_or_raise(db, recipe_id)
@@ -242,7 +252,7 @@ def update_recipe(
     updated = doc_ref.get().to_dict()
     updated["id"] = recipe_id
     cache.clear()
-    return Recipe(**updated)
+    return AdminRecipe(**updated)
 
 
 def set_published(db, recipe_id: str, published: bool, *, source: str) -> tuple[Recipe, list[str]]:
