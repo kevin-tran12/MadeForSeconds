@@ -63,9 +63,12 @@ _ADDRESS_CUE_RE = re.compile(
     r"mail\s+(?:it\s+)?to|send\s+it\s+to)\b[^.\n]{0,40}?\d",
     re.I,
 )
-_UNIT_RE = re.compile(r"\b(?:apt|apartment|unit|suite|ste)\.?\s*#?\s*\d{1,5}\b", re.I)
+_UNIT_RE = re.compile(r"\b(?:apt|apartment|unit|suite|ste)\.?[ ]{0,3}#?[ ]{0,3}\d{1,5}\b", re.I)
 
 ZIP_RE = re.compile(r"^\d{5}(?:-\d{4})?$")
+
+# Applied before every pattern below — see find_personal_info.
+_WHITESPACE_RE = re.compile(r"\s+")
 
 REFUSAL_MESSAGE = (
     "Please don't share personal details like phone numbers, addresses, or emails — "
@@ -119,9 +122,17 @@ def find_personal_info(text: str | None) -> str | None:
 
     Returns one of KINDS. The caller refuses the request and tells the reader
     which kind was spotted; it never echoes the text back.
+
+    Whitespace is collapsed first. That is not cosmetic: several patterns here
+    have to allow a gap between words, and a run of thousands of spaces makes
+    a regex engine backtrack over every way to split it — quadratic work on
+    input a reader controls. Replayed history turns and feedback bodies reach
+    this function raw (only the question is sanitised upstream), so the
+    collapse happens here rather than being assumed of every caller.
     """
     if not text:
         return None
+    text = _WHITESPACE_RE.sub(" ", text)
     if _EMAIL_RE.search(text):
         return "email"
     if _SSN_RE.search(text) or _ID_PHRASE_RE.search(text):
