@@ -67,6 +67,8 @@ export interface AskDoneEvent {
   stop_reason: string | null
   truncated: boolean
   refused: boolean
+  /** Server-side web searches the answer ran; billed per search, not per token. */
+  searches: number
   quota: QuotaInfo
 }
 

@@ -58,7 +58,7 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
         async for kind, payload in assistant.stream_answer(kwargs):
             if kind == "delta":
                 parts.append(payload)
-            else:
+            elif kind == "final":
                 final = payload
         answer = "".join(parts)
         usage = final.usage if final else None
@@ -105,7 +105,7 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
         async for kind, payload in assistant.stream_answer(second_kwargs):
             if kind == "final":
                 second_final = payload
-        read = int(getattr(second_final.usage, "cache_read_input_tokens", 0) or 0) if second_final else 0
+        read = second_final.usage.get("cache_read_input_tokens", 0) if second_final else 0
         if read <= 0:
             notes.append("second identical call read 0 cached tokens — a silent invalidator is at work")
         else:
@@ -115,7 +115,7 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
     return {
         "id": case["id"], "ok": not [n for n in notes if not n.startswith("cache_read_input_tokens=")],
         "gate": verdict, "stop": stop, "words": words, "notes": notes, "answer": answer,
-        "usage": None if usage is None else {k: int(getattr(usage, k, 0) or 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens")},
+        "usage": usage,
     }
 
 

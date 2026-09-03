@@ -44,6 +44,15 @@ PRICES_MICRO_PER_MTOK: dict[str, dict[str, int]] = {
 }
 _DEFAULT_PRICE_MODEL = "claude-sonnet-5"
 
+# Server-side web search: $10 per 1,000 searches, billed on top of the tokens
+# the results add to the next turn.
+WEB_SEARCH_MICRO_PER_REQUEST = 10_000
+
+# The counters an answer is billed on. `web_search_requests` is flattened out
+# of the SDK's nested `usage.server_tool_use` so a merged total is one dict.
+TOKEN_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+USAGE_FIELDS = (*TOKEN_FIELDS, "web_search_requests")
+
 # Outlives the month it counts, so a cost that lands just after midnight on
 # the 1st (a stream that started on the 31st) never hits an expired key.
 SPEND_TTL_SECONDS = 40 * 86_400
@@ -95,25 +104,54 @@ def _usage_value(usage, field: str) -> int:
     return int(value or 0)
 
 
+def _searches(usage) -> int:
+    """Web-search requests, from either the SDK's nested ``server_tool_use``
+    or the flat counter of a merged usage dict."""
+    if usage is None:
+        return 0
+    flat = usage.get("web_search_requests") if isinstance(usage, dict) else getattr(usage, "web_search_requests", None)
+    if flat is not None:
+        return int(flat or 0)
+    server = usage.get("server_tool_use") if isinstance(usage, dict) else getattr(usage, "server_tool_use", None)
+    return 0 if server is None else _usage_value(server, "web_search_requests")
+
+
+def empty_usage() -> dict[str, int]:
+    return dict.fromkeys(USAGE_FIELDS, 0)
+
+
+def add_usage(total: dict[str, int], usage) -> dict[str, int]:
+    """Sum one response's counters into a running total. An answer that pauses
+    mid tool use and is continued is two billed API calls, so they add up."""
+    merged = dict(total)
+    for field in TOKEN_FIELDS:
+        merged[field] = merged.get(field, 0) + _usage_value(usage, field)
+    merged["web_search_requests"] = merged.get("web_search_requests", 0) + _searches(usage)
+    return merged
+
+
 def cost_micro_usd(usage, model: str) -> int:
     """Cost of one API response in micro-dollars, rounded up.
 
     `usage` is the SDK's Usage object (or an equivalent dict); the four token
     counters are read by name and a missing or None counter counts as zero.
+    Server-side searches are priced per request, not per token.
     """
     prices = price_table(model)
     total = sum(_usage_value(usage, field) * price for field, price in prices.items())
-    return math.ceil(total / MICRO)
+    return math.ceil(total / MICRO) + _searches(usage) * WEB_SEARCH_MICRO_PER_REQUEST
 
 
-def estimate_micro(input_chars: int, output_chars: int, model: str) -> int:
+def estimate_micro(input_chars: int, output_chars: int, model: str, searches: int = 0) -> int:
     """Rough cost for a stream cut off before its final usage arrived — better
-    to over-count a disconnect than to leave spend unaccounted."""
+    to over-count a disconnect than to leave spend unaccounted. `searches` is
+    however many the stream announced before it was cut off; those are billed
+    whether or not their answer was ever delivered."""
     prices = price_table(model)
     input_tokens = math.ceil(max(input_chars, 0) / _CHARS_PER_TOKEN)
     output_tokens = math.ceil(max(output_chars, 0) / _CHARS_PER_TOKEN)
     total = input_tokens * prices["input_tokens"] + output_tokens * prices["output_tokens"]
-    return math.ceil(total / MICRO)
+    return math.ceil(total / MICRO) + max(searches, 0) * WEB_SEARCH_MICRO_PER_REQUEST
 
 
 def _durable_backend() -> bool:

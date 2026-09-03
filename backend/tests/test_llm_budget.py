@@ -60,6 +60,40 @@ def test_estimate_micro_uses_chars_per_token():
     assert budget.estimate_micro(400, 400, "claude-sonnet-5") == 1200
 
 
+# ── server-side web search ────────────────────────────────────────────────────
+
+def test_cost_charges_a_penny_per_web_search_on_top_of_the_tokens():
+    """$10 per 1,000 searches, read from the SDK's nested server_tool_use."""
+    usage = _usage(input_tokens=412, cache_read_input_tokens=3180, output_tokens=221)
+    usage.server_tool_use = SimpleNamespace(web_search_requests=2, web_fetch_requests=0)
+    assert budget.cost_micro_usd(usage, "claude-sonnet-5") == 3670 + 20_000
+
+
+def test_cost_reads_the_flat_search_counter_of_a_merged_usage_dict():
+    merged = {**budget.empty_usage(), "input_tokens": 100, "web_search_requests": 1}
+    assert budget.cost_micro_usd(merged, "claude-sonnet-5") == 200 + 10_000
+    assert budget.cost_micro_usd(budget.empty_usage(), "claude-sonnet-5") == 0
+
+
+def test_add_usage_sums_every_counter_across_calls():
+    """A continued pause_turn is a second billed call."""
+    first = _usage(input_tokens=400, output_tokens=100)
+    first.server_tool_use = SimpleNamespace(web_search_requests=1, web_fetch_requests=0)
+    second = _usage(input_tokens=900, output_tokens=50)
+    second.server_tool_use = SimpleNamespace(web_search_requests=1, web_fetch_requests=0)
+
+    total = budget.add_usage(budget.add_usage(budget.empty_usage(), first), second)
+    assert total == {
+        "input_tokens": 1300, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        "output_tokens": 150, "web_search_requests": 2,
+    }
+    assert budget.add_usage(budget.empty_usage(), None) == budget.empty_usage()
+
+
+def test_estimate_micro_bills_the_searches_a_cut_off_stream_announced():
+    assert budget.estimate_micro(400, 400, "claude-sonnet-5", searches=2) == 1200 + 20_000
+
+
 # ── month bookkeeping ─────────────────────────────────────────────────────────
 
 def test_month_key_and_resets_at_are_utc_month_based():

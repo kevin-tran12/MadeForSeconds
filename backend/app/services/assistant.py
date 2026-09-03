@@ -27,7 +27,7 @@ import anthropic
 from ..cache import cache
 from ..config import settings
 from ..models import Recipe
-from . import claude_auth
+from . import claude_auth, llm_budget
 from .recipes import get_all_published
 from .users import COOKING_LEVELS, DEFAULT_COOKING_LEVEL, MAX_EXPERIENCE_NOTES, clean_text
 
@@ -43,6 +43,15 @@ MAX_PROMPT_CHARS = 60_000  # ≈ 15K tokens worst case; every input is bounded a
 CATALOGUE_CACHE_KEY = "assistant:catalogue"  # versioned: any recipe mutation rebuilds it
 CATALOGUE_LIMIT = 200
 CLASSIFIER_MAX_TOKENS = 5
+
+# The one client-side tool: the chef asks the reader for what only they know.
+CLARIFY_TOOL_NAME = "ask_clarifying_questions"
+
+# A pause_turn means the server ran out of time mid tool use and wants the
+# turn continued. Continue once; a second pause is reported as truncated
+# rather than continued forever on the reader's dime.
+MAX_PAUSE_CONTINUATIONS = 1
+TRUNCATED_STOP_REASONS = ("max_tokens", "pause_turn")
 
 REFUSAL_TEXT = (
     "I can only help with cooking and the recipes on this site — ask me anything "
@@ -120,9 +129,21 @@ class PromptTooLong(ValueError):
 
 @dataclass(frozen=True)
 class FinalInfo:
-    usage: Any
+    """What the caller needs once the answer is written. ``usage`` is a flat
+    dict of ``llm_budget.USAGE_FIELDS`` summed over every API call the answer
+    took (a continued pause_turn is two)."""
+
+    usage: dict
     stop_reason: str | None
     request_id: str | None
+
+    @property
+    def searches(self) -> int:
+        return int(self.usage.get("web_search_requests", 0))
+
+    @property
+    def truncated(self) -> bool:
+        return self.stop_reason in TRUNCATED_STOP_REASONS
 
 
 # ── Reader text ───────────────────────────────────────────────────────────────
@@ -393,16 +414,98 @@ async def classify_topic(question: str, previous_user_message: str | None = None
     return verdict, response.usage
 
 
+def _is_server_tool_start(event) -> bool:
+    return getattr(getattr(event, "content_block", None), "type", "") == "server_tool_use"
+
+
+def _clarify_questions(final) -> list[dict]:
+    """The questions from an ``ask_clarifying_questions`` call, if the model
+    made one. The model wrote them after reading reader text, so the caller
+    validates every one before it reaches a reader."""
+    for block in getattr(final, "content", None) or []:
+        if getattr(block, "type", "") != "tool_use" or getattr(block, "name", "") != CLARIFY_TOOL_NAME:
+            continue
+        payload = getattr(block, "input", None)
+        items = payload.get("questions") if isinstance(payload, dict) else None
+        return [
+            {"text": item["text"], "kind": item.get("kind") or "other"}
+            for item in items or []
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
+        ]
+    return []
+
+
+def _answer_sources(final) -> list[dict]:
+    """Web citations behind the answer, deduped by URL in the order cited.
+    A reader must be able to see where a searched claim came from."""
+    seen: dict[str, dict] = {}
+    for block in getattr(final, "content", None) or []:
+        if getattr(block, "type", "") != "text":
+            continue
+        for citation in getattr(block, "citations", None) or []:
+            if getattr(citation, "type", "") != "web_search_result_location":
+                continue
+            url = getattr(citation, "url", "")
+            if url and url not in seen:
+                seen[url] = {"url": url, "title": getattr(citation, "title", None) or url}
+    return list(seen.values())
+
+
+def _assistant_turn(content) -> dict:
+    """The partial assistant turn to replay when continuing a pause_turn."""
+    blocks = []
+    for block in content or []:
+        dump = getattr(block, "model_dump", None)
+        blocks.append(dump(mode="json", exclude_none=True) if callable(dump) else block)
+    return {"role": "assistant", "content": blocks}
+
+
 async def stream_answer(kwargs: dict) -> AsyncIterator[tuple[str, Any]]:
-    """Yield ("delta", text) for each text chunk, then ("final", FinalInfo)."""
+    """Stream one answer as events, in this order:
+
+    ``("delta", text)``             a chunk of the answer as it is written
+    ``("status", "searching")``     a server-side search started (one per search)
+    ``("clarify", questions)``      the model asked the reader for what it needs
+    ``("sources", [{url, title}])`` deduped web citations behind the answer
+    ``("final", FinalInfo)``        always last, always exactly once
+
+    Reads the event stream rather than ``text_stream`` so tool blocks and
+    citations are visible; thinking blocks are ignored and never reach a
+    reader. A ``pause_turn`` (the server paused mid tool use) is continued
+    once by replaying the partial assistant turn, and its usage adds to the
+    first call's — both are billed.
+    """
     await _warm_credentials()
-    async with _get_client().messages.stream(**kwargs) as stream:
-        async for text in stream.text_stream:
-            yield "delta", text
-        final = await stream.get_final_message()
+    call = dict(kwargs)
+    messages = list(call.pop("messages", []))
+    usage = llm_budget.empty_usage()
+    final = None
+    stop_reason = None
+
+    for attempt in range(MAX_PAUSE_CONTINUATIONS + 1):
+        async with _get_client().messages.stream(messages=messages, **call) as stream:
+            async for event in stream:
+                kind = getattr(event, "type", "")
+                if kind == "text":
+                    yield "delta", event.text
+                elif kind == "content_block_start" and _is_server_tool_start(event):
+                    yield "status", "searching"
+            final = await stream.get_final_message()
+        usage = llm_budget.add_usage(usage, getattr(final, "usage", None))
+        stop_reason = getattr(final, "stop_reason", None)
+        if stop_reason != "pause_turn" or attempt == MAX_PAUSE_CONTINUATIONS:
+            break
+        messages = [*messages, _assistant_turn(getattr(final, "content", None))]
+
+    questions = _clarify_questions(final)
+    if questions:
+        yield "clarify", questions
+    sources = _answer_sources(final)
+    if sources:
+        yield "sources", sources
     yield "final", FinalInfo(
-        usage=final.usage,
-        stop_reason=getattr(final, "stop_reason", None),
+        usage=usage,
+        stop_reason=stop_reason,
         request_id=getattr(final, "_request_id", None),
     )
 
