@@ -24,7 +24,7 @@ from ..config import settings
 from ..firestore import get_db
 from ..log_redaction import keyed_hash
 from ..rate_limit import rate_limit
-from ..services import assistant, entitlements, llm_budget, pii, users
+from ..services import assistant, entitlements, llm_budget, pii, spokes, users
 from ..services.entitlements import Entitlement
 from ..services.recipes import get_published_doc
 from ..services.users import clean_text
@@ -201,22 +201,38 @@ async def ask(
         raise HTTPException(status_code=404, detail={"code": "recipe_not_found", "message": "Recipe not found"})
 
     history = assistant.normalize_history([m.model_dump() for m in body.history])
+
+    # The hub, before the response opens: which specialist answers this, and
+    # therefore which rules and which slice of the recipe get assembled. A
+    # router that errors falls to the general spoke, which sees everything.
+    router_cost = 0
     try:
-        kwargs = assistant.build_request(
-            recipe_doc=doc,
-            catalogue=catalogue,
-            question=question,
-            history=history,
-            view=body.context.model_dump(),
-            reader=reader,
-        )
-    except assistant.PromptTooLong:
-        raise HTTPException(status_code=413, detail={"code": "prompt_too_long", "message": "That's a long one — start a fresh chat."})
+        spoke, router_usage = await assistant.route(question, assistant.last_user_message(history))
+        router_cost = llm_budget.cost_micro_usd(router_usage, settings.assistant_classifier_model)
+    except Exception:
+        logger.warning("assistant: router failed, falling back to %s", spokes.DEFAULT_SPOKE, exc_info=True)
+        spoke = spokes.DEFAULT_SPOKE
+
+    kwargs = None
+    if spoke != spokes.OFFTOPIC_SPOKE:
+        try:
+            kwargs = assistant.build_request(
+                spoke=spoke,
+                recipe_doc=doc,
+                catalogue=catalogue,
+                question=question,
+                history=history,
+                view=body.context.model_dump(),
+                reader=reader,
+            )
+        except assistant.PromptTooLong:
+            raise HTTPException(status_code=413, detail={"code": "prompt_too_long", "message": "That's a long one — start a fresh chat."})
 
     # Consume, then re-check: two requests can both pass the peek.
     ent = entitlements.consume_quota(ent)
     if ent.day_used > ent.day_limit or (ent.month_limit is not None and ent.month_used > ent.month_limit):
         entitlements.refund_quota(ent)
+        _record_spend(router_cost)  # the router already ran; nothing goes unrecorded
         raise HTTPException(
             status_code=429,
             detail=entitlements.quota_exhausted_detail(ent),
@@ -224,47 +240,40 @@ async def ask(
         )
 
     return StreamingResponse(
-        _events(kwargs, ent, user, body.slug, question, history),
+        _events(kwargs, spoke, router_cost, ent, user, body.slug),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
-async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str, question: str, history: list[dict]):
+async def _events(kwargs: dict | None, spoke: str, router_cost: int, ent: Entitlement, user: UserIdentity, slug: str):
     started = time.monotonic()
     user_tag = keyed_hash(user.email)[:12]
     sent_any = False
     finished = False
     answer_parts: list[str] = []
     searches_seen = 0
-    prompt_chars = len(assistant.SYSTEM_RULES) + sum(len(json.dumps(m)) for m in kwargs["messages"])
+    prompt_chars = len(assistant.CORE_RULES) + sum(len(json.dumps(m)) for m in (kwargs or {}).get("messages", []))
 
     yield sse("meta", {"quota": ent.to_dict()})
 
-    # Stage 1: the topic gate. Off-topic never reaches the main model, but it
-    # still costs the reader a question so probing isn't free.
-    gate_cost = 0
-    try:
-        verdict, gate_usage = await assistant.classify_topic(question, assistant.last_user_message(history))
-        gate_cost = llm_budget.cost_micro_usd(gate_usage, settings.assistant_classifier_model)
-    except Exception:  # the main model's own rules still refuse; log and carry on
-        logger.warning("assistant: topic gate failed, falling through", exc_info=True)
-        verdict = "ON"
-    if verdict == "OFF":
+    # Off-topic never reaches the main model, but it still costs the reader a
+    # question so probing isn't free.
+    if kwargs is None:
         finished = True
         yield sse("delta", {"text": assistant.REFUSAL_TEXT})
-        month = _record_spend(gate_cost)
+        month = _record_spend(router_cost)
         yield sse("done", {
-            "usage": None, "cost_micro_usd": gate_cost, "stop_reason": "refused",
-            "truncated": False, "refused": True, "quota": ent.to_dict(),
+            "usage": None, "cost_micro_usd": router_cost, "stop_reason": "refused",
+            "truncated": False, "refused": True, "searches": 0, "spoke": spoke, "quota": ent.to_dict(),
         })
         logger.info(
-            "assistant refused slug=%s gate=OFF cost_micro=%d month_micro=%s user=%s ms=%d",
-            slug, gate_cost, month, user_tag, int((time.monotonic() - started) * 1000),
+            "assistant refused slug=%s spoke=%s cost_micro=%d month_micro=%s user=%s ms=%d",
+            slug, spoke, router_cost, month, user_tag, int((time.monotonic() - started) * 1000),
         )
         return
 
-    # Stage 2: the answer.
+    # The answer.
     final = None
     try:
         try:
@@ -283,7 +292,7 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
             finished = True
             if not sent_any:
                 entitlements.refund_quota(ent)
-            _record_spend(gate_cost)
+            _record_spend(router_cost)
             logger.warning("assistant: upstream rate limited slug=%s user=%s", slug, user_tag)
             yield sse("error", {"code": "upstream_busy", "message": "The Sous Chef is slammed right now — try again in a moment."})
             return
@@ -291,7 +300,7 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
             finished = True
             if not sent_any:
                 entitlements.refund_quota(ent)
-            _record_spend(gate_cost)
+            _record_spend(router_cost)
             logger.warning("assistant: upstream error slug=%s user=%s", slug, user_tag, exc_info=True)
             yield sse("error", {"code": "upstream_error", "message": "The Sous Chef dropped the pan — try again."})
             return
@@ -299,14 +308,14 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
         finished = True
         answer = "".join(answer_parts)
         usage = final.usage if final is not None else None
-        cost = gate_cost + (llm_budget.cost_micro_usd(usage, settings.assistant_model) if usage is not None else 0)
+        cost = router_cost + (llm_budget.cost_micro_usd(usage, settings.assistant_model) if usage is not None else 0)
         month = _record_spend(cost)
         stop_reason = final.stop_reason if final is not None else None
         searches = final.searches if final is not None else 0
 
         if stop_reason == "refusal":
             yield sse("error", {"code": "refused", "message": assistant.API_REFUSAL_TEXT})
-            logger.info("assistant refused slug=%s gate=ON stop=refusal user=%s", slug, user_tag)
+            logger.info("assistant refused slug=%s spoke=%s stop=refusal user=%s", slug, spoke, user_tag)
             return
         if assistant.leaks_rules(answer):
             yield sse("error", {"code": "refused", "message": assistant.API_REFUSAL_TEXT})
@@ -326,11 +335,12 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
             "truncated": final.truncated if final is not None else False,
             "refused": False,
             "searches": searches,
+            "spoke": spoke,
             "quota": ent.to_dict(),
         })
         logger.info(
-            "assistant answered slug=%s gate=ON in=%d cache_read=%d cache_write=%d out=%d searches=%d cost_micro=%d month_micro=%s stop=%s req=%s user=%s ms=%d",
-            slug, u.get("input_tokens", 0), u.get("cache_read_input_tokens", 0),
+            "assistant answered slug=%s spoke=%s in=%d cache_read=%d cache_write=%d out=%d searches=%d cost_micro=%d month_micro=%s stop=%s req=%s user=%s ms=%d",
+            slug, spoke, u.get("input_tokens", 0), u.get("cache_read_input_tokens", 0),
             u.get("cache_creation_input_tokens", 0), u.get("output_tokens", 0), searches, cost, month,
             stop_reason, final.request_id if final is not None else None, user_tag,
             int((time.monotonic() - started) * 1000),
@@ -339,7 +349,7 @@ async def _events(kwargs: dict, ent: Entitlement, user: UserIdentity, slug: str,
         if not finished:
             # The client went away mid-stream: the usage never arrived, so
             # charge a conservative estimate rather than leave spend unaccounted.
-            estimate = gate_cost + llm_budget.estimate_micro(
+            estimate = router_cost + llm_budget.estimate_micro(
                 prompt_chars, sum(len(p) for p in answer_parts), settings.assistant_model, searches=searches_seen
             )
             _record_spend(estimate)
