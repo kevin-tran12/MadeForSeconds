@@ -87,6 +87,22 @@ describe('useSousChef', () => {
     expect(result.current.error).toEqual({ code: 'quota_exhausted', message: 'Used up', supporter: false, resetsAt: 'r' })
   })
 
+  it('hands a question refused for personal details back to the composer', async () => {
+    vi.mocked(assistantApi.ask).mockRejectedValue(
+      new ApiError(400, { code: 'personal_info', kind: 'phone', message: 'Please don’t share personal details' })
+    )
+    const { result } = renderHook(() => useSousChef(recipe, view))
+    await waitFor(() => expect(result.current.statusLoading).toBe(false))
+    await act(() => result.current.send('call me on 415-555-0100'))
+
+    expect(result.current.error?.code).toBe('personal_info')
+    expect(result.current.messages).toEqual([])  // never left in the transcript
+    expect(result.current.rejectedText).toBe('call me on 415-555-0100')
+
+    act(() => result.current.clearRejectedText())
+    expect(result.current.rejectedText).toBeNull()
+  })
+
   it('stop() aborts the in-flight request', async () => {
     let seenSignal: AbortSignal | undefined
     vi.mocked(assistantApi.ask).mockImplementation(
@@ -131,6 +147,7 @@ describe('toSousChefError', () => {
     expect(toSousChefError(new ApiError(503, { code: 'spend_cap', message: 'Paused', resets_at: 'x' })).code).toBe('spend_cap')
     expect(toSousChefError(new ApiError(503, { code: 'not_configured', message: 'off' })).code).toBe('not_configured')
     expect(toSousChefError(new ApiError(429, 'Too many attempts')).code).toBe('rate_limited')
+    expect(toSousChefError(new ApiError(400, { code: 'personal_info', message: 'nope' })).code).toBe('personal_info')
     expect(toSousChefError(new ApiError(400, { code: 'invalid_question', message: 'plain words' })).code).toBe('invalid_question')
     expect(toSousChefError(new TypeError('Failed to fetch')).code).toBe('network')
   })

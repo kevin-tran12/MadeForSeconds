@@ -29,7 +29,7 @@ export function toSousChefError(err: unknown): SousChefError {
     }
     const known: AskErrorCode[] = [
       'not_configured', 'quota_exhausted', 'spend_cap', 'budget_unavailable', 'invalid_question',
-      'prompt_too_long', 'recipe_not_found', 'upstream_busy', 'upstream_error', 'refused',
+      'personal_info', 'prompt_too_long', 'recipe_not_found', 'upstream_busy', 'upstream_error', 'refused',
     ]
     if (err.status === 401 || err.status === 403) {
       return { code: 'sign_in_required', message: 'Sign in with Google to ask the Sous Chef.' }
@@ -53,6 +53,9 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
   const [statusLoading, setStatusLoading] = useState(true)
   const [quota, setQuota] = useState<QuotaInfo | null>(null)
   const [error, setError] = useState<SousChefError | null>(null)
+  // A question refused for personal details goes back to the composer to be
+  // edited, rather than sitting in the transcript for the reader to retype.
+  const [rejectedText, setRejectedText] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const viewRef = useRef(view)
   viewRef.current = view
@@ -79,6 +82,7 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
       const question = rawQuestion.trim()
       if (!question || phase === 'streaming') return
       setError(null)
+      setRejectedText(null)
 
       const history = messages
         .filter((m) => !m.pending && !m.refused && m.content.trim())
@@ -132,8 +136,15 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
       } catch (err) {
         const mapped = toSousChefError(err)
         if (!(err instanceof Error && err.name === 'AbortError')) setError(mapped)
-        // Nothing streamed: drop the empty bubble so the question can be retried.
-        setMessages((prev) => (receivedAnything ? prev.map((m) => (m.id === pendingId ? { ...m, pending: false } : m)) : prev.filter((m) => m.id !== pendingId)))
+        const rejected = mapped.code === 'personal_info'
+        if (rejected) setRejectedText(question)
+        // Nothing streamed: drop the empty bubble so the question can be retried,
+        // and the refused question with it — it is going back to the composer.
+        setMessages((prev) =>
+          receivedAnything
+            ? prev.map((m) => (m.id === pendingId ? { ...m, pending: false } : m))
+            : prev.filter((m) => m.id !== pendingId && !(rejected && m.id === userMessage.id))
+        )
       } finally {
         abortRef.current = null
         setPhase('idle')
@@ -168,5 +179,9 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
     [messages, recipe.slug]
   )
 
-  return { messages, phase, status, statusLoading, quota, error, send, stop, reset, sendFeedback, loadStatus, clearError: () => setError(null) }
+  return {
+    messages, phase, status, statusLoading, quota, error, rejectedText, send, stop, reset, sendFeedback, loadStatus,
+    clearError: () => setError(null),
+    clearRejectedText: () => setRejectedText(null),
+  }
 }

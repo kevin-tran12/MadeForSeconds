@@ -3,6 +3,7 @@
 in for both the topic gate (messages.create) and the answer (messages.stream)."""
 
 import json
+import logging
 from collections import deque
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -610,6 +611,47 @@ def test_ask_503_budget_unavailable_in_prod_without_redis(user_client, recipe_db
     monkeypatch.setattr(settings, "environment", "production")
     response = user_client.post("/api/assistant/ask", json=ASK)
     assert response.status_code == 503 and response.json()["detail"]["code"] == "budget_unavailable"
+
+
+def test_ask_refuses_personal_details_before_any_model_call(user_client, recipe_db, fake, caplog):
+    """No quota, no gate, no Sonnet, and the text never reaches a log."""
+    caplog.set_level(logging.INFO)
+    question = "my number is 415-555-0100, call me about the sauce"
+    response = user_client.post("/api/assistant/ask", json={**ASK, "question": question})
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "personal_info" and detail["kind"] == "phone"
+    assert "zip code" in detail["message"]
+    assert fake.create_calls == [] and fake.stream_calls == []
+    ent = entitlements.peek_entitlement(recipe_db, "reader@example.com", "uid-reader")
+    assert ent.day_used == 0
+    assert "personal_info kind=phone" in caplog.text
+    assert "415-555-0100" not in caplog.text
+
+
+def test_ask_refuses_personal_details_replayed_in_history(user_client, recipe_db, fake):
+    """A crafted client can replay what was refused a turn ago."""
+    history = [{"role": "user", "content": "I live at 12 Main St"}, {"role": "assistant", "content": "Noted."}]
+    response = user_client.post("/api/assistant/ask", json={**ASK, "history": history})
+    assert response.status_code == 400
+    assert response.json()["detail"]["kind"] == "address"
+    assert fake.stream_calls == []
+
+
+def test_ask_allows_a_bare_zip_code(user_client, recipe_db, fake):
+    response, _ = _ask(user_client, {**ASK, "question": "where do I buy belacan near 94110?"})
+    assert response.status_code == 200
+
+
+def test_feedback_refuses_personal_details_in_the_comment(user_client, mock_db):
+    response = user_client.post("/api/assistant/feedback", json={
+        "slug": "hainanese-chicken-rice", "question": "How long do I poach it?",
+        "answer": "About 40 minutes.", "rating": "down", "comment": "email me at kevin@example.com",
+    })
+    assert response.status_code == 400
+    assert response.json()["detail"]["kind"] == "email"
+    assert mock_db.collection.return_value.add.called is False
 
 
 def test_ask_400_on_prompt_tag_lookalike(user_client, recipe_db, fake):
