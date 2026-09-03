@@ -222,11 +222,18 @@ jobs:
           # alongside STAGING_REDIS_CONFIGURED=true — the backend refuses to start
           # with federation and no Redis (config.validate_production_settings).
           TF_VAR_anthropic_federation_rule_id: ${{ vars.STAGING_ANTHROPIC_FEDERATION_RULE_ID }}
-          TF_VAR_anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
           TF_VAR_anthropic_service_account_id: ${{ vars.STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID }}
           TF_VAR_anthropic_workspace_id: ${{ vars.STAGING_ANTHROPIC_WORKSPACE_ID }}
         run: |
           set -euo pipefail
+          # The organization is one value for both environments, but the rule and
+          # service account are per-environment: passing the shared org id to an
+          # environment with no rule of its own is a partial set, which the root
+          # variable validation refuses — configuring production would break the
+          # staging apply. Pass it only alongside this environment's own rule.
+          if [ -n "${{ vars.STAGING_ANTHROPIC_FEDERATION_RULE_ID }}" ]; then
+            export TF_VAR_anthropic_organization_id="${{ vars.ANTHROPIC_ORGANIZATION_ID }}"
+          fi
           if [ "${{ vars.STAGING_REDIS_CONFIGURED }}" = "true" ]; then
             export TF_VAR_redis_url="${{ secrets.STAGING_REDIS_URL }}"
           fi
@@ -462,11 +469,18 @@ jobs:
           # alongside PROD_REDIS_CONFIGURED=true — the backend refuses to start
           # with federation and no Redis (config.validate_production_settings).
           TF_VAR_anthropic_federation_rule_id: ${{ vars.PROD_ANTHROPIC_FEDERATION_RULE_ID }}
-          TF_VAR_anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
           TF_VAR_anthropic_service_account_id: ${{ vars.PROD_ANTHROPIC_SERVICE_ACCOUNT_ID }}
           TF_VAR_anthropic_workspace_id: ${{ vars.PROD_ANTHROPIC_WORKSPACE_ID }}
         run: |
           set -euo pipefail
+          # The organization is one value for both environments, but the rule and
+          # service account are per-environment: passing the shared org id to an
+          # environment with no rule of its own is a partial set, which the root
+          # variable validation refuses — configuring production would break the
+          # staging apply. Pass it only alongside this environment's own rule.
+          if [ -n "${{ vars.PROD_ANTHROPIC_FEDERATION_RULE_ID }}" ]; then
+            export TF_VAR_anthropic_organization_id="${{ vars.ANTHROPIC_ORGANIZATION_ID }}"
+          fi
           if [ "${{ vars.PROD_REDIS_CONFIGURED }}" = "true" ]; then
             export TF_VAR_redis_url="${{ secrets.PROD_REDIS_URL }}"
           fi

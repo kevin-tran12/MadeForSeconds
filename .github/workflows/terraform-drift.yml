@@ -75,11 +75,10 @@ jobs:
           TF_VAR_deployment_target: ${{ matrix.environment }}
           TF_VAR_staging_gcp_project_id: ${{ vars.GCP_PROJECT_ID_STAGING }}
           # Sous Chef federation ids are plain variables, so the drift plan sees
-          # the real values and never proposes removing them. The organization
-          # is shared; the per-environment rule/service-account ids are picked
-          # in the run step — the `cond && a || b` expression form above would
-          # fall through to staging's ids whenever production's are unset.
-          TF_VAR_anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          # the real values and never proposes removing them. All three are
+          # picked in the run step: the organization is shared, but it may only
+          # be passed alongside this environment's own rule, or the plan sees a
+          # partial set and the root variable validation refuses it.
           TF_VAR_stripe_secret_key: ci-plan-placeholder-not-real
           TF_VAR_stripe_webhook_secret: ci-plan-placeholder-not-real
           TF_VAR_subscriber_jwt_secret: ci-plan-placeholder-not-real
@@ -99,6 +98,9 @@ jobs:
             export TF_VAR_anthropic_federation_rule_id="${{ vars.STAGING_ANTHROPIC_FEDERATION_RULE_ID }}"
             export TF_VAR_anthropic_service_account_id="${{ vars.STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID }}"
             export TF_VAR_anthropic_workspace_id="${{ vars.STAGING_ANTHROPIC_WORKSPACE_ID }}"
+          fi
+          if [ -n "${TF_VAR_anthropic_federation_rule_id:-}" ]; then
+            export TF_VAR_anthropic_organization_id="${{ vars.ANTHROPIC_ORGANIZATION_ID }}"
           fi
           if [ "${{ vars.PROD_INSTAGRAM_CONFIGURED }}" = "true" ]; then
             export TF_VAR_instagram_user_id="ci-plan-placeholder-not-real"
