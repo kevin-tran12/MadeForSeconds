@@ -380,3 +380,40 @@ class TestSousChefNotes:
         # Omitting the field leaves it untouched.
         svc.update_recipe(db, "doc-id", RecipeUpdate(title="Renamed"), source="admin")
         assert "sous_chef_notes" not in db.update.call_args[0][0]
+
+# ── Published-recipe helpers used by the public route and the Sous Chef ──────
+
+class TestPublishedHelpers:
+    def test_get_published_by_slug_returns_full_recipe(self, db):
+        db.stream.return_value = iter([_doc(id="r1", published=True)])
+        recipe = svc.get_published_by_slug(db, "test-recipe")
+        assert recipe.id == "r1" and recipe.slug == "test-recipe"
+
+    def test_get_published_by_slug_none_when_absent(self, db):
+        db.stream.return_value = iter([])
+        assert svc.get_published_by_slug(db, "nope") is None
+
+    def test_get_published_doc_is_json_safe_keeps_owner_notes_and_caches(self, db):
+        from app.cache import MemoryCache
+        db.stream.return_value = iter([_doc(id="r1", published=True, sous_chef_notes="use day-old rice")])
+        with patch("app.services.recipes.cache", MemoryCache(ttl=60)) as mem:
+            data = svc.get_published_doc(db, "test-recipe")
+            assert data["id"] == "r1"
+            assert data["sous_chef_notes"] == "use day-old rice"
+            assert data["created_at"] == "2026-01-01T00:00:00+00:00"  # ISO string, not datetime
+            assert "premium_content" not in data
+            assert mem.get("assistant:recipe:test-recipe") == data
+            # Second call is served from the cache; the exhausted stream is not re-read.
+            assert svc.get_published_doc(db, "test-recipe") == data
+
+    def test_get_published_doc_none_when_absent(self, db):
+        from app.cache import MemoryCache
+        db.stream.return_value = iter([])
+        with patch("app.services.recipes.cache", MemoryCache(ttl=60)):
+            assert svc.get_published_doc(db, "nope") is None
+
+    def test_get_all_published_returns_recipes(self, db):
+        db.stream.return_value = iter([_doc(id="a", published=True), _doc(id="b", published=True)])
+        recipes = svc.get_all_published(db, limit=10)
+        assert [r.id for r in recipes] == ["a", "b"]
+        db.limit.assert_called_with(10)
