@@ -232,12 +232,16 @@ def consume_quota(ent: Entitlement, now: datetime | None = None) -> Entitlement:
     return replace(ent, day_used=day_used, month_used=month_used)
 
 
-def refund_quota(ent: Entitlement, now: datetime | None = None) -> None:
-    """Give a question back (the upstream call failed before any answer)."""
+def refund_quota(ent: Entitlement, now: datetime | None = None) -> Entitlement:
+    """Give a question back — the upstream call failed before any answer, or
+    the chef asked the reader something instead of answering — and return the
+    entitlement as the reader now stands."""
     n = _now(now)
-    _add_counter(day_key(ent.email, n.date()), -1, DAY_QUOTA_TTL)
+    day_used = _add_counter(day_key(ent.email, n.date()), -1, DAY_QUOTA_TTL)
+    month_used = ent.month_used
     if ent.month_limit is not None:
-        _add_counter(month_key(ent.email, n), -1, MONTH_QUOTA_TTL)
+        month_used = _add_counter(month_key(ent.email, n), -1, MONTH_QUOTA_TTL)
+    return replace(ent, day_used=day_used, month_used=month_used)
 
 
 def quota_exhausted_detail(ent: Entitlement) -> dict[str, Any]:

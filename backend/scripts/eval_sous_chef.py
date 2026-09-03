@@ -47,6 +47,7 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
     question = assistant.sanitize_question(case["question"])
     spoke, _router_usage = await assistant.route(question)
     usage = None
+    clarify: list[dict] = []
     if spoke == spokes.OFFTOPIC_SPOKE:
         answer, refused, stop = assistant.REFUSAL_TEXT, True, "router"
     else:
@@ -55,14 +56,19 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
             recipe_doc=doc, catalogue=catalogue, question=question, history=[],
             view={"servings": doc.get("servings") or 4, "unit_system": "metric"},
             reader=case.get("reader"),
+            clarified=bool(case.get("clarified")),
         )
         parts: list[str] = []
         final = None
+        asked: list[dict] = []
         async for kind, payload in assistant.stream_answer(kwargs):
             if kind == "delta":
                 parts.append(payload)
+            elif kind == "clarify":
+                asked = payload
             elif kind == "final":
                 final = payload
+        clarify = assistant.clean_clarify_questions(asked)
         answer = "".join(parts)
         usage = final.usage if final else None
         stop = final.stop_reason if final else None
@@ -73,6 +79,12 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
     lower = answer.lower()
     words = len(answer.split())
 
+    if "clarifies" in expect and bool(clarify) != expect["clarifies"]:
+        asked_text = " | ".join(q["text"] for q in clarify)
+        notes.append(f"expected clarifies={expect['clarifies']}, got {bool(clarify)} [{asked_text}]")
+    for needle in expect.get("clarify_contains", []):
+        if not any(needle.lower() in q["text"].lower() for q in clarify):
+            notes.append(f"no clarifying question mentions {needle!r}")
     if "spoke" in expect and spoke != expect["spoke"]:
         notes.append(f"routed to {spoke}, expected {expect['spoke']}")
     if "refused" in expect and refused != expect["refused"]:
