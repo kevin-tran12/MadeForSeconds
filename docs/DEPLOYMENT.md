@@ -533,7 +533,7 @@ pushes new env vars to a running service, so it never surfaced there:
 | `WORKOS_AUTHKIT_DOMAIN` | Same value as your local root `terraform.tfvars` — one WorkOS environment typically serves both staging and production |
 | `STAGING_MCP_RESOURCE_URL` | Staging's Cloud Run URL + `/mcp` — `terraform output -raw cloud_run_url` from `terraform/environments/staging`, then append `/mcp` |
 | `PROD_MCP_RESOURCE_URL` | Same value as your local root `terraform.tfvars` |
-| `ANTHROPIC_ORGANIZATION_ID` | Optional, unlike the two above: the Anthropic organization UUID, shared by both environments. With the two below it switches the Sous Chef assistant on — see [Sous Chef assistant](#sous-chef-assistant) |
+| `ANTHROPIC_ORGANIZATION_ID` | Optional, unlike the two above: the Anthropic organization UUID, shared by both environments — the workflows pass it to an environment only alongside that environment's own rule id, since one of three is a partial set and Terraform refuses it. With the two below it switches the Sous Chef assistant on — see [Sous Chef assistant](#sous-chef-assistant) |
 | `PROD_ANTHROPIC_FEDERATION_RULE_ID` | Optional: the production federation rule (`fdrl_…`). Only alongside `PROD_REDIS_CONFIGURED=true`. Staging twin: `STAGING_ANTHROPIC_FEDERATION_RULE_ID` |
 | `PROD_ANTHROPIC_SERVICE_ACCOUNT_ID` | Optional: the Anthropic service account (`svac_…`) that rule targets. Staging twin: `STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID` |
 | `PROD_ANTHROPIC_WORKSPACE_ID` | Optional, and only when the rule is enabled for more than one workspace (`wrkspc_…`). Staging twin: `STAGING_ANTHROPIC_WORKSPACE_ID` |
