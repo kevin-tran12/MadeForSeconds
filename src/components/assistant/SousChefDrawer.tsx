@@ -172,7 +172,12 @@ export function SousChefDrawer({ recipe, servings, unitSystem, onClose }: Props)
             <ExampleQuestions recipe={recipe} servings={servings} onPick={(q) => void chef.send(q)} />
           </>
         ) : (
-          <MessageList messages={chef.messages} onRate={(id, rating) => void chef.sendFeedback(id, rating)} />
+          <MessageList
+            messages={chef.messages}
+            onRate={(id, rating) => void chef.sendFeedback(id, rating)}
+            onClarify={(questions, answers) => void chef.answerClarification(questions, answers)}
+            activity={chef.activity}
+          />
         )}
         {chef.error && chef.error.code !== 'refused' && (
           <div className="rounded-lg border border-danger-border bg-danger-surface px-3 py-2 text-sm text-danger" role="alert">

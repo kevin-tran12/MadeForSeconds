@@ -103,6 +103,58 @@ describe('useSousChef', () => {
     expect(result.current.rejectedText).toBeNull()
   })
 
+  it('shows the chef’s questions, then sends the answers back as one clarified turn', async () => {
+    const questions = [
+      { text: 'Do you have a wok?', kind: 'equipment' as const },
+      { text: 'What is your zip code?', kind: 'location' as const },
+    ]
+    vi.mocked(assistantApi.ask)
+      .mockImplementationOnce(async (_body, onEvent) => {
+        onEvent('meta', { quota })
+        onEvent('clarify', { questions })
+        onEvent('done', { usage: null, cost_micro_usd: 1, stop_reason: 'tool_use', truncated: false, refused: false, clarifying: true, quota })
+      })
+      .mockImplementationOnce(streamingAsk(['A carbon steel wok, then.']))
+
+    const { result } = renderHook(() => useSousChef(recipe, view))
+    await waitFor(() => expect(result.current.statusLoading).toBe(false))
+    await act(() => result.current.send('where do I buy holy basil?'))
+
+    const asked = result.current.messages.at(-1)!
+    expect(asked.clarify).toEqual(questions)
+    expect(asked.pending).toBeFalsy()
+
+    await act(() => result.current.answerClarification(questions, [
+      { kind: 'equipment', text: ' cast iron ' },
+      { kind: 'location', text: '94110' },
+    ]))
+
+    const second = vi.mocked(assistantApi.ask).mock.calls[1][0]
+    expect(second.question).toBe('Q: Do you have a wok?\nA: cast iron\n\nQ: What is your zip code?\nA: 94110')
+    expect(second.context).toEqual({
+      servings: 4,
+      unit_system: 'metric',
+      clarified: true,
+      answers: [{ kind: 'equipment', text: 'cast iron' }, { kind: 'location', text: '94110' }],
+    })
+    expect(result.current.messages.some((m) => m.clarify)).toBe(false)  // the form is gone once answered
+  })
+
+  it('skips unanswered questions and sends nothing when every field is blank', async () => {
+    const questions = [{ text: 'Do you have a wok?', kind: 'equipment' as const }, { text: 'Any allergies?', kind: 'diet' as const }]
+    vi.mocked(assistantApi.ask).mockImplementation(streamingAsk(['ok']))
+    const { result } = renderHook(() => useSousChef(recipe, view))
+    await waitFor(() => expect(result.current.statusLoading).toBe(false))
+
+    await act(() => result.current.answerClarification(questions, [{ kind: 'equipment', text: '' }, { kind: 'diet', text: '' }]))
+    expect(assistantApi.ask).not.toHaveBeenCalled()
+
+    await act(() => result.current.answerClarification(questions, [{ kind: 'equipment', text: 'wok' }, { kind: 'diet', text: '  ' }]))
+    const body = vi.mocked(assistantApi.ask).mock.calls[0][0]
+    expect(body.question).toBe('Q: Do you have a wok?\nA: wok')
+    expect(body.context.answers).toEqual([{ kind: 'equipment', text: 'wok' }])
+  })
+
   it('stop() aborts the in-flight request', async () => {
     let seenSignal: AbortSignal | undefined
     vi.mocked(assistantApi.ask).mockImplementation(

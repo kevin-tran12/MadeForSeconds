@@ -3,7 +3,9 @@ import { assistantApi } from '../lib/api'
 import { ApiError } from '../lib/api-client'
 import type { Recipe } from '../lib/types'
 import type { UnitSystem } from '../lib/units'
-import type { AskDoneEvent, AskErrorCode, AssistantStatus, ChatMessage, QuotaInfo } from '../lib/types-assistant'
+import type {
+  AskDoneEvent, AskErrorCode, AssistantStatus, ChatMessage, ClarifyAnswer, ClarifyQuestion, QuotaInfo,
+} from '../lib/types-assistant'
 
 export interface SousChefError {
   code: AskErrorCode
@@ -56,6 +58,10 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
   // A question refused for personal details goes back to the composer to be
   // edited, rather than sitting in the transcript for the reader to retype.
   const [rejectedText, setRejectedText] = useState<string | null>(null)
+  // What the chef is doing while nothing is streaming yet ("searching").
+  const [activity, setActivity] = useState<string | null>(null)
+  // One round of clarifying questions per thread; the server enforces it too.
+  const clarifiedRef = useRef(false)
   const abortRef = useRef<AbortController | null>(null)
   const viewRef = useRef(view)
   viewRef.current = view
@@ -78,11 +84,12 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
   }, [loadStatus])
 
   const send = useCallback(
-    async (rawQuestion: string) => {
+    async (rawQuestion: string, answers?: ClarifyAnswer[]) => {
       const question = rawQuestion.trim()
       if (!question || phase === 'streaming') return
       setError(null)
       setRejectedText(null)
+      setActivity(null)
 
       const history = messages
         .filter((m) => !m.pending && !m.refused && m.content.trim())
@@ -108,15 +115,27 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
             slug: recipe.slug,
             question,
             history,
-            context: { servings: viewRef.current.servings, unit_system: viewRef.current.unitSystem },
+            context: {
+              servings: viewRef.current.servings,
+              unit_system: viewRef.current.unitSystem,
+              ...(clarifiedRef.current ? { clarified: true } : {}),
+              ...(answers?.length ? { answers } : {}),
+            },
           },
           (event, data) => {
             if (event === 'meta') {
               setQuota((data as { quota: QuotaInfo }).quota)
             } else if (event === 'delta') {
               receivedAnything = true
+              setActivity(null)
               const text = (data as { text: string }).text
               patchPending((m) => ({ content: m.content + text }))
+            } else if (event === 'status') {
+              setActivity((data as { state?: string }).state === 'searching' ? 'Checking sources…' : null)
+            } else if (event === 'clarify') {
+              receivedAnything = true
+              clarifiedRef.current = true
+              patchPending({ clarify: (data as { questions: ClarifyQuestion[] }).questions })
             } else if (event === 'done') {
               const done = data as AskDoneEvent
               setQuota(done.quota)
@@ -148,6 +167,7 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
       } finally {
         abortRef.current = null
         setPhase('idle')
+        setActivity(null)
         setMessages((prev) => prev.map((m) => (m.id === pendingId && m.pending ? { ...m, pending: false } : m)))
       }
     },
@@ -160,7 +180,25 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
     abortRef.current?.abort()
     setMessages([])
     setError(null)
+    setActivity(null)
+    clarifiedRef.current = false
   }, [])
+
+  /** Send the reader's answers back as one turn: the chef sees them written
+   *  out, and the server gets the structured copy it validates. */
+  const answerClarification = useCallback(
+    async (questions: ClarifyQuestion[], answers: ClarifyAnswer[]) => {
+      const filled = answers.filter((a) => a.text.trim())
+      if (!filled.length) return
+      const lines = questions
+        .map((q, i) => ({ q, a: answers[i] }))
+        .filter(({ a }) => a?.text.trim())
+        .map(({ q, a }) => `Q: ${q.text}\nA: ${a.text.trim()}`)
+      setMessages((prev) => prev.map((m) => (m.clarify ? { ...m, clarify: undefined } : m)))
+      await send(lines.join('\n\n'), filled.map((a) => ({ kind: a.kind, text: a.text.trim() })))
+    },
+    [send]
+  )
 
   const sendFeedback = useCallback(
     async (messageId: string, rating: 'up' | 'down') => {
@@ -180,7 +218,8 @@ export function useSousChef(recipe: Recipe, view: { servings: number; unitSystem
   )
 
   return {
-    messages, phase, status, statusLoading, quota, error, rejectedText, send, stop, reset, sendFeedback, loadStatus,
+    messages, phase, status, statusLoading, quota, error, rejectedText, activity,
+    send, stop, reset, sendFeedback, answerClarification, loadStatus,
     clearError: () => setError(null),
     clearRejectedText: () => setRejectedText(null),
   }

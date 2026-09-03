@@ -47,11 +47,30 @@ export interface AssistantStatus {
   levels: CookingLevel[]
 }
 
+/** What a clarifying question is about. `location` is only ever a zip code. */
+export type ClarifyKind = 'location' | 'equipment' | 'quantity' | 'diet' | 'other'
+
+export interface ClarifyQuestion {
+  text: string
+  kind: ClarifyKind
+}
+
+export interface ClarifyAnswer {
+  kind: ClarifyKind
+  text: string
+}
+
 export interface AskRequest {
   slug: string
   question: string
   history: { role: 'user' | 'assistant'; content: string }[]
-  context: { servings: number; unit_system: 'imperial' | 'metric' }
+  context: {
+    servings: number
+    unit_system: 'imperial' | 'metric'
+    /** True for every send after the chef asked its questions: one round per thread. */
+    clarified?: boolean
+    answers?: ClarifyAnswer[]
+  }
 }
 
 export interface AskUsage {
@@ -71,6 +90,8 @@ export interface AskDoneEvent {
   searches: number
   /** Which specialist answered: technique, ingredients, safety, scaling, sourcing, catalogue, general, offtopic. */
   spoke: string
+  /** True when the chef asked the reader something instead of answering; the question is refunded. */
+  clarifying: boolean
   quota: QuotaInfo
 }
 
@@ -98,4 +119,6 @@ export interface ChatMessage {
   truncated?: boolean
   refused?: boolean
   rated?: 'up' | 'down'
+  /** Present while this bubble is waiting on the reader's answers. */
+  clarify?: ClarifyQuestion[]
 }

@@ -751,7 +751,8 @@ def test_ask_reports_and_charges_for_server_side_searches(user_client, recipe_db
     with patch("app.services.assistant._get_client", return_value=client):
         _, body = _ask(user_client)
     events = _parse_sse(body)
-    assert [e for e, _ in events] == ["meta", "delta", "done"]  # "searching" is not a client event yet
+    assert [e for e, _ in events] == ["meta", "status", "delta", "done"]
+    assert events[1][1] == {"state": "searching"}
     done = events[-1][1]
     assert done["searches"] == 2
     assert done["cost_micro_usd"] == 3670 + 65 + 2 * llm_budget.WEB_SEARCH_MICRO_PER_REQUEST

@@ -81,6 +81,65 @@ describe('SousChefDrawer', () => {
     expect(screen.getByText('Link that donation').getAttribute('href')).toBe('/support/link/')
   })
 
+  it('asks the chef’s questions in a form and sends the answers back', async () => {
+    const questions = [
+      { text: 'Do you have a wok?', kind: 'equipment' },
+      { text: 'What is your zip code?', kind: 'location' },
+    ]
+    vi.mocked(useAuth).mockReturnValue({ ...baseAuth, user: { email: 'k@x.y' }, me: me() } as never)
+    vi.mocked(assistantApi.ask)
+      .mockImplementationOnce(async (_body, onEvent) => {
+        onEvent('meta', { quota })
+        onEvent('clarify', { questions })
+        onEvent('done', { usage: null, cost_micro_usd: 1, stop_reason: 'tool_use', truncated: false, refused: false, clarifying: true, quota })
+      })
+      .mockImplementationOnce(async (_body, onEvent) => {
+        onEvent('delta', { text: 'Try the Asian grocer on your street.' })
+        onEvent('done', { usage: null, cost_micro_usd: 1, stop_reason: 'end_turn', truncated: false, refused: false, clarifying: false, quota })
+      })
+    renderDrawer()
+
+    const box = (await screen.findByLabelText('Ask the Sous Chef')) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: 'where do I buy holy basil?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    expect(await screen.findByText('Do you have a wok?')).toBeDefined()
+    expect(screen.queryByLabelText('Helpful')).toBeNull()  // nothing to rate yet
+
+    const zip = screen.getByLabelText('What is your zip code?') as HTMLInputElement
+    fireEvent.change(zip, { target: { value: 'San Francisco' } })
+    expect(screen.getByText(/five-digit zip code/i)).toBeDefined()
+    expect((screen.getByRole('button', { name: 'Answer' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.change(zip, { target: { value: '94110' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Answer' }))
+
+    expect(await screen.findByText('Try the Asian grocer on your street.')).toBeDefined()
+    const second = vi.mocked(assistantApi.ask).mock.calls[1][0]
+    expect(second.context.clarified).toBe(true)
+    expect(second.context.answers).toEqual([{ kind: 'location', text: '94110' }])
+    expect(screen.queryByRole('button', { name: 'Answer' })).toBeNull()
+  })
+
+  it('says what it is doing while it searches', async () => {
+    let finish: () => void = () => {}
+    vi.mocked(useAuth).mockReturnValue({ ...baseAuth, user: { email: 'k@x.y' }, me: me() } as never)
+    vi.mocked(assistantApi.ask).mockImplementation(async (_body, onEvent) => {
+      onEvent('meta', { quota })
+      onEvent('status', { state: 'searching' })
+      await new Promise<void>((resolve) => { finish = resolve })
+    })
+    renderDrawer()
+
+    const box = await screen.findByLabelText('Ask the Sous Chef')
+    fireEvent.change(box, { target: { value: 'where do I buy belacan?' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }))
+
+    expect(await screen.findByText('Checking sources…')).toBeDefined()
+    finish()
+    await waitFor(() => expect(screen.queryByText('Checking sources…')).toBeNull())
+  })
+
   it('warns about personal details and puts the question back in the composer', async () => {
     const { ApiError } = await import('../../../lib/api-client')
     vi.mocked(useAuth).mockReturnValue({ ...baseAuth, user: { email: 'k@x.y' }, me: me() } as never)
