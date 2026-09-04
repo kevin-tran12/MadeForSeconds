@@ -80,6 +80,20 @@ run "defaults_keep_audience_enforcement_on" {
   }
 }
 
+run "configuring_workos_without_an_owner_subject_is_refused" {
+  command = plan
+
+  # The configuration that actually shipped after #72: issuer and resource
+  # set, owner blank. It applied cleanly and rejected every MCP token.
+  variables {
+    workos_authkit_domain = "https://example.authkit.app"
+    mcp_resource_url      = "https://backend.example.invalid/mcp"
+    mcp_owner_subject     = ""
+  }
+
+  expect_failures = [var.mcp_owner_subject]
+}
+
 run "an_owner_subject_that_is_not_a_workos_user_id_is_refused" {
   command = plan
 

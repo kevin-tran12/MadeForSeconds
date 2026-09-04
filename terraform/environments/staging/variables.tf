@@ -58,14 +58,9 @@ variable "mcp_resource_url" {
 }
 
 variable "mcp_owner_subject" {
-  description = "WorkOS user id (user_…) accepted as the MCP owner — the same account as production when one AuthKit environment serves both"
+  description = "WorkOS user id (user_…) accepted as the MCP owner — the same account as production when one AuthKit environment serves both. Validated by the root module (required once workos_authkit_domain is set)"
   type        = string
   default     = ""
-
-  validation {
-    condition     = var.mcp_owner_subject == "" || startswith(var.mcp_owner_subject, "user_")
-    error_message = "mcp_owner_subject must be a WorkOS user id (user_…) or blank."
-  }
 }
 
 variable "mcp_enforce_audience" {

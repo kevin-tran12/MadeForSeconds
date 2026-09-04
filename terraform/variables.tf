@@ -60,6 +60,15 @@ variable "mcp_owner_subject" {
     condition     = var.mcp_owner_subject == "" || startswith(var.mcp_owner_subject, "user_")
     error_message = "mcp_owner_subject must be a WorkOS user id (user_…) or blank."
   }
+
+  # Configuring the OAuth issuer without an owner is the exact misconfiguration
+  # that shipped with #72: the apply succeeds, the revision starts, and the
+  # MCP server rejects every token with only a per-request warning. Refuse it
+  # at plan time instead, where the message can say what to set.
+  validation {
+    condition     = var.workos_authkit_domain == "" || var.mcp_owner_subject != ""
+    error_message = "mcp_owner_subject is required whenever workos_authkit_domain is set: WorkOS access tokens carry no email claim by default, so admin_emails alone rejects every MCP token. Set it to the owner's WorkOS user id (user_…, from WorkOS → Users) — in the pipeline, the MCP_OWNER_SUBJECT repository variable."
+  }
 }
 
 variable "mcp_enforce_audience" {

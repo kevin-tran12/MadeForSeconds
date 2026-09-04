@@ -70,7 +70,7 @@ mcp_resource_url      = ""   # https://<cloud-run-url>/mcp
 # mcp_resource_url must also be registered verbatim as a Resource Indicator in
 # WorkOS or no token carries a matching aud. Runbook: docs/DEPLOYMENT.md § MCP
 # token binding.
-mcp_owner_subject    = ""   # user_…
+mcp_owner_subject    = ""   # user_… — required once workos_authkit_domain is set
 mcp_enforce_audience = true # false only as the documented escape hatch
 
 # Shared cache. Without it the app falls back to in-memory, which resets on every

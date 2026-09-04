@@ -44,7 +44,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `github_repo` | Repository name (e.g. `MadeForSeconds`) |
 | `workos_authkit_domain` | WorkOS AuthKit domain — OAuth issuer for MCP (e.g. `https://<slug>.authkit.app`) |
 | `mcp_resource_url` | Public URL of the MCP endpoint (e.g. `https://<cloud-run-url>/mcp`) |
-| `mcp_owner_subject` | WorkOS user id (`user_…`) accepted as the MCP owner — see [MCP token binding](#mcp-server-recipeexpense-automation) |
+| `mcp_owner_subject` | WorkOS user id (`user_…`) accepted as the MCP owner; required once `workos_authkit_domain` is set — see [MCP token binding](#mcp-server-recipeexpense-automation) |
 | `mcp_enforce_audience` | Leave `true`; the documented escape hatch, see [MCP token binding](#mcp-server-recipeexpense-automation) |
 | `stripe_secret_key` | Stripe secret key (`sk_live_…`) |
 | `stripe_webhook_secret` | Stripe webhook signing secret (`whsec_…`) |
@@ -536,7 +536,7 @@ pushes new env vars to a running service, so it never surfaced there:
 | `STAGING_MCP_RESOURCE_URL` | Staging's Cloud Run URL + `/mcp` — `terraform output -raw cloud_run_url` from `terraform/environments/staging`, then append `/mcp` |
 | `PROD_MCP_RESOURCE_URL` | Same value as your local root `terraform.tfvars` |
 | `MCP_OWNER_SUBJECT` | The owner's WorkOS user id (`user_…`), shared by both environments. Without it the MCP server can only match an `email` claim, which WorkOS access tokens do not carry by default — so every MCP token is rejected and the claude.ai connector reports an auth failure. See [MCP token binding](#mcp-server-recipeexpense-automation) |
-| `MCP_ENFORCE_AUDIENCE` | Optional, defaults to `true` when unset. `false` is the documented escape hatch only |
+| `PROD_MCP_ENFORCE_AUDIENCE` | Optional, defaults to `true` when unset. `false` is the documented escape hatch only. Staging twin: `STAGING_MCP_ENFORCE_AUDIENCE` — per environment, since each URL must be its own Resource Indicator |
 | `ANTHROPIC_ORGANIZATION_ID` | Optional, unlike the two above: the Anthropic organization UUID, shared by both environments — the workflows pass it to an environment only alongside that environment's own rule id, since one of three is a partial set and Terraform refuses it. With the two below it switches the Sous Chef assistant on — see [Sous Chef assistant](#sous-chef-assistant) |
 | `PROD_ANTHROPIC_FEDERATION_RULE_ID` | Optional: the production federation rule (`fdrl_…`). Only alongside `PROD_REDIS_CONFIGURED=true`. Staging twin: `STAGING_ANTHROPIC_FEDERATION_RULE_ID` |
 | `PROD_ANTHROPIC_SERVICE_ACCOUNT_ID` | Optional: the Anthropic service account (`svac_…`) that rule targets. Staging twin: `STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID` |
@@ -1279,13 +1279,18 @@ HTTP). Auth is **OAuth 2.1** — the MCP server is a *resource server* that only
 validates tokens; **WorkOS AuthKit** is the authorization server (login, consent,
 PKCE, Dynamic Client Registration). The SDK serves
 `/.well-known/oauth-protected-resource/mcp` so clients auto-discover WorkOS.
-Access is gated to `ADMIN_EMAILS`. Production startup fails if
-`WORKOS_AUTHKIT_DOMAIN` / `MCP_RESOURCE_URL` are unset.
+Access is gated to the owner's WorkOS user id (`MCP_OWNER_SUBJECT`), with
+`ADMIN_EMAILS` only as a fallback for tokens that carry an `email` claim —
+which WorkOS access tokens do not, by default. Production startup fails if
+`WORKOS_AUTHKIT_DOMAIN` / `MCP_RESOURCE_URL` are unset, and `terraform plan`
+refuses a `workos_authkit_domain` with no `mcp_owner_subject`.
 
 **WorkOS one-time setup:** create an AuthKit-enabled environment, enable Dynamic
-Client Registration, and restrict sign-in to the admin email. Set
-`workos_authkit_domain` (the issuer, `https://<slug>.authkit.app`) and
-`mcp_resource_url` (`https://<cloud-run-url>/mcp`) in `terraform.tfvars`.
+Client Registration, restrict sign-in to the admin email, and register the
+MCP URL as a Resource Indicator (see token binding below). Set
+`workos_authkit_domain` (the issuer, `https://<slug>.authkit.app`),
+`mcp_resource_url` (`https://<cloud-run-url>/mcp`) and `mcp_owner_subject`
+(the owner's `user_…` id) in `terraform.tfvars`.
 
 **MCP token binding.** Beyond signature and issuer, every access token is
 checked against three things (`backend/app/mcp_auth.py`) — a security review
@@ -1320,8 +1325,9 @@ one the token's audience is the environment client id and it is rejected.
 
 `MCP_OWNER_SUBJECT` and `MCP_ENFORCE_AUDIENCE` are Terraform variables
 (`mcp_owner_subject`, `mcp_enforce_audience` in root and staging), written to
-the Cloud Run template on every apply and fed from the `MCP_OWNER_SUBJECT` /
-`MCP_ENFORCE_AUDIENCE` repository variables in the pipeline (see
+the Cloud Run template on every apply and fed from the `MCP_OWNER_SUBJECT` and
+`PROD_MCP_ENFORCE_AUDIENCE` / `STAGING_MCP_ENFORCE_AUDIENCE` repository
+variables in the pipeline (see
 [Merge-to-main promotion pipeline](#merge-to-main-promotion-pipeline)).
 `MCP_EXPECTED_AUDIENCE` and `MCP_REQUIRED_SCOPES` remain backend-only
 settings with safe defaults; add them as Cloud Run env vars if you ever need
