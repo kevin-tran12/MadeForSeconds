@@ -62,3 +62,5 @@ frontend_url = "" # the staging Cloudflare Pages URL, once PR 9 creates it
 
 # workos_authkit_domain = ""
 # mcp_resource_url      = ""
+# mcp_owner_subject     = "" # user_… — same account as production
+# mcp_enforce_audience  = true

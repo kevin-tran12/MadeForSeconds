@@ -72,6 +72,11 @@ output "secret_pruner_canary_id" {
   value       = try(module.secret-maintenance[0].canary_secret_id, null)
 }
 
+output "mcp_token_binding_env" {
+  description = "MCP_* env vars on the Cloud Run template, name => value. See terraform/tests/mcp_token_binding.tftest.hcl."
+  value       = module.backend-service.mcp_token_binding_env
+}
+
 output "assistant_federation_env_names" {
   description = "Anthropic federation env vars on the Cloud Run template (the Sous Chef assistant); empty means the assistant is off. See terraform/tests/assistant_federation.tftest.hcl."
   value       = module.backend-service.assistant_federation_env_names

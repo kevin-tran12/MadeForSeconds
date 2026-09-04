@@ -215,6 +215,11 @@ jobs:
           # a running service, so it never surfaced there.
           TF_VAR_workos_authkit_domain: ${{ vars.WORKOS_AUTHKIT_DOMAIN }}
           TF_VAR_mcp_resource_url: ${{ vars.STAGING_MCP_RESOURCE_URL }}
+          # MCP token binding. The owner's WorkOS user id is shared with
+          # production (one AuthKit environment, one owner); a bool TF_VAR
+          # cannot be blank, hence the 'true' fallback for an unset variable.
+          TF_VAR_mcp_owner_subject: ${{ vars.MCP_OWNER_SUBJECT }}
+          TF_VAR_mcp_enforce_audience: ${{ vars.MCP_ENFORCE_AUDIENCE || 'true' }}
           # Sous Chef assistant — Anthropic Workload Identity Federation ids.
           # Repository *variables*, not secrets: the runtime service account's
           # identity token is the credential; these only name the rule. Unset
@@ -462,6 +467,9 @@ jobs:
           # here at all.
           TF_VAR_workos_authkit_domain: ${{ vars.WORKOS_AUTHKIT_DOMAIN }}
           TF_VAR_mcp_resource_url: ${{ vars.PROD_MCP_RESOURCE_URL }}
+          # See the identical comment on staging-apply.
+          TF_VAR_mcp_owner_subject: ${{ vars.MCP_OWNER_SUBJECT }}
+          TF_VAR_mcp_enforce_audience: ${{ vars.MCP_ENFORCE_AUDIENCE || 'true' }}
           # Sous Chef assistant — Anthropic Workload Identity Federation ids.
           # Repository *variables*, not secrets: the runtime service account's
           # identity token is the credential; these only name the rule. Unset

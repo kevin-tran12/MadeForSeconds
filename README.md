@@ -589,7 +589,7 @@ Or push to `main` — [`.github/workflows/deploy.yml`](.github/workflows/deploy.
 | `ANTHROPIC_API_KEY` | (Optional, local only) Anthropic key for the Sous Chef assistant — production authenticates with Workload Identity Federation instead (`ANTHROPIC_FEDERATION_RULE_ID` + organization and service-account ids, no key; see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)) |
 | `REDIS_URL` | Upstash Redis URL (optional — falls back to in-memory) |
 
-The MCP server needs no configuration locally — it runs unauthenticated in dev. In production `WORKOS_AUTHKIT_DOMAIN` and `MCP_RESOURCE_URL` are both required, and the backend refuses to start without them (see `validate_production_settings` in [`backend/app/config.py`](backend/app/config.py)). Full production variable reference: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+The MCP server needs no configuration locally — it runs unauthenticated in dev. In production `WORKOS_AUTHKIT_DOMAIN` and `MCP_RESOURCE_URL` are both required, and the backend refuses to start without them (see `validate_production_settings` in [`backend/app/config.py`](backend/app/config.py)). `MCP_OWNER_SUBJECT` (the owner's WorkOS `user_…` id) is required in practice too: WorkOS access tokens carry no email claim by default, so without it every MCP token fails the owner check. Full production variable reference: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ---
 

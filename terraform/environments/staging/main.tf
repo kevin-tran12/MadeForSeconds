@@ -73,6 +73,8 @@ module "app" {
 
   workos_authkit_domain  = var.workos_authkit_domain
   mcp_resource_url       = var.mcp_resource_url
+  mcp_owner_subject      = var.mcp_owner_subject
+  mcp_enforce_audience   = var.mcp_enforce_audience
   redis_url              = var.redis_url
   stripe_secret_key      = var.stripe_secret_key
   stripe_webhook_secret  = var.stripe_webhook_secret
