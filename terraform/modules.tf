@@ -131,6 +131,8 @@ module "backend-service" {
 
   workos_authkit_domain  = var.workos_authkit_domain
   mcp_resource_url       = var.mcp_resource_url
+  mcp_owner_subject      = var.mcp_owner_subject
+  mcp_enforce_audience   = var.mcp_enforce_audience
   frontend_url           = var.frontend_url
   alert_email            = var.alert_email
   instagram_user_id      = var.instagram_user_id

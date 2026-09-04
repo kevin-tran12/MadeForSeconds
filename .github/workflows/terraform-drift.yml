@@ -94,11 +94,17 @@ jobs:
             export TF_VAR_anthropic_federation_rule_id="${{ vars.PROD_ANTHROPIC_FEDERATION_RULE_ID }}"
             export TF_VAR_anthropic_service_account_id="${{ vars.PROD_ANTHROPIC_SERVICE_ACCOUNT_ID }}"
             export TF_VAR_anthropic_workspace_id="${{ vars.PROD_ANTHROPIC_WORKSPACE_ID }}"
+            export TF_VAR_mcp_enforce_audience="${{ vars.PROD_MCP_ENFORCE_AUDIENCE || 'true' }}"
           else
             export TF_VAR_anthropic_federation_rule_id="${{ vars.STAGING_ANTHROPIC_FEDERATION_RULE_ID }}"
             export TF_VAR_anthropic_service_account_id="${{ vars.STAGING_ANTHROPIC_SERVICE_ACCOUNT_ID }}"
             export TF_VAR_anthropic_workspace_id="${{ vars.STAGING_ANTHROPIC_WORKSPACE_ID }}"
+            export TF_VAR_mcp_enforce_audience="${{ vars.STAGING_MCP_ENFORCE_AUDIENCE || 'true' }}"
           fi
+          # MCP owner subject: plain variable, one value for both environments,
+          # so the drift plan sees what deploy.yml applied rather than
+          # proposing to blank it every night.
+          export TF_VAR_mcp_owner_subject="${{ vars.MCP_OWNER_SUBJECT }}"
           if [ -n "${TF_VAR_anthropic_federation_rule_id:-}" ]; then
             export TF_VAR_anthropic_organization_id="${{ vars.ANTHROPIC_ORGANIZATION_ID }}"
           fi

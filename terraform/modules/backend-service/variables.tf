@@ -56,6 +56,18 @@ variable "mcp_resource_url" {
   type        = string
 }
 
+variable "mcp_owner_subject" {
+  description = "WorkOS user id (user_…) accepted as the MCP owner via the token's sub claim. Blank leaves only the admin-email match."
+  type        = string
+  default     = ""
+}
+
+variable "mcp_enforce_audience" {
+  description = "Whether the MCP server requires the token's aud claim to equal mcp_resource_url."
+  type        = bool
+  default     = true
+}
+
 variable "frontend_url" {
   description = "Frontend URL for building links in emails"
   type        = string

@@ -18,6 +18,14 @@ output "referenced_secret_ids" {
   value       = toset(concat([var.secret_ids.admin_emails], [for entry in local.optional_secret_env : entry.secret_id]))
 }
 
+output "mcp_token_binding_env" {
+  description = "Every MCP_* env var on the Cloud Run template, name => value, read from the template itself rather than from the variables that feed it. Asserted by terraform/tests/mcp_token_binding.tftest.hcl so the owner-subject and audience settings cannot silently drop off the revision again."
+  value = {
+    for entry in google_cloud_run_v2_service.backend.template[0].containers[0].env :
+    entry.name => entry.value if startswith(entry.name, "MCP_")
+  }
+}
+
 output "assistant_federation_env_names" {
   description = "Names of the Anthropic Workload Identity Federation env vars the Cloud Run template injects for the Sous Chef assistant — empty when the assistant is off. Asserted by terraform/tests/assistant_federation.tftest.hcl."
   value       = toset(keys(local.assistant_federation_env))
