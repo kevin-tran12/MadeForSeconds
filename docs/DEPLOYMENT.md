@@ -484,7 +484,13 @@ the freshly built local image with Trivy (`--severity HIGH,CRITICAL
 image never gets pushed to either registry. `.trivyignore` (repo root) is
 the documented, dated allowlist for a HIGH/CRITICAL finding with no fix
 available yet; every entry carries an expiry and the reason it's safe to
-defer, per the file's own header comment. The same step also emits a
+defer, per the file's own header comment. Expect the gate to go red with
+no code change — the image is digest-pinned, so what moves is the
+vulnerability database — and treat each waiver as a dated loan: on or before
+its expiry, check the Debian tracker for the package, re-run the scan without
+`--ignorefile`, and either bump the base-image digest and delete the entry
+or open a fresh dated one with the tracker's current status. Never re-date
+in place. The same step also emits a
 CycloneDX SBOM (uploaded as a build artifact, `sbom-backend-<sha>`) and a
 GitHub-native SLSA provenance attestation against the verified staging
 digest (`actions/attest-build-provenance`, independently checkable via `gh
