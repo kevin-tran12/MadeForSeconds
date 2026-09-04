@@ -344,6 +344,16 @@ class TestRecipeSlices:
         assert assistant.compact_recipe(RECIPE_DOC) == assistant.compact_recipe(RECIPE_DOC, keep=None)
         assert "instructions" in assistant.compact_recipe(RECIPE_DOC)
 
+    @pytest.mark.parametrize("name", ["technique", "ingredients", "safety", "scaling", "sourcing"])
+    def test_every_recipe_spoke_sees_the_owners_own_words(self, name):
+        """A substitution warning, a doneness checklist and a "don't double this"
+        get written wherever they fit, not filed by spoke. Slicing the Chef's
+        Secrets out of the ingredients spoke is how an answer once recommended
+        the single-cut swap that this recipe's own secret warns against."""
+        sliced = assistant.compact_recipe(RECIPE_DOC, keep=spokes.SPOKES[name].keep)
+        assert sliced["secrets"][0]["title"] == "The ice bath"
+        assert "Thai basil works" in sliced["chef_guidance"]
+
     @pytest.mark.parametrize("name", [n for n in spokes.SPOKES if n != spokes.OFFTOPIC_SPOKE])
     def test_every_spoke_still_names_the_dish(self, name):
         sliced = assistant.compact_recipe(RECIPE_DOC, keep=spokes.SPOKES[name].keep)
@@ -816,7 +826,10 @@ def test_ask_routes_to_a_spoke_and_reports_it(user_client, recipe_db, configured
     kw = client.stream_calls[0]
     assert kw["system"][1]["text"] == spokes.SAFETY.rules
     assert "<catalogue>" not in kw["system"][1]["text"]
-    assert "The ice bath" not in kw["messages"][0]["content"][0]["text"]  # secrets are not this spoke's
+    recipe = kw["messages"][0]["content"][0]["text"]
+    assert "Poach the chicken" in recipe  # the method, which a doneness answer needs
+    assert "The ice bath" in recipe  # the owner's words reach every recipe spoke
+    assert "hainanese-chicken-rice | Hainanese" not in recipe  # but not the catalogue
 
 
 def test_ask_clarifies_instead_of_answering_and_gives_the_question_back(user_client, recipe_db, configured):
