@@ -19,6 +19,13 @@ the anti-injection rule stay in CORE_RULES, shared by every spoke. A
 misrouted doneness question must still meet the USDA figure, and a
 misrouted substitution question must still carry the allergen line.
 
+The owner's own words — `secrets` (the Chef's Secrets) and `chef_guidance`
+(sous_chef_notes) — go to every spoke that sees the recipe at all, whatever
+the question. They are short, and they are the most opinionated content on
+the page: a substitution warning, a doneness checklist, a "don't double
+this" all get written wherever they fit rather than filed by spoke. Slicing
+them out is how an answer ends up contradicting the recipe it is quoting.
+
 Caching: CORE_RULES is the same bytes for every reader, recipe, and spoke,
 so the largest cache entry survives a spoke switch. The spoke's rules and
 the recipe slice sit behind their own breakpoints and are rewritten when a
@@ -79,7 +86,7 @@ TECHNIQUE = Spoke(
 
 INGREDIENTS = Spoke(
     name="ingredients",
-    keep=("categories", "labels", "ingredients", "components", "chef_guidance"),
+    keep=("categories", "labels", "ingredients", "components", "secrets", "chef_guidance"),
     sentinel="A substitution answer says what changes",
     rules="""YOUR BEAT: ingredients — what is in the dish, what each thing does, and what can stand in for it.
 
@@ -93,7 +100,7 @@ INGREDIENTS = Spoke(
 SAFETY = Spoke(
     name="safety",
     keep=("prep_time_minutes", "cook_time_minutes", "ingredients", "instructions",
-          "components", "chef_guidance"),
+          "components", "secrets", "chef_guidance"),
     sentinel="Give the temperature, not a question back",
     rules="""YOUR BEAT: food safety — doneness, temperatures, storage, and reheating.
 
@@ -106,7 +113,8 @@ SAFETY = Spoke(
 
 SCALING = Spoke(
     name="scaling",
-    keep=("servings", "prep_time_minutes", "cook_time_minutes", "ingredients", "components"),
+    keep=("servings", "prep_time_minutes", "cook_time_minutes", "ingredients", "components",
+          "secrets", "chef_guidance"),
     sentinel="what does not scale with the ingredients",
     rules="""YOUR BEAT: scaling and timing — cooking this for a different number of people.
 
@@ -118,7 +126,7 @@ SCALING = Spoke(
 
 SOURCING = Spoke(
     name="sourcing",
-    keep=("categories", "labels", "ingredients", "components", "chef_guidance"),
+    keep=("categories", "labels", "ingredients", "components", "secrets", "chef_guidance"),
     include_stores=True,
     web_search=True,
     timeout_seconds=90.0,
