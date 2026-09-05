@@ -1419,7 +1419,20 @@ idempotency, same as the rate budgets above — there is no "did my earlier
 call from another session already land" ambiguity to resolve there, since
 dev is a single trusted operator working synchronously.
 
-
+**Second factor.** `create_expense` via MCP does not require the admin-UI
+expense route's TOTP second factor (`require_totp_session`) — a deliberate
+decision (`app/mcp_auth.py`'s docstring, point 4), not an oversight. It is
+create-only: no MCP tool updates or deletes an existing expense. The
+audience + owner-subject binding already checked on every MCP token proves
+both "this came from a WorkOS-authenticated session" and "that session
+belongs to the site owner specifically" — the two things TOTP adds on top
+of a bare credential elsewhere. Every expense created via MCP carries an
+`actor` attribution (`"mcp:<client_id>"`, `app/mcp_server/wrapper.py`'s
+`current_actor()`) into both its own revision history's `changed_by` field
+and the audit trail above, so the gap is auditable rather than invisible.
+**Recommended if this needs hardening further:** turn on WorkOS AuthKit's
+own MFA enrollment for the owner's account — that covers the WorkOS login
+itself, rather than bolting a second, separate factor onto this one path.
 
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,

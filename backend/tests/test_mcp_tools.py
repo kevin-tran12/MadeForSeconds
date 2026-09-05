@@ -518,6 +518,24 @@ class TestCreateExpenseReceiptUrl:
         assert result["receipt_uploaded"] is False
         assert result["item_count"] == 1
 
+    def test_changed_by_defaults_to_mcp_without_a_client_id(self, db):
+        """S8: no OAuth context in this test environment, matching dev
+        mode's own unauthenticated MCP server — changed_by falls back to
+        the bare "mcp" literal, not a crash or an empty string."""
+        mcp_server.create_expense(**self._BASE)
+        revision = db.transaction.return_value.set.call_args_list[1][0][1]
+        assert revision["changed_by"] == "mcp"
+
+    def test_changed_by_carries_the_client_id_when_authenticated(self, db):
+        from types import SimpleNamespace
+        with patch(
+            "app.mcp_server.wrapper.get_access_token",
+            return_value=SimpleNamespace(client_id="claude-code", subject=None),
+        ):
+            mcp_server.create_expense(**self._BASE)
+        revision = db.transaction.return_value.set.call_args_list[1][0][1]
+        assert revision["changed_by"] == "mcp:claude-code"
+
 
 # ── publish_instagram_post ────────────────────────────────────────────────────
 

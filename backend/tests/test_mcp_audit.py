@@ -71,7 +71,9 @@ class TestRecord:
     def test_writes_the_full_expected_shape(self):
         mock_db = MagicMock()
         with patch("app.mcp_server.audit.get_db", return_value=mock_db):
-            audit.record("update_recipe", {"recipe_id": "r1", "title": "New"}, {"id": "r1"}, "client-a", None)
+            audit.record(
+                "update_recipe", {"recipe_id": "r1", "title": "New"}, {"id": "r1"}, "client-a", None, "mcp:client-a",
+            )
 
         mock_db.collection.assert_called_once_with("mcp_audit")
         doc = mock_db.collection.return_value.document.return_value.set.call_args[0][0]
@@ -80,6 +82,7 @@ class TestRecord:
         assert doc["error"] is None
         assert doc["client_id"] == "client-a"
         assert doc["subject"] is None
+        assert doc["actor"] == "mcp:client-a"
         assert doc["target"] == {"recipe_id": "r1"}
         assert doc["arg_keys"] == ["recipe_id", "title"]
         assert "at" in doc
@@ -96,6 +99,7 @@ class TestRecord:
                 {"id": "r1"},
                 None,
                 None,
+                "mcp",
             )
 
         doc = mock_db.collection.return_value.document.return_value.set.call_args[0][0]
@@ -107,6 +111,8 @@ class TestRecord:
     def test_a_write_failure_is_swallowed_and_logged(self, caplog):
         with patch("app.mcp_server.audit.get_db", side_effect=RuntimeError("firestore down")):
             with caplog.at_level(logging.WARNING, logger="app.mcp_server.audit"):
-                audit.record("update_recipe", {"recipe_id": "r1"}, {"id": "r1"}, None, None)  # must not raise
+                audit.record(
+                    "update_recipe", {"recipe_id": "r1"}, {"id": "r1"}, None, None, "mcp",
+                )  # must not raise
 
         assert any("mcp audit write failed" in r.getMessage() for r in caplog.records)

@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.mcp_server import wrapper
 from app.mcp_server.wrapper import mcp_tool
 from app.services import instagram, recipes as recipe_service
 
@@ -253,6 +254,7 @@ class TestAuditTrail:
         assert written["tool"] == "fn"
         assert written["ok"] is True
         assert written["client_id"] == "client-x"
+        assert written["actor"] == "mcp:client-x"
         assert written["arg_keys"] == ["recipe_id"]
 
     def test_a_read_only_call_writes_no_audit_doc(self):
@@ -435,3 +437,18 @@ class TestIdempotency:
 
         assert result["error"] == "invalid_request"
         assert len(calls) == 0
+
+
+class TestActorAttribution:
+    """current_actor() (S8) — the exported (no leading underscore)
+    attribution helper create_expense (tools/expenses.py) calls directly
+    for its own changed_by field, in addition to wrapper.py using it
+    internally for audit.record()'s actor field (see TestAuditTrail
+    above, which already checks that field on a generic mutating call)."""
+
+    def test_mcp_with_no_client_id(self):
+        assert wrapper.current_actor() == "mcp"
+
+    def test_mcp_colon_client_id_when_authenticated(self):
+        with patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("claude-code")):
+            assert wrapper.current_actor() == "mcp:claude-code"
