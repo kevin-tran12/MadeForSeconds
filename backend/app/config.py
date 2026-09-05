@@ -84,6 +84,16 @@ class Settings(BaseSettings):
     # signed up for (e.g. a network's tracking parameter); blank means plain
     # links, which is what ships today.
     weee_affiliate_query: str = ""
+    # Exports the mcp SDK's built-in OpenTelemetry spans (every tools/call,
+    # tools/list, initialize) to Cloud Trace — see app/tracing.py. Dev always
+    # skips it regardless of this flag (configure_tracing() checks is_dev
+    # first); set false in production only to turn the exporter off without a
+    # redeploy of code, e.g. while diagnosing an exporter-related issue.
+    trace_enabled: bool = True
+    # Fraction of traces sampled, (0.0, 1.0]. 1.0 (every request) is well
+    # inside Cloud Trace's free tier (2.5M spans/month) at this app's volume;
+    # lower it only if that changes.
+    trace_sample_ratio: float = 1.0
 
     @property
     def assistant_search_domain_list(self) -> list[str]:

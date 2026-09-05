@@ -31,6 +31,20 @@ for _handler in logging.getLogger().handlers:
 
 logger = logging.getLogger(__name__)
 
+# Cloud Trace export for the MCP server's built-in OpenTelemetry spans (see
+# app/tracing.py). Placed before the MCP import below on the same principle
+# as the logging setup above it: get everything observability-related
+# configured before importing the modules it will observe. Not strictly
+# required for correctness — the mcp SDK's module-level get_tracer() call
+# returns an OpenTelemetry ProxyTracer, which defers to whichever
+# TracerProvider set_tracer_provider() installs, even one installed later
+# (verified empirically, not assumed) — but there's no reason to depend on
+# that rather than just doing it in the obvious order.
+from .tracing import configure_tracing  # noqa: E402
+
+if configure_tracing():
+    logger.info("Cloud Trace export configured")
+
 # ruff: noqa: E402 — deliberately after logging setup, see above.
 from .mcp_server import create_mcp_app, mcp as mcp_server  # noqa: E402
 from .routes import (  # noqa: E402

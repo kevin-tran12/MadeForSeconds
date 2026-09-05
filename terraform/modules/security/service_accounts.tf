@@ -20,6 +20,15 @@ resource "google_project_iam_member" "backend_logging" {
   member  = "serviceAccount:${google_service_account.backend.email}"
 }
 
+# Write access for the MCP tool-call spans app/tracing.py exports via
+# CloudTraceSpanExporter (roles/cloudtrace.agent is the write-only trace
+# role — no read access, matching logWriter's shape above).
+resource "google_project_iam_member" "backend_trace" {
+  project = var.gcp_project_id
+  role    = "roles/cloudtrace.agent"
+  member  = "serviceAccount:${google_service_account.backend.email}"
+}
+
 # Read access — needed to aggregate request logs into the weekly usage report
 resource "google_project_iam_member" "backend_logging_viewer" {
   project = var.gcp_project_id
