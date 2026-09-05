@@ -62,23 +62,38 @@ class TestInMemoryClient:
 
     @pytest.mark.asyncio
     async def test_snapshot_create_recipe_schema(self):
-        """Ground truth for a later story (typed inputs): today `ingredients`
-        is an untyped array of open objects
-        ({"type": "object", "additionalProperties": True}) — S10 replaces this
-        with list[Ingredient]. No tool has an output schema yet (S11).
+        """Ground truth for typed inputs (S10): `ingredients` is now a real
+        $ref to a generated Ingredient schema (with the exact maxLength
+        values from models.py), not an untyped array of open objects — that
+        was this story's whole point to falsify, the same way S4 falsified
+        this test's earlier "no tool carries annotations" assertion.
+        No tool has an output schema yet (S11).
 
-        Annotations now exist (added by S4's mcp_tool wrapper) — snapshot the
-        matrix here rather than asserting None, so a future accidental change
-        to any tool's read_only/destructive/idempotent/open_world hints shows
+        Annotations (added by S4's mcp_tool wrapper) — snapshot the matrix
+        here rather than asserting None, so a future accidental change to
+        any tool's read_only/destructive/idempotent/open_world hints shows
         up as a failing assertion in this file, the same ground-truth role
         this test already plays for schemas."""
         async with Client(mcp_server.mcp) as c:
             result = await c.list_tools()
         by_name = {t.name: t for t in result.tools}
         create_recipe = by_name["create_recipe"]
-        ingredients_schema = create_recipe.input_schema["properties"]["ingredients"]
+        schema = create_recipe.input_schema
+        ingredients_schema = schema["properties"]["ingredients"]
         assert ingredients_schema["type"] == "array"
-        assert ingredients_schema["items"] == {"type": "object", "additionalProperties": True}
+        assert ingredients_schema["items"] == {"$ref": "#/$defs/Ingredient"}
+
+        ingredient_def = schema["$defs"]["Ingredient"]
+        assert ingredient_def["properties"]["item"]["maxLength"] == 300  # models.py's Ingredient.item cap
+        assert ingredient_def["required"] == ["item", "amount", "unit"]
+
+        # components: max_length=5 on the model becomes a JSON Schema
+        # maxItems — S10 also removed the old silent `components[:5]`
+        # truncation, so this constraint is now what actually enforces the
+        # cap (a 6th component is a validation_error, see below).
+        components_variants = schema["properties"]["components"]["anyOf"]
+        components_array = next(v for v in components_variants if v.get("type") == "array")
+        assert components_array["maxItems"] == 5
         assert all(t.output_schema is None for t in result.tools)
 
         def hints(name):
@@ -105,6 +120,25 @@ class TestInMemoryClient:
         assert hints("get_ingredient") == (True, False, False, False)
         assert hints("upsert_ingredient") == (False, False, True, False)
         assert hints("delete_ingredient") == (False, True, False, False)
+
+    @pytest.mark.asyncio
+    async def test_snapshot_typed_enum_schemas(self):
+        """S10's other typed replacements, beyond create_recipe's own
+        (covered above): each of these used to be a bare `str` — a client
+        (or a model) had no way to discover the valid values short of
+        reading the docstring. Now the MCP schema itself enumerates them."""
+        async with Client(mcp_server.mcp) as c:
+            result = await c.list_tools()
+        by_name = {t.name: t for t in result.tools}
+
+        category = by_name["create_expense"].input_schema["properties"]["category"]
+        assert category["enum"] == ["ingredients", "equipment", "hosting", "marketing", "software", "other"]
+
+        kind = by_name["request_image_upload"].input_schema["properties"]["kind"]
+        assert kind["enum"] == ["recipe_image", "receipt"]
+
+        clear_fields = by_name["update_recipe"].input_schema["properties"]["clear_fields"]
+        assert clear_fields["items"]["enum"] == ["about", "image_url", "components", "sous_chef_notes"]
 
     @pytest.mark.asyncio
     async def test_call_list_categories(self, db):

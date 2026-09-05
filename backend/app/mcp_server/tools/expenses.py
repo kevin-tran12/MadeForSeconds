@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 
 from google.cloud.firestore import transactional
 from google.cloud.firestore_v1.base_query import FieldFilter
+from pydantic import TypeAdapter
 
 from ...firestore import get_db
-from ...models_expense import EXPENSE_CATEGORIES, ExpenseItem, recalculate_project_amounts
+from ...models_expense import EXPENSE_CATEGORIES, ExpenseCategory, ExpenseItem, recalculate_project_amounts
 from ...routes.expenses import _write_revision_in_transaction
 from ...services import uploads
+from ..schemas import ExpenseItemInput
 from ..wrapper import current_actor, mcp_tool
 
 logger = logging.getLogger(__name__)
@@ -70,16 +72,25 @@ def _mcp_create_expense_logic(transaction, db, doc_ref, data: dict, changed_by: 
 
 _mcp_create_expense_transaction = transactional(_mcp_create_expense_logic)
 
+# A module-level TypeAdapter (built once, not per call) validating the whole
+# items list at once rather than one ExpenseItemInput.model_validate(item)
+# per item in a loop — the latter reports a failure's field as just "name"
+# with no indication of which of possibly several items it came from;
+# validating the list as one unit gives "3.name"-style loc paths instead
+# (verified directly: pydantic's TypeAdapter includes the list index in
+# ValidationError.errors()' loc, a bare per-item model_validate does not).
+_ITEMS_ADAPTER = TypeAdapter(list[ExpenseItemInput])
+
 
 @mcp_tool(read_only=False, budget="write")
 def create_expense(
     date: str,
     vendor: str,
-    items: list[dict],
+    items: list[ExpenseItemInput],
     raw_subtotal: int,
     raw_tax: int,
     raw_total: int,
-    category: str = "ingredients",
+    category: ExpenseCategory = "ingredients",
     description: str = "",
     purpose: str = "",
     transaction_id: str = "",
@@ -95,7 +106,7 @@ def create_expense(
     Args:
         date: ISO date string YYYY-MM-DD (e.g. "2026-03-08")
         vendor: Store or service name (e.g. "City Farmers Market")
-        items: List of line items. Each dict has:
+        items: List of line items. Each has:
             - name (str): Item description
             - quantity (float): Number of units (default 1.0)
             - unit_price (int): Price per unit in cents
@@ -118,12 +129,21 @@ def create_expense(
             instead of logging a second expense (see server.py's
             INSTRUCTIONS retry note).
     """
+    # S10: items is typed list[ExpenseItemInput] in the signature (visible
+    # in the MCP schema a client sees), but a direct call — every existing
+    # test, and category's own runtime check right below for the same
+    # reason — can still pass plain dicts, since Python itself never
+    # enforces a parameter's type hint. Re-validating explicitly here is
+    # what actually normalises either shape into real ExpenseItemInput
+    # instances before anything downstream relies on attribute access.
+    items = _ITEMS_ADAPTER.validate_python(items)
+
     # Validate category
     if category not in EXPENSE_CATEGORIES:
         raise ValueError(f"Invalid category '{category}'. Must be one of: {', '.join(EXPENSE_CATEGORIES)}")
 
     # Resolve recipe slugs to IDs
-    slugs = list({item["recipe_slug"] for item in items if item.get("recipe_slug")})
+    slugs = list({item.recipe_slug for item in items if item.recipe_slug})
     slug_map = _resolve_recipe_slugs(slugs) if slugs else {}
 
     # Check for unresolved slugs
@@ -136,17 +156,16 @@ def create_expense(
     for item in items:
         recipe_id = None
         recipe_name = None
-        slug = item.get("recipe_slug")
-        if slug and slug in slug_map:
-            recipe_id, recipe_name = slug_map[slug]
+        if item.recipe_slug and item.recipe_slug in slug_map:
+            recipe_id, recipe_name = slug_map[item.recipe_slug]
 
         expense_items.append(
             ExpenseItem(
-                name=item["name"],
-                quantity=item.get("quantity", 1.0),
-                unit_price=item.get("unit_price", 0),
-                total_price=item.get("total_price", 0),
-                project_related=item.get("project_related", True),
+                name=item.name,
+                quantity=item.quantity,
+                unit_price=item.unit_price,
+                total_price=item.total_price,
+                project_related=item.project_related,
                 recipe_id=recipe_id,
                 recipe_name=recipe_name,
             )

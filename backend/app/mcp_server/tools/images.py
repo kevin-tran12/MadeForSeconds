@@ -2,6 +2,7 @@
 server-side fetch for photos that are already hosted somewhere."""
 
 import logging
+from typing import Literal
 from uuid import uuid4
 
 from ...config import settings
@@ -12,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 @mcp_tool(read_only=False, budget="write")
-def request_image_upload(filename: str, content_type: str, kind: str = "recipe_image") -> dict:
+def request_image_upload(
+    filename: str, content_type: str, kind: Literal["recipe_image", "receipt"] = "recipe_image",
+) -> dict:
     """Get a short-lived signed PUT URL to upload a file directly to storage.
 
     kind="recipe_image" (JPEG/PNG/WebP; sanitized and made public once attached
