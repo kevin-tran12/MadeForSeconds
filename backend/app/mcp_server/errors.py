@@ -1,11 +1,11 @@
 """Shared helpers every tool module in this package uses.
 
 tool_errors translates the domain exceptions services/recipes.py, uploads.py,
-and instagram.py raise into structured dicts the model can act on — a 4xx-ish
-outcome the caller can read and retry differently, not an opaque failure. It
-sits directly under @mcp.tool() (applied via each module's register()) on
-every tool function, so a failure never surfaces as a raw traceback to the
-model or the operator.
+instagram.py, and ingredients.py raise into structured dicts the model can
+act on — a 4xx-ish outcome the caller can read and retry differently, not an
+opaque failure. It sits directly under @mcp.tool() (applied via each module's
+register()) on every tool function, so a failure never surfaces as a raw
+traceback to the model or the operator.
 """
 
 import functools
@@ -13,6 +13,7 @@ import logging
 
 from pydantic import ValidationError
 
+from ..services import ingredients
 from ..services import instagram
 from ..services import recipes as recipe_service
 
@@ -59,6 +60,18 @@ def tool_errors(fn):
             return {"error": "not_publishable", "problems": exc.problems}
         except recipe_service.RecipeServiceError as exc:
             return {"error": "invalid_request", "message": str(exc)}
+        except ingredients.AliasConflict as exc:
+            return {
+                "error": "alias_conflict",
+                "key": exc.key,
+                "existing_slug": exc.existing_slug,
+                "hint": (
+                    f"{exc.key!r} already belongs to the profile {exc.existing_slug!r}. "
+                    "Add it as an alias there instead, or pick a different name/alias."
+                ),
+            }
+        except ingredients.IngredientNotFound as exc:
+            return {"error": "not_found", "message": f"Ingredient not found: {exc}"}
         except instagram.InstagramError as exc:
             return {
                 "error": "instagram_auth" if exc.auth else "instagram",

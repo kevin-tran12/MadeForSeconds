@@ -73,17 +73,21 @@ def mcp_db():
 
     Each app.mcp_server.tools.<domain> module binds its own `get_db` name
     (the package has no single shared import to patch since the mcp_server
-    split), so this patches the three that call it — recipes, social,
-    expenses; images.py never touches Firestore — plus the recipe service's
-    cache, the same combination test_mcp_tools.py's own `db` fixture used to
-    provide via a single `app.mcp_server.get_db` patch.
+    split), so this patches the four that call it — recipes, ingredients,
+    social, expenses; images.py never touches Firestore — plus the recipe
+    and ingredient services' own cache bindings (each imports its own
+    `cache` reference, so both need patching independently), the same
+    combination test_mcp_tools.py's own `db` fixture used to provide via a
+    single `app.mcp_server.get_db` patch.
     """
     mock = _chain_db()
     with (
         patch("app.mcp_server.tools.recipes.get_db", return_value=mock),
+        patch("app.mcp_server.tools.ingredients.get_db", return_value=mock),
         patch("app.mcp_server.tools.social.get_db", return_value=mock),
         patch("app.mcp_server.tools.expenses.get_db", return_value=mock),
         patch("app.services.recipes.cache"),
+        patch("app.services.ingredients.cache"),
     ):
         yield mock
 

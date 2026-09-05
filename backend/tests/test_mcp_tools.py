@@ -47,10 +47,11 @@ def _doc(id="doc-id", exists=True, **data):
 def db(mcp_db):
     """The pre-split fixture name, kept so every test below reads unchanged.
 
-    mcp_db (conftest.py) patches get_db in each of the three tools/*.py
-    modules that call it, plus app.services.recipes.cache — the same
-    combination this fixture's own single app.mcp_server.get_db patch
-    provided before the mcp_server package split.
+    mcp_db (conftest.py) patches get_db in each of the four tools/*.py
+    modules that call it, plus the recipe and ingredient services' own
+    cache — the same combination this fixture's own single
+    app.mcp_server.get_db patch provided before the mcp_server package
+    split.
     """
     return mcp_db
 
@@ -672,3 +673,166 @@ class TestSocialKit:
             result = mcp_server.social_status()
         assert result["platforms"]["instagram"]["expires_at"].startswith("2026-11-01")
         assert "1st and the 15th" in result["refresh_schedule"]
+
+
+# ── Ingredient knowledge tools ──────────────────────────────────────────────
+
+def _profile_doc(slug, name, exists=True, **over):
+    doc = MagicMock()
+    doc.id = slug
+    doc.exists = exists
+    data = {
+        "name": name, "aliases": [], "what_it_is": "x", "role": "", "substitutions": "",
+        "buying": "", "storage": "", "mistakes": "", "allergens": "",
+    }
+    data.update(over)
+    doc.to_dict.return_value = data
+    return doc
+
+
+def _published_recipe_doc(slug, title, ingredient_items):
+    doc = MagicMock()
+    doc.id = slug
+    doc.to_dict.return_value = {
+        "slug": slug, "title": title, "published": True,
+        "ingredients": [{"item": item} for item in ingredient_items],
+        "components": [], "secrets": [], "about": "", "sous_chef_notes": "",
+        "created_at": None, "updated_at": None,
+    }
+    return doc
+
+
+class TestIngredientTools:
+    @pytest.mark.parametrize("tool_call", [
+        lambda: mcp_server.get_ingredient(slug="pork/belly"),
+        lambda: mcp_server.upsert_ingredient(name="X", slug="pork/belly", what_it_is="y"),
+        lambda: mcp_server.delete_ingredient("pork/belly"),
+    ], ids=["get_ingredient", "upsert_ingredient", "delete_ingredient"])
+    def test_every_slug_taking_tool_rejects_a_path_injection_shaped_slug(self, db, tool_call):
+        """services/ingredients.py's _require_safe_slug guard (PR #128) fires
+        before any Firestore call — proving it protects these tools too,
+        not just direct service callers, since a slug here comes straight
+        from the MCP caller's own arguments."""
+        result = tool_call()
+        assert result["error"] == "invalid_request"
+        db.set.assert_not_called()
+        db.delete.assert_not_called()
+
+    def test_list_ingredients_missing_by_default(self, db):
+        recipe_docs = [_published_recipe_doc("ramen", "Tonkotsu Ramen", ["pork belly, skin-on", "garlic cloves"])]
+        profile_docs = [_profile_doc("garlic", "Garlic")]
+        # list_ingredients streams recipes (get_all_published_docs) first,
+        # then profiles (list_profiles) — see its own comment on the order.
+        db.stream.side_effect = [iter(recipe_docs), iter(profile_docs)]
+
+        result = mcp_server.list_ingredients()
+
+        keys = {row["key"] for row in result["ingredients"]}
+        assert keys == {"pork belly"}  # garlic is covered, excluded from "missing"
+        assert result["total_count"] == 2
+        assert result["covered_count"] == 1
+
+    def test_list_ingredients_all_shows_covered_and_via(self, db):
+        recipe_docs = [_published_recipe_doc("ramen", "Tonkotsu Ramen", ["garlic"])]
+        profile_docs = [_profile_doc("garlic", "Garlic")]
+        db.stream.side_effect = [iter(recipe_docs), iter(profile_docs)]
+
+        result = mcp_server.list_ingredients(coverage="all")
+
+        assert result["ingredients"][0]["covered"] is True
+        assert result["ingredients"][0]["via"] == "exact"
+
+    def test_list_ingredients_search_filters_by_key(self, db):
+        recipe_docs = [_published_recipe_doc("ramen", "Tonkotsu Ramen", ["garlic", "salt"])]
+        db.stream.side_effect = [iter(recipe_docs), iter([])]
+
+        result = mcp_server.list_ingredients(coverage="all", search="gar")
+
+        assert [row["key"] for row in result["ingredients"]] == ["garlic"]
+
+    def test_list_ingredients_rejects_a_bad_coverage_value(self, db):
+        result = mcp_server.list_ingredients(coverage="whatever")
+        assert result["error"] == "invalid_request"
+
+    def test_get_ingredient_by_slug(self, db):
+        db.get.return_value = _profile_doc("garlic", "Garlic")
+        result = mcp_server.get_ingredient(slug="garlic")
+        assert result["name"] == "Garlic"
+
+    def test_get_ingredient_by_slug_not_found(self, db):
+        db.get.return_value = _profile_doc("ghost", "Ghost", exists=False)
+        result = mcp_server.get_ingredient(slug="ghost")
+        assert result["error"] == "not_found"
+
+    def test_get_ingredient_resolves_by_alias(self, db):
+        db.stream.return_value = iter([_profile_doc("garlic", "Garlic", aliases=["garlic cloves"])])
+        result = mcp_server.get_ingredient(name="garlic cloves")
+        assert result["name"] == "Garlic"
+
+    def test_get_ingredient_unresolved_name_is_not_found(self, db):
+        db.stream.return_value = iter([_profile_doc("garlic", "Garlic")])
+        result = mcp_server.get_ingredient(name="dragonfruit")
+        assert result["error"] == "not_found"
+
+    def test_get_ingredient_requires_slug_or_name(self, db):
+        result = mcp_server.get_ingredient()
+        assert result["error"] == "invalid_request"
+
+    def test_upsert_ingredient_creates(self, db):
+        db.stream.return_value = iter([])  # no existing profiles for the conflict check
+        db.get.return_value = _profile_doc("pork-belly", "Pork Belly", exists=False)
+
+        result = mcp_server.upsert_ingredient(name="Pork Belly", what_it_is="A fatty cut.")
+
+        assert result["created"] is True
+        assert result["slug"] == "pork-belly"
+        written = db.set.call_args[0][0]
+        assert written["name"] == "Pork Belly"
+        assert written["what_it_is"] == "A fatty cut."
+
+    def test_upsert_ingredient_merges_only_provided_fields(self, db):
+        existing = _profile_doc("pork-belly", "Pork Belly", what_it_is="A fatty cut.", role="fat")
+        db.stream.return_value = iter([existing])
+        db.get.return_value = existing
+
+        result = mcp_server.upsert_ingredient(name="Pork Belly", storage="Fridge 3 days.")
+
+        # name is a required parameter (unlike update_recipe's optional title),
+        # so it is always part of the write, whatever value the caller passes.
+        assert result["updated_fields"] == ["name", "storage"]
+        written = db.set.call_args[0][0]
+        assert written["role"] == "fat"  # untouched field preserved
+        assert written["storage"] == "Fridge 3 days."
+
+    def test_upsert_ingredient_over_cap_is_a_validation_error(self, db):
+        db.stream.return_value = iter([])
+        db.get.return_value = _profile_doc("garlic", "Garlic", exists=False)
+
+        result = mcp_server.upsert_ingredient(
+            name="Garlic", what_it_is="x" * 300, role="x" * 200, substitutions="x" * 400, buying="x" * 101,
+        )
+
+        assert result["error"] == "validation_error"
+        db.set.assert_not_called()
+
+    def test_upsert_ingredient_alias_conflict(self, db):
+        db.stream.return_value = iter([_profile_doc("garlic", "Garlic")])
+        db.get.return_value = _profile_doc("garlic-powder", "Garlic Powder", exists=False)
+
+        result = mcp_server.upsert_ingredient(name="Garlic Powder", aliases=["garlic"], what_it_is="Dried, ground.")
+
+        assert result["error"] == "alias_conflict"
+        assert result["existing_slug"] == "garlic"
+        db.set.assert_not_called()
+
+    def test_delete_ingredient(self, db):
+        db.get.return_value = _profile_doc("garlic", "Garlic")
+        result = mcp_server.delete_ingredient("garlic")
+        assert result == {"deleted": True, "slug": "garlic"}
+        db.delete.assert_called_once()
+
+    def test_delete_ingredient_not_found(self, db):
+        db.get.return_value = _profile_doc("ghost", "Ghost", exists=False)
+        result = mcp_server.delete_ingredient("ghost")
+        assert result["error"] == "not_found"
+        db.delete.assert_not_called()
