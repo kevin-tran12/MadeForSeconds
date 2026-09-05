@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -126,12 +127,34 @@ def _warm_cache() -> None:
         logger.warning("Cache warm failed (non-fatal): %s", exc)
 
 
+# S9: asyncio.create_task's own docs warn that nothing else holds a
+# reference to a fire-and-forget task, so the event loop is free to garbage
+# collect it mid-run ("Task was destroyed but it is pending"). This set is
+# that reference — the task removes itself via its done callback once
+# _warm_cache() finishes (success or failure), rather than accumulating.
+_background_tasks: set[asyncio.Task] = set()
+
+
 @asynccontextmanager
 async def lifespan(app):
     # mcp 2.x: the streamable-HTTP session manager owns a task group that must
     # be running for any /mcp request; it exists only after create_mcp_app().
     async with mcp_server.session_manager.run():
-        _warm_cache()
+        # S9: _warm_cache() used to run synchronously right here, which
+        # meant every Cloud Run cold start (min_instances=0 — the instance
+        # scales to zero between requests) blocked the very first request
+        # after idle on a Firestore query for up to 50 recipes before the
+        # app would accept any traffic at all. Firing it as a background
+        # task instead lets `yield` (readiness) happen immediately; the
+        # warm cache becomes available a moment later on its own, and a
+        # request that lands before it finishes just falls through to the
+        # same on-demand Firestore read the cache miss path already
+        # handles — not a new failure mode. asyncio.to_thread because
+        # _warm_cache() is a synchronous, blocking function (the Firestore
+        # client is sync).
+        task = asyncio.create_task(asyncio.to_thread(_warm_cache))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
         yield
 
 
