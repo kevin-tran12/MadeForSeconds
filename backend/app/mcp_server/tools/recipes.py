@@ -2,12 +2,22 @@
 
 import logging
 from datetime import datetime
+from typing import Annotated, Literal
 
 from google.cloud.firestore_v1.base_query import FieldFilter
+from pydantic import Field
 
 from ...config import settings
 from ...firestore import get_db
-from ...models import RecipeCreate, RecipeUpdate
+from ...models import (
+    Ingredient,
+    Instruction,
+    NutritionEntry,
+    RecipeComponent,
+    RecipeCreate,
+    RecipeSecret,
+    RecipeUpdate,
+)
 from ...services import recipes as recipe_service
 from ..wrapper import iso, mcp_tool
 
@@ -195,19 +205,19 @@ def create_recipe(
     title: str,
     description: str = "",
     about: str | None = None,
-    ingredients: list[dict] = [],
-    prep_steps: list[dict] = [],
-    instructions: list[dict] = [],
+    ingredients: Annotated[list[Ingredient], Field(max_length=100)] = [],
+    prep_steps: Annotated[list[Instruction], Field(max_length=50)] = [],
+    instructions: Annotated[list[Instruction], Field(max_length=100)] = [],
     prep_time_minutes: int = 0,
     cook_time_minutes: int = 0,
     servings: int = 1,
-    difficulty: str = "easy",
+    difficulty: Literal["easy", "medium", "hard"] = "easy",
     categories: list[str] = [],
     labels: list[str] = [],
-    nutrition: list[dict] = [],
+    nutrition: Annotated[list[NutritionEntry], Field(max_length=30)] = [],
     image_url: str | None = None,
-    components: list[dict] | None = None,
-    secrets: list[dict] = [],
+    components: Annotated[list[RecipeComponent], Field(max_length=5)] | None = None,
+    secrets: Annotated[list[RecipeSecret], Field(max_length=20)] = [],
     sous_chef_notes: str | None = None,
     idempotency_key: str | None = None,
 ) -> dict:
@@ -233,8 +243,9 @@ def create_recipe(
     it is never shown to readers.
 
     For multi-component dishes (e.g. Hainanese Chicken Rice with separate rice,
-    sauces): pass components as up to 5 dicts, each with title (str), optional
-    description, ingredients, optional prep_steps, instructions, optional
+    sauces): pass components as up to 5 dicts (a 6th is a validation_error,
+    not silently dropped), each with title (str), optional description,
+    ingredients, optional prep_steps, instructions, optional
     prep/cook_time_minutes, optional yield_description. With components, leave
     top-level ingredients/instructions empty.
 
@@ -257,7 +268,12 @@ def create_recipe(
         "nutrition": nutrition,
         "image_url": image_url,
         "published": False,
-        "components": components[:5] if components else None,
+        # S10: was `components[:5] if components else None` — silently
+        # dropping components past the 5th instead of rejecting them. Now
+        # the full list reaches RecipeCreate as-is, so its own
+        # Field(max_length=5) is what actually enforces the cap, as a
+        # validation_error the caller sees.
+        "components": components,
         "secrets": secrets,
         "sous_chef_notes": sous_chef_notes,
     })
@@ -275,6 +291,11 @@ def create_recipe(
     }
 
 
+# Keep in sync with update_recipe's clear_fields Literal[...] type hint below
+# — that's what shows up in the MCP schema a client sees, this is the
+# runtime backstop for direct calls that bypass it (tests, and the SDK
+# itself, since it can't enforce a Literal the way a JSON schema enum
+# hints at rather than strictly enforces).
 _CLEARABLE_FIELDS = {"about", "image_url", "components", "sous_chef_notes"}
 
 
@@ -284,21 +305,21 @@ def update_recipe(
     title: str | None = None,
     description: str | None = None,
     about: str | None = None,
-    ingredients: list[dict] | None = None,
-    prep_steps: list[dict] | None = None,
-    instructions: list[dict] | None = None,
+    ingredients: Annotated[list[Ingredient], Field(max_length=100)] | None = None,
+    prep_steps: Annotated[list[Instruction], Field(max_length=50)] | None = None,
+    instructions: Annotated[list[Instruction], Field(max_length=100)] | None = None,
     prep_time_minutes: int | None = None,
     cook_time_minutes: int | None = None,
     servings: int | None = None,
-    difficulty: str | None = None,
+    difficulty: Literal["easy", "medium", "hard"] | None = None,
     categories: list[str] | None = None,
     labels: list[str] | None = None,
-    nutrition: list[dict] | None = None,
+    nutrition: Annotated[list[NutritionEntry], Field(max_length=30)] | None = None,
     image_url: str | None = None,
-    components: list[dict] | None = None,
-    secrets: list[dict] | None = None,
+    components: Annotated[list[RecipeComponent], Field(max_length=5)] | None = None,
+    secrets: Annotated[list[RecipeSecret], Field(max_length=20)] | None = None,
     sous_chef_notes: str | None = None,
-    clear_fields: list[str] = [],
+    clear_fields: list[Literal["about", "image_url", "components", "sous_chef_notes"]] = [],
 ) -> dict:
     """Update fields of an existing recipe (draft or published).
 

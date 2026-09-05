@@ -139,6 +139,8 @@ Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev
 
 ### Tools
 
+Structured fields (ingredients, instructions, nutrition, recipe secrets/components, expense line items) are typed pydantic models, not opaque `dict`s — a client introspecting the tool schemas sees the exact shape and length limits (`models.py`'s own caps), and a value outside them is a `validation_error`, not a value silently truncated or ignored.
+
 | Tool | Purpose |
 |------|---------|
 | `list_categories` | Allowed category list |
@@ -202,7 +204,7 @@ Every tool carries MCP annotations (read-only/destructive/idempotent/open-world 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (1015 tests across 45 files)
+│   ├── tests/                  Pytest suite (1020 tests across 45 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -305,7 +307,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (1015 tests)
+npm run test:backend                    # Pytest (1020 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -443,7 +445,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (1015 tests, 45 files)
+### Backend — pytest (1020 tests, 45 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing

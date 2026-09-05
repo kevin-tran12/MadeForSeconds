@@ -110,6 +110,28 @@ class TestCreateRecipeTool:
         assert result["invalid"] == ["desserts"]
         assert result["valid_categories"] == ["mains", "sides"]
 
+    def test_six_components_is_a_validation_error_not_a_silent_truncation(self, db):
+        """S10: create_recipe used to pass `components[:5]` to RecipeCreate,
+        silently dropping a 6th component instead of rejecting it. Now the
+        full list reaches RecipeCreate as-is, so its own Field(max_length=5)
+        does the rejecting."""
+        components = [{"title": f"Part {i}"} for i in range(6)]
+
+        result = mcp_server.create_recipe(title="X", components=components)
+
+        assert result["error"] == "validation_error"
+        assert any(e["field"] == "components" for e in result["field_errors"])
+        db.set.assert_not_called()
+
+    def test_five_components_is_accepted(self, db):
+        db.stream.return_value = iter([])
+        db.id = "new-id"
+
+        components = [{"title": f"Part {i}"} for i in range(5)]
+        result = mcp_server.create_recipe(title="X", components=components)
+
+        assert "error" not in result
+
 
 # ── update_recipe ─────────────────────────────────────────────────────────────
 
@@ -639,6 +661,47 @@ class TestCreateExpenseReceiptUrl:
             mcp_server.create_expense(**self._BASE)
         revision = db.transaction.return_value.set.call_args_list[1][0][1]
         assert revision["changed_by"] == "mcp:claude-code"
+
+
+# ── create_expense typed items (S10) ────────────────────────────────────────
+
+class TestCreateExpenseTypedItems:
+    _BASE = dict(
+        date="2026-03-08",
+        vendor="Test Market",
+        raw_subtotal=1000,
+        raw_tax=80,
+        raw_total=1080,
+    )
+
+    def test_missing_required_field_is_a_validation_error(self, db):
+        """items is typed list[ExpenseItemInput] in the signature, but a
+        direct call (like every test in this file) still passes plain
+        dicts — the tool re-validates explicitly, which is what actually
+        catches a malformed item, not the type hint itself. Two items, only
+        the second broken, to also confirm the error names the right one
+        (index 1) rather than losing that information."""
+        result = mcp_server.create_expense(
+            **self._BASE,
+            items=[
+                {"name": "Fine", "unit_price": 100, "total_price": 100},
+                {"quantity": 1, "unit_price": 100, "total_price": 100},  # missing "name"
+            ],
+        )
+
+        assert result["error"] == "validation_error"
+        assert any(e["field"] == "1.name" for e in result["field_errors"])
+        db.transaction.return_value.set.assert_not_called()
+
+    def test_unit_price_and_total_price_default_to_zero(self, db):
+        """Matches the exact pre-S10 behavior (item.get("unit_price", 0)) —
+        these two fields were never required, only name was."""
+        result = mcp_server.create_expense(**self._BASE, items=[{"name": "Mystery item"}])
+
+        assert "error" not in result
+        written = db.transaction.return_value.set.call_args_list[0][0][1]
+        assert written["items"][0]["unit_price"] == 0
+        assert written["items"][0]["total_price"] == 0
 
 
 # ── publish_instagram_post ────────────────────────────────────────────────────
