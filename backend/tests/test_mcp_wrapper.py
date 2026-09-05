@@ -10,6 +10,8 @@ failure here points at wrapper.py itself rather than at a tool's own
 """
 
 import logging
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -121,3 +123,75 @@ class TestOutcomeLog:
         assert result["error"] == "validation_error"
         assert result["field_errors"][0]["field"] == "x"
         assert not any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+class TestRateLimitEnforcement:
+    """rate_budgets.py has its own thorough tests (test_mcp_rate_budgets.py)
+    for the actual limit math — this class checks only that mcp_tool()
+    wires it in correctly: called with the real caller identity, and a
+    rejection short-circuits before the wrapped function ever runs.
+
+    get_access_token() is patched directly (rather than threading a real
+    AccessToken through contextvars) since wrapper.py's own
+    _current_client_id() is the thin, already-covered translation from that
+    call to a plain client_id string — patching at that boundary keeps this
+    test about mcp_tool()'s behavior, not about re-deriving how the SDK's
+    auth context works.
+    """
+
+    def test_a_rejected_call_never_invokes_the_wrapped_function(self):
+        calls = []
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn():
+            calls.append(1)
+            return {"ok": True}
+
+        with patch(
+            "app.mcp_server.wrapper.get_access_token",
+            return_value=SimpleNamespace(client_id="rate-test-client"),
+        ):
+            for _ in range(30):
+                fn()
+            assert len(calls) == 30
+
+            result = fn()  # 31st: over the write budget (30/min)
+
+        assert result == {"error": "rate_limited", "retry_after_seconds": 60}
+        assert len(calls) == 30  # the 31st call never reached fn()
+
+    def test_a_rejected_call_still_logs_the_outcome_line(self, caplog):
+        @mcp_tool(read_only=False, budget="write")
+        def fn():
+            return {"ok": True}
+
+        with patch(
+            "app.mcp_server.wrapper.get_access_token",
+            return_value=SimpleNamespace(client_id="rate-test-client-2"),
+        ):
+            with caplog.at_level(logging.INFO, logger="app.mcp_server.wrapper"):
+                for _ in range(31):
+                    fn()
+
+        info_records = [r for r in caplog.records if r.levelno == logging.INFO]
+        assert info_records[-1].json_fields["error"] == "rate_limited"
+        assert info_records[-1].json_fields["ok"] is False
+        # rate_limited is a working-as-designed rejection, not a broken tool
+        # — it must not also trigger the MCP_TOOL_FAILED alert marker.
+        assert not any("MCP_TOOL_FAILED" in r.getMessage() for r in caplog.records)
+
+    def test_without_a_client_id_the_budget_never_applies(self):
+        """dev mode / an in-memory Client() test: no patch needed here since
+        get_access_token() genuinely returns None outside a request
+        context, which is exactly the case this exercises."""
+        calls = []
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn():
+            calls.append(1)
+            return {"ok": True}
+
+        for _ in range(40):
+            fn()
+
+        assert len(calls) == 40
