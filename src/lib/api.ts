@@ -328,3 +328,51 @@ export interface AssistantFeedbackRow {
 export const adminAssistantApi = {
   listFeedback: (limit = 50) => apiFetch<AssistantFeedbackRow[]>(`/api/admin/assistant/feedback?limit=${limit}`),
 }
+
+// ─── Ingredient knowledge base ──────────────────────────────────────────────
+// The MCP tools (list_ingredients/get_ingredient/upsert_ingredient/
+// delete_ingredient) are the primary authoring path — this admin tab is a
+// minimal equivalent, both backed by the same backend service.
+
+export interface IngredientCoverageRow {
+  key: string
+  display: string
+  recipes: string[]
+  recipe_count: number
+  covered: boolean
+  profile_slug: string | null
+  via: 'exact' | 'fallback' | null
+}
+
+export interface IngredientProfile {
+  slug: string
+  name: string
+  aliases: string[]
+  what_it_is: string
+  role: string
+  substitutions: string
+  buying: string
+  storage: string
+  mistakes: string
+  allergens: string
+  updated_via?: 'mcp' | 'admin'
+}
+
+export type IngredientProfileInput = Omit<IngredientProfile, 'slug' | 'updated_via'>
+
+export const adminIngredientApi = {
+  coverage: () => apiFetch<IngredientCoverageRow[]>('/api/admin/ingredients/coverage'),
+
+  list: () => apiFetch<IngredientProfile[]>('/api/admin/ingredients'),
+
+  get: (slug: string) => apiFetch<IngredientProfile>(`/api/admin/ingredients/${encodeURIComponent(slug)}`),
+
+  upsert: (slug: string, data: IngredientProfileInput) =>
+    apiFetch<IngredientProfile>(`/api/admin/ingredients/${encodeURIComponent(slug)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (slug: string) =>
+    apiFetch<void>(`/api/admin/ingredients/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
+}
