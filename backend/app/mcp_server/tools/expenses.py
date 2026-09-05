@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 from google.cloud.firestore import transactional
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 from ...firestore import get_db
 from ...models_expense import EXPENSE_CATEGORIES, ExpenseItem, recalculate_project_amounts
@@ -14,16 +15,36 @@ from ..wrapper import current_actor, mcp_tool
 logger = logging.getLogger(__name__)
 
 
+_MAX_RESOLVE_SLUGS = 100
+_SLUG_CHUNK_SIZE = 30
+
+
 def _resolve_recipe_slugs(slugs: list[str]) -> dict[str, tuple[str, str]]:
-    """Query Firestore for recipes by slug, return {slug: (id, title)}."""
-    if not slugs:
+    """Query Firestore for recipes by slug, return {slug: (id, title)}.
+
+    S7: Firestore's `in` operator accepts at most 30 values per query — the
+    previous version passed `slugs[:30]` straight through, which silently
+    dropped every slug past the 30th rather than resolving them (a
+    create_expense call linking 31+ recipes would have had its 31st link
+    fail the "Recipe slugs not found" check below for a slug that actually
+    exists, just never queried). Chunks the input instead. Capped at 100
+    distinct slugs total — enough for any real expense — rather than
+    letting a caller trigger an unbounded number of Firestore queries.
+    """
+    distinct = list(dict.fromkeys(slugs))  # de-dupe, preserve order
+    if not distinct:
         return {}
+    if len(distinct) > _MAX_RESOLVE_SLUGS:
+        raise ValueError(f"too many distinct recipe_slug values ({len(distinct)}); at most {_MAX_RESOLVE_SLUGS} allowed")
+
     db = get_db()
-    docs = db.collection("recipes").where("slug", "in", slugs[:30]).stream()
     result: dict[str, tuple[str, str]] = {}
-    for doc in docs:
-        data = doc.to_dict()
-        result[data["slug"]] = (doc.id, data.get("title", data["slug"]))
+    for i in range(0, len(distinct), _SLUG_CHUNK_SIZE):
+        chunk = distinct[i:i + _SLUG_CHUNK_SIZE]
+        docs = db.collection("recipes").where(filter=FieldFilter("slug", "in", chunk)).stream()
+        for doc in docs:
+            data = doc.to_dict()
+            result[data["slug"]] = (doc.id, data.get("title", data["slug"]))
     return result
 
 

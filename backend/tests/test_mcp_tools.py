@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app import mcp_server
+from app.mcp_server.tools import expenses as expenses_tools
 from app.services import instagram, uploads
 
 
@@ -245,6 +246,109 @@ class TestListAndGetTools:
 
         assert result["count"] == 1
         assert result["recipes"][0]["id"] == "b"
+
+
+# ── list_recipes cursor pagination (S7) ─────────────────────────────────────
+
+class TestListRecipesPagination:
+    def test_first_page_without_cursor_sets_next_cursor_when_more_exist(self, db):
+        # limit=2 -> fetch_limit=3; 3 docs returned means a 3rd page exists.
+        docs = [
+            _doc(id=f"r{i}", created_at=datetime(2026, 1, 10 - i, tzinfo=timezone.utc))
+            for i in range(3)
+        ]
+        db.stream.return_value = iter(docs)
+
+        result = mcp_server.list_recipes(limit=2)
+
+        assert [r["id"] for r in result["recipes"]] == ["r0", "r1"]
+        assert result["exhausted"] is False
+        assert result["next_cursor"] == "2026-01-09T00:00:00+00:00"  # r1's created_at
+
+    def test_a_two_page_walk_yields_disjoint_ids_and_ends_with_no_cursor(self, db):
+        page1 = [_doc(id=f"r{i}", created_at=datetime(2026, 1, 10 - i, tzinfo=timezone.utc)) for i in range(3)]
+        page2 = [_doc(id="r3", created_at=datetime(2026, 1, 6, tzinfo=timezone.utc))]
+        db.stream.side_effect = [iter(page1), iter(page2)]
+
+        first = mcp_server.list_recipes(limit=2)
+        assert [r["id"] for r in first["recipes"]] == ["r0", "r1"]
+        assert first["next_cursor"] is not None
+
+        second = mcp_server.list_recipes(limit=2, cursor=first["next_cursor"])
+        assert [r["id"] for r in second["recipes"]] == ["r3"]
+        assert second["next_cursor"] is None
+        assert second["exhausted"] is True
+
+        first_ids = {r["id"] for r in first["recipes"]}
+        second_ids = {r["id"] for r in second["recipes"]}
+        assert first_ids.isdisjoint(second_ids)
+
+    def test_invalid_cursor_is_rejected_before_any_query(self, db):
+        result = mcp_server.list_recipes(cursor="not-a-real-cursor")
+
+        assert result["error"] == "invalid_request"
+        db.stream.assert_not_called()
+
+    def test_search_finds_a_match_only_on_the_second_scanned_page(self, db):
+        # limit=2 -> page_fetch_limit = min(2*3, 100) = 6. A full, non-matching
+        # first page must not stop the scan — it should continue to page 2.
+        page1 = [
+            _doc(id=f"a{i}", title=f"Tom Yum {i}", created_at=datetime(2026, 1, 20 - i, tzinfo=timezone.utc))
+            for i in range(6)
+        ]
+        page2 = [_doc(id="b0", title="Pho", created_at=datetime(2026, 1, 13, tzinfo=timezone.utc))]
+        db.stream.side_effect = [iter(page1), iter(page2)]
+
+        result = mcp_server.list_recipes(search="pho", limit=2)
+
+        assert result["count"] == 1
+        assert result["recipes"][0]["id"] == "b0"
+        assert db.stream.call_count == 2
+
+    def test_search_marks_exhausted_when_the_scanned_page_is_short(self, db):
+        docs = [_doc(id="a0", title="Pho", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))]
+        db.stream.return_value = iter(docs)  # fewer than page_fetch_limit -> exhausted
+
+        result = mcp_server.list_recipes(search="pho", limit=5)
+
+        assert result["exhausted"] is True
+        assert result["next_cursor"] is None
+
+
+# ── _resolve_recipe_slugs chunking (S7) ─────────────────────────────────────
+
+class TestResolveRecipeSlugsChunking:
+    def test_31_slugs_issues_two_where_calls(self, db):
+        db.stream.side_effect = [iter([]), iter([])]
+
+        expenses_tools._resolve_recipe_slugs([f"slug-{i}" for i in range(31)])
+
+        assert db.where.call_count == 2
+
+    def test_more_than_100_distinct_slugs_is_rejected(self, db):
+        with pytest.raises(ValueError, match="too many distinct recipe_slug"):
+            expenses_tools._resolve_recipe_slugs([f"slug-{i}" for i in range(101)])
+        db.where.assert_not_called()
+
+    def test_duplicate_slugs_are_deduplicated_before_chunking(self, db):
+        db.stream.return_value = iter([])
+
+        expenses_tools._resolve_recipe_slugs(["same-slug"] * 50)
+
+        # 50 duplicates collapse to 1 distinct slug -> a single chunk.
+        assert db.where.call_count == 1
+
+    def test_results_from_every_chunk_are_merged(self, db):
+        chunk1_doc = _doc(id="r1", slug="slug-0")
+        chunk2_doc = _doc(id="r2", slug="slug-30")
+        db.stream.side_effect = [iter([chunk1_doc]), iter([chunk2_doc])]
+
+        result = expenses_tools._resolve_recipe_slugs(
+            [f"slug-{i}" for i in range(30)] + ["slug-30"]
+        )
+
+        assert result["slug-0"] == ("r1", "Test Recipe")
+        assert result["slug-30"] == ("r2", "Test Recipe")
 
     def test_get_recipe_by_id(self, db):
         db.get.return_value = _doc()

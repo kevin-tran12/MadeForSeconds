@@ -54,9 +54,19 @@ def mock_db():
 
 def _chain_db():
     """A Firestore-client MagicMock whose chainable query methods
-    (collection/document/where/order_by/limit/select) all return itself, so a
-    test can set .stream.side_effect / .get.return_value on one object
-    regardless of how deep the tool under test chains the query."""
+    (collection/document/where/order_by/limit/select/start_after) all return
+    itself, so a test can set .stream.side_effect / .get.return_value on one
+    object regardless of how deep the tool under test chains the query.
+
+    start_after was added for S7's cursor pagination (list_recipes) — an
+    unconfigured MagicMock method returns a fresh, unrelated child mock by
+    default, which silently breaks the chain: a cursor-carrying call's
+    .limit(...).stream() then runs against that unrelated mock instead of
+    this one, its default (empty) iteration, not whatever .stream.side_effect
+    was actually configured for. Caught this exact way once, not by
+    inspection — the first pagination test written against a fixture missing
+    this line failed with an empty second page for no visible reason.
+    """
     mock = MagicMock()
     mock.collection.return_value = mock
     mock.document.return_value = mock
@@ -64,6 +74,7 @@ def _chain_db():
     mock.order_by.return_value = mock
     mock.limit.return_value = mock
     mock.select.return_value = mock
+    mock.start_after.return_value = mock
     return mock
 
 
