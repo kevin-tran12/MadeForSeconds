@@ -417,3 +417,22 @@ class TestPublishedHelpers:
         recipes = svc.get_all_published(db, limit=10)
         assert [r.id for r in recipes] == ["a", "b"]
         db.limit.assert_called_with(10)
+
+    def test_get_all_published_docs_is_json_safe_and_keeps_owner_notes(self, db):
+        """Unlike get_all_published (the public Recipe model), this keeps
+        sous_chef_notes — services/ingredients.py and services/knowledge.py
+        both need it — and is JSON-safe like get_published_doc, but is not
+        itself cached (its callers cache the corpus they build from it)."""
+        db.stream.return_value = iter([
+            _doc(id="a", published=True, sous_chef_notes="don't double the chilli"),
+        ])
+        docs = svc.get_all_published_docs(db, limit=10)
+        assert docs[0]["id"] == "a"
+        assert docs[0]["sous_chef_notes"] == "don't double the chilli"
+        assert docs[0]["created_at"] == "2026-01-01T00:00:00+00:00"  # ISO string, not datetime
+        assert "premium_content" not in docs[0]
+        db.limit.assert_called_with(10)
+
+    def test_get_all_published_docs_empty(self, db):
+        db.stream.return_value = iter([])
+        assert svc.get_all_published_docs(db) == []

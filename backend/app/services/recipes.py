@@ -154,6 +154,32 @@ def get_all_published(db, limit: int = 200) -> list[Recipe]:
     return [doc_to_recipe(doc) for doc in docs]
 
 
+def get_all_published_docs(db, limit: int = 200) -> list[dict]:
+    """Raw published recipe dicts — same query as get_all_published, but keeps
+    the admin-only fields (sous_chef_notes) the public Recipe model drops, and
+    is JSON-safe (timestamps as ISO strings) like get_published_doc.
+
+    Used by services/knowledge.py and services/ingredients.py, which both need
+    sous_chef_notes/secrets and every ingredient across the whole catalogue —
+    not cached itself; both callers cache the corpus they build from it.
+    """
+    docs = (
+        db.collection("recipes")
+        .where(filter=FieldFilter("published", "==", True))
+        .order_by("created_at", direction="DESCENDING")
+        .limit(limit)
+        .stream()
+    )
+    out = []
+    for doc in docs:
+        data = doc.to_dict() or {}
+        data["id"] = doc.id
+        data.pop("premium_content", None)
+        data.pop("has_premium_content", None)
+        out.append(json.loads(json.dumps(data, default=_json_default)))
+    return out
+
+
 def get_categories(db) -> list[str]:
     doc = db.collection("config").document("categories").get()
     return sorted(doc.to_dict().get("list", [])) if doc.exists else []
