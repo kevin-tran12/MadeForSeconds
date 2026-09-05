@@ -177,7 +177,11 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │   ├── models_expense.py   Pydantic schemas (Expense, ExpenseItem…)
 │   │   ├── totp.py             TOTP 2FA logic and session JWT
 │   │   ├── validation.py       Shared validators (admin routes + MCP)
-│   │   ├── mcp_server.py       MCP server + tool definitions
+│   │   ├── mcp_server/         MCP server package
+│   │   │   ├── server.py       MCPServer construction, auth/transport settings, instructions
+│   │   │   ├── tools/          One module per tool domain — recipes, images, social, expenses —
+│   │   │   │                   each exposing a TOOLS tuple and a register(mcp) function
+│   │   │   └── errors.py       tool_errors: domain errors → structured dicts
 │   │   ├── mcp_auth.py         WorkOS OAuth token verification (resource server)
 │   │   ├── services/
 │   │   │   ├── recipes.py      Recipe domain logic shared by routes and MCP
@@ -190,7 +194,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (845 tests across 37 files)
+│   ├── tests/                  Pytest suite (848 tests across 37 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -293,7 +297,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (845 tests)
+npm run test:backend                    # Pytest (848 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -426,7 +430,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (845 tests, 37 files)
+### Backend — pytest (848 tests, 37 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing

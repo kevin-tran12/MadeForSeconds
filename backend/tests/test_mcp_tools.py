@@ -1,8 +1,8 @@
-"""Tests for the MCP tool surface (app/mcp_server.py).
+"""Tests for the MCP tool surface (app/mcp_server/).
 
 Tools are called directly as functions — the mcp SDK 2.x's @mcp.tool() registers
-and returns the original callable, and _tool_errors translates domain errors
-into structured dicts.
+and returns the original callable, and errors.tool_errors translates domain
+errors into structured dicts.
 """
 
 from datetime import datetime, timezone
@@ -11,18 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app import mcp_server
-from app.services import uploads
-
-
-def _chain_db():
-    mock = MagicMock()
-    mock.collection.return_value = mock
-    mock.document.return_value = mock
-    mock.where.return_value = mock
-    mock.order_by.return_value = mock
-    mock.limit.return_value = mock
-    mock.select.return_value = mock
-    return mock
+from app.services import instagram, uploads
 
 
 def _recipe_data(**over):
@@ -55,13 +44,15 @@ def _doc(id="doc-id", exists=True, **data):
 
 
 @pytest.fixture
-def db():
-    mock = _chain_db()
-    with (
-        patch("app.mcp_server.get_db", return_value=mock),
-        patch("app.services.recipes.cache"),
-    ):
-        yield mock
+def db(mcp_db):
+    """The pre-split fixture name, kept so every test below reads unchanged.
+
+    mcp_db (conftest.py) patches get_db in each of the three tools/*.py
+    modules that call it, plus app.services.recipes.cache — the same
+    combination this fixture's own single app.mcp_server.get_db patch
+    provided before the mcp_server package split.
+    """
+    return mcp_db
 
 
 # ── create_recipe ─────────────────────────────────────────────────────────────
@@ -315,7 +306,7 @@ class TestRequestImageUpload:
             "expires_in_seconds": 900,
         }
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url", return_value=signed) as signer,
         ):
             mock_settings.is_dev = False
@@ -341,7 +332,7 @@ class TestRequestImageUpload:
         applied manually and separately, so a revision can genuinely reach
         production with this unset."""
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url") as signer,
         ):
             mock_settings.is_dev = False
@@ -356,7 +347,7 @@ class TestRequestImageUpload:
 
     def test_raises_in_production_when_public_bucket_not_configured(self):
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url") as signer,
         ):
             mock_settings.is_dev = False
@@ -370,7 +361,7 @@ class TestRequestImageUpload:
 
     def test_raises_in_production_when_receipts_bucket_not_configured(self):
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url") as signer,
         ):
             mock_settings.is_dev = False
@@ -394,7 +385,7 @@ class TestRequestImageUpload:
     def test_production_receipt_goes_to_private_bucket(self):
         signed = {"upload_url": "u", "method": "PUT", "required_headers": {}, "expires_in_seconds": 900}
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url", return_value=signed) as signer,
         ):
             mock_settings.is_dev = False
@@ -539,22 +530,22 @@ class TestPublishInstagramPost:
         assert result["message"] == "Posted to Instagram."
 
     def test_instagram_error_maps_to_instagram_dict(self):
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
-            mock_pub.side_effect = mcp_server.instagram.InstagramError("API failure")
+        with patch("app.services.instagram.publish_image") as mock_pub:
+            mock_pub.side_effect = instagram.InstagramError("API failure")
             result = mcp_server.publish_instagram_post("https://example.com/img.jpg")
         assert result["error"] == "instagram"
         assert "API failure" in result["message"]
 
     def test_instagram_auth_error_maps_to_instagram_auth_dict(self):
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
-            mock_pub.side_effect = mcp_server.instagram.InstagramError(
+        with patch("app.services.instagram.publish_image") as mock_pub:
+            mock_pub.side_effect = instagram.InstagramError(
                 "bad token", auth=True
             )
             result = mcp_server.publish_instagram_post("https://example.com/img.jpg")
         assert result["error"] == "instagram_auth"
 
     def test_value_error_maps_to_invalid_request(self):
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+        with patch("app.services.instagram.publish_image") as mock_pub:
             mock_pub.side_effect = ValueError("image_url must be a public https URL")
             result = mcp_server.publish_instagram_post("http://not-https.com/img.jpg")
         assert result["error"] == "invalid_request"
@@ -566,7 +557,7 @@ class TestPublishInstagramPost:
 class TestPublishRecipeToInstagram:
     def test_recipe_with_image_returns_permalink(self, db):
         db.stream.return_value = iter([_doc()])
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+        with patch("app.services.instagram.publish_image") as mock_pub:
             mock_pub.return_value = {
                 "id": "ig-123",
                 "permalink": "https://www.instagram.com/p/abc/",
@@ -580,8 +571,8 @@ class TestPublishRecipeToInstagram:
     def test_auto_caption_contains_title_and_link(self, db):
         db.stream.return_value = iter([_doc()])
         with (
-            patch("app.mcp_server.instagram.publish_image") as mock_pub,
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.services.instagram.publish_image") as mock_pub,
+            patch("app.mcp_server.tools.social.settings") as mock_settings,
         ):
             mock_settings.frontend_url = "https://madeforseconds.com"
             mock_pub.return_value = {"id": "ig-123", "permalink": ""}
@@ -594,7 +585,7 @@ class TestPublishRecipeToInstagram:
 
     def test_explicit_caption_overrides_auto_caption(self, db):
         db.stream.return_value = iter([_doc()])
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+        with patch("app.services.instagram.publish_image") as mock_pub:
             mock_pub.return_value = {"id": "ig-123", "permalink": ""}
             mcp_server.publish_recipe_to_instagram(
                 slug="test-recipe", caption="My custom caption"
@@ -647,7 +638,7 @@ def _pages_doc(exists=True, **data):
 class TestSocialKit:
     def test_defaults_apply_when_no_social_page_exists(self, db):
         db.get.side_effect = [_doc(id="r1", published=True, categories=["Mains"], labels=["Chicken Rice"]), _pages_doc(exists=False)]
-        with patch("app.mcp_server.settings") as s:
+        with patch("app.mcp_server.tools.social.settings") as s:
             s.frontend_url = "https://madeforseconds.com/"
             kit = mcp_server.get_social_kit(recipe_id="r1")
         assert kit["recipe"]["url"] == "https://madeforseconds.com/recipes/test-recipe/"
@@ -664,7 +655,7 @@ class TestSocialKit:
             _doc(id="r1", published=True),
             _pages_doc(tone="Cheeky and warm", hashtags_brand="MadeForSeconds, #Home Cooking, madeforseconds, ", do=""),
         ]
-        with patch("app.mcp_server.settings") as s:
+        with patch("app.mcp_server.tools.social.settings") as s:
             s.frontend_url = "https://madeforseconds.com"
             kit = mcp_server.get_social_kit(slug="test-recipe") if False else mcp_server.get_social_kit(recipe_id="r1")
         assert kit["brand_voice"]["tone"] == "Cheeky and warm"
@@ -677,7 +668,7 @@ class TestSocialKit:
         assert "error" in result
 
     def test_social_status_passes_through_the_refresh_record(self, db):
-        with patch("app.mcp_server.social.status", return_value={"instagram": {"configured": True, "expires_at": "2026-11-01T00:00:00+00:00"}}):
+        with patch("app.services.social.status", return_value={"instagram": {"configured": True, "expires_at": "2026-11-01T00:00:00+00:00"}}):
             result = mcp_server.social_status()
         assert result["platforms"]["instagram"]["expires_at"].startswith("2026-11-01")
         assert "1st and the 15th" in result["refresh_schedule"]

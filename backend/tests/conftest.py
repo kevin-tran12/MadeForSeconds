@@ -52,6 +52,42 @@ def mock_db():
         yield mock
 
 
+def _chain_db():
+    """A Firestore-client MagicMock whose chainable query methods
+    (collection/document/where/order_by/limit/select) all return itself, so a
+    test can set .stream.side_effect / .get.return_value on one object
+    regardless of how deep the tool under test chains the query."""
+    mock = MagicMock()
+    mock.collection.return_value = mock
+    mock.document.return_value = mock
+    mock.where.return_value = mock
+    mock.order_by.return_value = mock
+    mock.limit.return_value = mock
+    mock.select.return_value = mock
+    return mock
+
+
+@pytest.fixture
+def mcp_db():
+    """A mocked Firestore client for the MCP tool suite.
+
+    Each app.mcp_server.tools.<domain> module binds its own `get_db` name
+    (the package has no single shared import to patch since the mcp_server
+    split), so this patches the three that call it — recipes, social,
+    expenses; images.py never touches Firestore — plus the recipe service's
+    cache, the same combination test_mcp_tools.py's own `db` fixture used to
+    provide via a single `app.mcp_server.get_db` patch.
+    """
+    mock = _chain_db()
+    with (
+        patch("app.mcp_server.tools.recipes.get_db", return_value=mock),
+        patch("app.mcp_server.tools.social.get_db", return_value=mock),
+        patch("app.mcp_server.tools.expenses.get_db", return_value=mock),
+        patch("app.services.recipes.cache"),
+    ):
+        yield mock
+
+
 @pytest.fixture
 def mock_admin():
     """Returns a mock admin email."""

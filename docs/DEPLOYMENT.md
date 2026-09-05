@@ -738,7 +738,7 @@ The association record names the object; finding it still means knowing where
 to look. Receipts live in two places, not one: recipe receipts sit at the
 bucket root (`admin_upload_recipe_receipt` in `backend/app/routes/admin.py`),
 expense receipts sit under `receipts/` (`backend/app/routes/expenses.py`,
-`backend/app/mcp_server.py`). Listing only `receipts/` misses every recipe
+`backend/app/mcp_server/tools/expenses.py`). Listing only `receipts/` misses every recipe
 receipt, so check both:
 
 ```bash

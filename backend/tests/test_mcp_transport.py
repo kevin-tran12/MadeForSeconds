@@ -1,4 +1,4 @@
-"""Transport-level tests for the mcp SDK 2.x migration (app/mcp_server.py).
+"""Transport-level tests for the mcp SDK 2.x migration (app/mcp_server/).
 
 test_mcp_tools.py calls tools as plain functions and never touches the SDK's
 own surface — tools/list, schemas, the /mcp mount, or the auth challenge. This
@@ -10,15 +10,12 @@ limit (1.6d), and the HTTP mount (1.6b).
 import json
 import time
 from itertools import count
-from unittest.mock import patch
 
 import anyio
 import pytest
 from mcp.client import Client
 
 from app import mcp_server
-
-from test_mcp_tools import _chain_db
 
 DOCUMENTED_TOOLS = {
     "list_recipes", "get_recipe", "list_categories", "create_recipe",
@@ -42,13 +39,10 @@ MCP_HEADERS = {"Content-Type": "application/json", "Accept": "application/json, 
 
 
 @pytest.fixture
-def db():
-    mock = _chain_db()
-    with (
-        patch("app.mcp_server.get_db", return_value=mock),
-        patch("app.services.recipes.cache"),
-    ):
-        yield mock
+def db(mcp_db):
+    """Alias for conftest.py's mcp_db, kept so every test below reads
+    unchanged — see that fixture for what it patches."""
+    return mcp_db
 
 
 # ── 1.6a In-memory client ───────────────────────────────────────────────────
@@ -222,3 +216,68 @@ class TestHttpMount:
     def test_mount_ordering_preserved(self, client):
         assert client.get("/api/health").status_code == 200
         assert client.get("/definitely-not-a-route").status_code == 404
+
+
+# ── Package structure (app/mcp_server/ split) ───────────────────────────────
+
+
+class TestPackageStructure:
+    @pytest.mark.asyncio
+    async def test_registered_tools_equal_module_tool_tuples(self):
+        """The tool surface is exactly the union of each tools/*.py module's
+        TOOLS tuple — nothing registers by import-order side effect."""
+        expected = {tool.__name__ for module in mcp_server.TOOL_MODULES for tool in module.TOOLS}
+        async with Client(mcp_server.mcp) as c:
+            result = await c.list_tools()
+        assert {t.name for t in result.tools} == expected
+
+    def test_sdk_is_imported_only_in_server_py(self):
+        """server.py is the only module in the package allowed to import the
+        mcp SDK — every tools/*.py module talks to it only through the `mcp`
+        object register(mcp) receives."""
+        import ast
+        from pathlib import Path
+
+        package_dir = Path(mcp_server.__file__).parent
+        offenders = []
+        for path in package_dir.rglob("*.py"):
+            if path.name == "server.py":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    names = [node.module] if node.module else []
+                else:
+                    continue
+                if any(name and (name == "mcp" or name.startswith("mcp.")) for name in names):
+                    offenders.append(str(path.relative_to(package_dir)))
+        assert not offenders, f"mcp SDK imported outside server.py: {offenders}"
+
+    def test_prod_config_serves_auth_challenge(self):
+        """build_server/build_app take an explicit settings object, so a
+        prod-like server can be built and probed without patching module
+        globals or setting real env vars — this is the same server.py path
+        production actually runs, just constructed with a fake settings."""
+        from types import SimpleNamespace
+
+        from starlette.testclient import TestClient
+
+        prod_settings = SimpleNamespace(
+            is_dev=False,
+            workos_issuer_url="https://example.authkit.app",
+            mcp_resource_url="https://api.example.com/mcp",
+            mcp_required_scopes_list=[],
+        )
+        server = mcp_server.build_server(prod_settings)
+        app = mcp_server.build_app(prod_settings, server)
+
+        with TestClient(app) as c:
+            response = c.post("/mcp", json=INITIALIZE_BODY, headers=MCP_HEADERS)
+            assert response.status_code == 401
+            assert "resource_metadata=" in response.headers.get("www-authenticate", "")
+
+            metadata = c.get("/.well-known/oauth-protected-resource/mcp")
+            assert metadata.status_code == 200
+            assert metadata.json()["authorization_servers"] == ["https://example.authkit.app"]
