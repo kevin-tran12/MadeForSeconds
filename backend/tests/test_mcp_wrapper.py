@@ -11,12 +11,32 @@ failure here points at wrapper.py itself rather than at a tool's own
 
 import logging
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.mcp_server.wrapper import mcp_tool
 from app.services import instagram, recipes as recipe_service
+
+
+@pytest.fixture(autouse=True)
+def mock_audit_db():
+    """Every read_only=False call below now also triggers wrapper.py's
+    audit.record() (S13) — without this, that call reaches the real
+    Firestore client (no credentials in this environment) and logs a
+    WARNING on every single one of them, polluting caplog-based assertions
+    in tests that have nothing to do with auditing. TestAuditTrail below
+    overrides this per-test where it actually wants to inspect the write.
+    """
+    with patch("app.mcp_server.audit.get_db", return_value=MagicMock()):
+        yield
+
+
+def _caller(client_id: str, subject: str | None = None) -> SimpleNamespace:
+    """A fake mcp AccessToken-shaped object — real ones have more fields
+    (token, scopes, ...) but wrapper.py's _current_caller() only ever reads
+    .client_id and .subject."""
+    return SimpleNamespace(client_id=client_id, subject=subject)
 
 
 class TestAnnotationsAndBudget:
@@ -133,10 +153,10 @@ class TestRateLimitEnforcement:
 
     get_access_token() is patched directly (rather than threading a real
     AccessToken through contextvars) since wrapper.py's own
-    _current_client_id() is the thin, already-covered translation from that
-    call to a plain client_id string — patching at that boundary keeps this
-    test about mcp_tool()'s behavior, not about re-deriving how the SDK's
-    auth context works.
+    _current_caller() is the thin, already-covered translation from that
+    call to a plain (client_id, subject) pair — patching at that boundary
+    keeps this test about mcp_tool()'s behavior, not about re-deriving how
+    the SDK's auth context works.
     """
 
     def test_a_rejected_call_never_invokes_the_wrapped_function(self):
@@ -149,7 +169,7 @@ class TestRateLimitEnforcement:
 
         with patch(
             "app.mcp_server.wrapper.get_access_token",
-            return_value=SimpleNamespace(client_id="rate-test-client"),
+            return_value=_caller("rate-test-client"),
         ):
             for _ in range(30):
                 fn()
@@ -167,7 +187,7 @@ class TestRateLimitEnforcement:
 
         with patch(
             "app.mcp_server.wrapper.get_access_token",
-            return_value=SimpleNamespace(client_id="rate-test-client-2"),
+            return_value=_caller("rate-test-client-2"),
         ):
             with caplog.at_level(logging.INFO, logger="app.mcp_server.wrapper"):
                 for _ in range(31):
@@ -195,3 +215,75 @@ class TestRateLimitEnforcement:
             fn()
 
         assert len(calls) == 40
+
+
+class TestAuditTrail:
+    """audit.py has its own tests (test_mcp_audit.py) for target extraction
+    and the write-failure-is-swallowed behavior — this class checks only
+    that mcp_tool() calls it at the right time: for mutating tools, not
+    read-only ones, with the arguments the tool was actually called with.
+    """
+
+    def test_a_mutating_call_writes_one_audit_doc(self):
+        mock_db = MagicMock()
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn(recipe_id: str):
+            return {"id": recipe_id, "published": True}
+
+        with (
+            patch("app.mcp_server.audit.get_db", return_value=mock_db),
+            patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("client-x")),
+        ):
+            fn(recipe_id="r1")
+
+        mock_db.collection.assert_called_once_with("mcp_audit")
+        written = mock_db.collection.return_value.document.return_value.set.call_args[0][0]
+        assert written["tool"] == "fn"
+        assert written["ok"] is True
+        assert written["client_id"] == "client-x"
+        assert written["arg_keys"] == ["recipe_id"]
+
+    def test_a_read_only_call_writes_no_audit_doc(self):
+        mock_db = MagicMock()
+
+        @mcp_tool(read_only=True)
+        def fn():
+            return {"count": 0}
+
+        with patch("app.mcp_server.audit.get_db", return_value=mock_db):
+            fn()
+
+        mock_db.collection.assert_not_called()
+
+    def test_a_failed_mutating_call_still_writes_an_audit_doc(self):
+        """Named update_recipe (rather than a generic local `fn`) since
+        audit.py's target extraction is keyed by real tool name — see
+        test_mcp_audit.py for that logic's own dedicated tests; this one
+        just confirms the wrapper passes kwargs through so target ends up
+        populated even on a failure, where audit._build_target has only
+        the caller-supplied recipe_id to go on (the result carries none)."""
+        mock_db = MagicMock()
+
+        @mcp_tool(read_only=False, budget="write")
+        def update_recipe(recipe_id: str):
+            raise recipe_service.RecipeNotFound(recipe_id)
+
+        with patch("app.mcp_server.audit.get_db", return_value=mock_db):
+            update_recipe(recipe_id="ghost")
+
+        written = mock_db.collection.return_value.document.return_value.set.call_args[0][0]
+        assert written["ok"] is False
+        assert written["error"] == "not_found"
+        assert written["target"] == {"recipe_id": "ghost"}
+
+    def test_an_audit_write_failure_does_not_fail_the_call(self):
+        with patch("app.mcp_server.audit.get_db", side_effect=RuntimeError("firestore down")):
+
+            @mcp_tool(read_only=False, budget="write")
+            def fn():
+                return {"ok": True}
+
+            result = fn()  # must not raise
+
+        assert result == {"ok": True}

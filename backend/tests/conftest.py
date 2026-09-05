@@ -78,7 +78,14 @@ def mcp_db():
     and ingredient services' own cache bindings (each imports its own
     `cache` reference, so both need patching independently), the same
     combination test_mcp_tools.py's own `db` fixture used to provide via a
-    single `app.mcp_server.get_db` patch.
+    single `app.mcp_server.get_db` patch. Also patches
+    app.mcp_server.audit.get_db (S13's audit trail, called from every
+    read_only=False tool via wrapper.py) — without it, every mutating-tool
+    test here would additionally attempt a real Firestore write and log a
+    WARNING on the (swallowed, but noisy) failure. Uses its own separate
+    mock rather than reusing `mock`: several existing tests assert exact
+    call counts on `mock` itself (e.g. `db.set.assert_not_called()`), and
+    audit's own unrelated `.set()` call would silently break those.
     """
     mock = _chain_db()
     with (
@@ -86,6 +93,7 @@ def mcp_db():
         patch("app.mcp_server.tools.ingredients.get_db", return_value=mock),
         patch("app.mcp_server.tools.social.get_db", return_value=mock),
         patch("app.mcp_server.tools.expenses.get_db", return_value=mock),
+        patch("app.mcp_server.audit.get_db", return_value=_chain_db()),
         patch("app.services.recipes.cache"),
         patch("app.services.ingredients.cache"),
     ):
