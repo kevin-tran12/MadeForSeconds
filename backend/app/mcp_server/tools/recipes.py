@@ -1,6 +1,7 @@
 """Recipe tools: list, fetch, create, update, publish, delete."""
 
 import logging
+from datetime import datetime
 
 from google.cloud.firestore_v1.base_query import FieldFilter
 
@@ -12,47 +13,143 @@ from ..wrapper import iso, mcp_tool
 
 logger = logging.getLogger(__name__)
 
+# S7: search mode scans forward in bounded pages instead of the whole
+# catalogue in one call — this caps how much of it any single call touches.
+_MAX_SEARCH_PAGES = 3
+
+
+def _recipe_item(doc, data: dict) -> dict:
+    return {
+        "id": doc.id,
+        "slug": data.get("slug", ""),
+        "title": data.get("title", ""),
+        "published": data.get("published", False),
+        "updated_at": iso(data.get("updated_at")),
+        "categories": data.get("categories", []),
+        "labels": data.get("labels", []),
+        "has_image": bool(data.get("image_url")),
+    }
+
+
+def _recipes_query(published: bool | None):
+    # Known limitation, shared with routes/public.py's identical pattern
+    # (this deliberately reuses it, per S7's own spec) rather than something
+    # new: a `start_after` cursor keyed on `created_at` alone has no
+    # tiebreaker, so two recipes sharing the exact same microsecond
+    # timestamp would land on the same cursor "position" and one could be
+    # silently skipped across a page boundary. Found this for real —
+    # seed.py computes one `now` and reuses it for every seeded recipe,
+    # which reproduces the tie deterministically — not a hypothetical.
+    # Not fixed here: real recipe creation (one MCP/HTTP call at a time)
+    # makes an exact microsecond collision astronomically unlikely, and a
+    # proper fix (a compound (created_at, doc_id) cursor) is a change to a
+    # pattern used in two places, not a one-line addition — worth its own
+    # follow-up rather than folding into this story's scope.
+    query = get_db().collection("recipes")
+    if published is not None:
+        query = query.where(filter=FieldFilter("published", "==", published))
+    return query.order_by("created_at", direction="DESCENDING").select(
+        ["slug", "title", "published", "created_at", "updated_at", "categories", "labels", "image_url"]
+    )
+
 
 @mcp_tool(read_only=True, budget="read")
-def list_recipes(published: bool | None = None, search: str = "", limit: int = 20) -> dict:
-    """List recipes (drafts and published) as lightweight summaries.
+def list_recipes(
+    published: bool | None = None, search: str = "", limit: int = 20, cursor: str | None = None,
+) -> dict:
+    """List recipes (drafts and published) as lightweight summaries, newest first.
 
     published: filter by state (True/False), or omit for all.
     search: case-insensitive substring match on the title.
-    Returns {recipes: [{id, slug, title, published, updated_at, categories,
-    labels, has_image}], count}.
-    """
-    db = get_db()
-    limit = max(1, min(limit, 100))
-    query = db.collection("recipes")
-    if published is not None:
-        query = query.where(filter=FieldFilter("published", "==", published))
-    docs = (
-        query.order_by("created_at", direction="DESCENDING")
-        .limit(100 if search else limit)
-        .select(["slug", "title", "published", "updated_at", "categories", "labels", "image_url"])
-        .stream()
-    )
+    cursor: pass back the next_cursor from a previous call to continue where
+    it left off. An unrecognised cursor returns {"error": "invalid_request"}
+    rather than silently starting over from the beginning.
 
-    items = []
+    Without search, this is one Firestore page per call (limit+1 trick to
+    detect whether another page exists, same as the public /api/recipes
+    route). With search — Firestore has no substring/ILIKE query, so
+    matching happens here — it scans up to 3 pages of min(limit*3, 100)
+    docs each per call, bounding how much of the catalogue one call
+    touches, rather than the whole thing at once. next_cursor continues
+    from the last SCANNED doc (not the last matched one), so a follow-up
+    call with the same search keeps scanning forward instead of
+    re-scanning what this call already looked at; exhausted=true means
+    every recipe has now been scanned end to end.
+
+    Returns {recipes, count, next_cursor, exhausted}.
+    """
+    limit = max(1, min(limit, 100))
+
+    cursor_dt = None
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            return {"error": "invalid_request", "message": f"invalid cursor: {cursor!r}"}
+
     needle = search.lower()
-    for doc in docs:
-        data = doc.to_dict() or {}
-        if needle and needle not in data.get("title", "").lower():
-            continue
-        items.append({
-            "id": doc.id,
-            "slug": data.get("slug", ""),
-            "title": data.get("title", ""),
-            "published": data.get("published", False),
-            "updated_at": iso(data.get("updated_at")),
-            "categories": data.get("categories", []),
-            "labels": data.get("labels", []),
-            "has_image": bool(data.get("image_url")),
-        })
-        if len(items) >= limit:
+
+    if not needle:
+        query = _recipes_query(published)
+        if cursor_dt is not None:
+            query = query.start_after({"created_at": cursor_dt})
+        fetch_limit = limit + 1  # +1 to detect whether another page exists
+        docs = list(query.limit(fetch_limit).stream())
+        has_more = len(docs) > limit
+        docs = docs[:limit]
+
+        items = []
+        last_created_at = None
+        for doc in docs:
+            data = doc.to_dict() or {}
+            last_created_at = data.get("created_at")
+            items.append(_recipe_item(doc, data))
+
+        return {
+            "recipes": items,
+            "count": len(items),
+            "next_cursor": iso(last_created_at) if has_more else None,
+            "exhausted": not has_more,
+        }
+
+    # search mode: scan forward in bounded pages rather than the whole
+    # catalogue at once.
+    page_fetch_limit = min(limit * 3, 100)
+    page_cursor_dt = cursor_dt
+    last_scanned_at = None
+    exhausted = False
+    items = []
+
+    for _ in range(_MAX_SEARCH_PAGES):
+        query = _recipes_query(published)
+        if page_cursor_dt is not None:
+            query = query.start_after({"created_at": page_cursor_dt})
+        page_docs = list(query.limit(page_fetch_limit).stream())
+        if not page_docs:
+            exhausted = True
             break
-    return {"recipes": items, "count": len(items)}
+
+        for doc in page_docs:
+            data = doc.to_dict() or {}
+            last_scanned_at = data.get("created_at")
+            if needle in data.get("title", "").lower():
+                items.append(_recipe_item(doc, data))
+                if len(items) >= limit:
+                    break
+
+        if len(page_docs) < page_fetch_limit:
+            exhausted = True
+        page_cursor_dt = last_scanned_at
+
+        if len(items) >= limit or exhausted:
+            break
+
+    return {
+        "recipes": items[:limit],
+        "count": len(items[:limit]),
+        "next_cursor": None if exhausted else iso(last_scanned_at),
+        "exhausted": exhausted,
+    }
 
 
 def _lookup_recipe(recipe_id: str = "", slug: str = ""):

@@ -142,7 +142,7 @@ Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev
 | Tool | Purpose |
 |------|---------|
 | `list_categories` | Allowed category list |
-| `list_recipes` | Search/filter existing recipes before creating |
+| `list_recipes` | Search/filter existing recipes before creating; cursor-paginated (`next_cursor`, `exhausted`) rather than one unbounded fetch |
 | `get_recipe` | Full recipe by id or slug |
 | `create_recipe` | Save a draft — duplicate titles return a pointer to the existing recipe instead of writing a second one |
 | `update_recipe` | Revise a draft (array fields are replaced whole) |
@@ -202,7 +202,7 @@ Every tool carries MCP annotations (read-only/destructive/idempotent/open-world 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (1006 tests across 45 files)
+│   ├── tests/                  Pytest suite (1015 tests across 45 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -305,7 +305,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (1006 tests)
+npm run test:backend                    # Pytest (1015 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -443,7 +443,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (1006 tests, 45 files)
+### Backend — pytest (1015 tests, 45 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
