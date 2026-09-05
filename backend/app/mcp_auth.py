@@ -24,6 +24,20 @@ this MCP resource or for the site owner specifically.
      restriction") — that gap is what let (1) matter less than it should.
   3. Scopes — enforced by the MCP SDK itself via ``AuthSettings.required_scopes``
      (see ``mcp_server/server.py``), not duplicated here.
+  4. Second factor (TOTP) — a deliberate gap, not an oversight.
+     ``create_expense`` via MCP does not go through ``require_totp_session``
+     the way the admin-UI expense route does. It is a create-only path (no
+     MCP tool updates or deletes an existing expense), and the audience +
+     owner-subject binding above already proves both "this came from a
+     WorkOS-authenticated session" and "that session belongs to the site
+     owner specifically" — the two things TOTP exists to add on top of a
+     bare credential. Every expense created this way carries an
+     attribution (``changed_by``, ``mcp_server/wrapper.py::current_actor()``)
+     so the gap is at least auditable, not invisible. Recommended next
+     step if this needs hardening further: WorkOS AuthKit's own MFA
+     enrollment for the owner's account, which would then cover the
+     WorkOS login itself rather than adding a second, separate factor
+     here — see docs/DEPLOYMENT.md § MCP "Second factor".
 """
 
 import logging

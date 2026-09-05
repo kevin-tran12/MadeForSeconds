@@ -8,13 +8,16 @@ for the caller (pattern: services/social.py's own `_record`, which the
 docstring there names for exactly this reason).
 
 Each doc in the `mcp_audit` collection: {tool, at, ok, error, client_id,
-subject, target, arg_keys}. `arg_keys` is the sorted list of argument
-NAMES the call was made with, never values — this is a record of what was
-attempted, not a second copy of the mutation's payload sitting in a second
-collection with a different access-control story than the one it belongs
-in. `target` is the handful of identifiers (recipe_id, slug, expense_id,
-media_id, ingredient_slug) that say WHAT the call touched, extracted below
-per tool since each domain names its own identifiers differently.
+subject, actor, target, arg_keys}. `arg_keys` is the sorted list of
+argument NAMES the call was made with, never values — this is a record of
+what was attempted, not a second copy of the mutation's payload sitting in
+a second collection with a different access-control story than the one it
+belongs in. `target` is the handful of identifiers (recipe_id, slug,
+expense_id, media_id, ingredient_slug) that say WHAT the call touched,
+extracted below per tool since each domain names its own identifiers
+differently. `actor` ("mcp:<client_id>" or "mcp" in dev — wrapper.py's
+current_actor(), S8) is the same attribution string create_expense stamps
+into its own revision history's changed_by field.
 
 No Terraform, no TTL: a personal site's mutation volume through this
 surface keeps `mcp_audit` writes trivially inside Firestore's free tier
@@ -79,7 +82,9 @@ def _build_target(tool_name: str, kwargs: dict, result) -> dict:
     return target
 
 
-def record(tool_name: str, kwargs: dict, result, client_id: str | None, subject: str | None) -> None:
+def record(
+    tool_name: str, kwargs: dict, result, client_id: str | None, subject: str | None, actor: str,
+) -> None:
     """Write one audit doc for a mutating MCP tool call. Never raises."""
     error_kind = result.get("error") if isinstance(result, dict) else None
     doc = {
@@ -92,6 +97,11 @@ def record(tool_name: str, kwargs: dict, result, client_id: str | None, subject:
         # (see mcp_auth.py) — always None until that lands, kept here so
         # the schema does not need to change when it does.
         "subject": subject,
+        # "mcp:<client_id>" or "mcp" in dev (S8) — the same attribution
+        # string create_expense stamps into its own revision history's
+        # changed_by field, so a human or query correlating the two sees a
+        # matching identity for the same request.
+        "actor": actor,
         "target": _build_target(tool_name, kwargs, result),
         "arg_keys": sorted(kwargs.keys()),
     }

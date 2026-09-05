@@ -9,7 +9,7 @@ from ...firestore import get_db
 from ...models_expense import EXPENSE_CATEGORIES, ExpenseItem, recalculate_project_amounts
 from ...routes.expenses import _write_revision_in_transaction
 from ...services import uploads
-from ..wrapper import mcp_tool
+from ..wrapper import current_actor, mcp_tool
 
 logger = logging.getLogger(__name__)
 
@@ -27,17 +27,23 @@ def _resolve_recipe_slugs(slugs: list[str]) -> dict[str, tuple[str, str]]:
     return result
 
 
-def _mcp_create_expense_logic(transaction, db, doc_ref, data: dict) -> None:
+def _mcp_create_expense_logic(transaction, db, doc_ref, data: dict, changed_by: str) -> None:
     """Commits the expense document and its first revision atomically —
     reuses routes/expenses.py's _write_revision_in_transaction rather than a
     second, divergent implementation, which is how this exact class of bug
     (expense doc and revision as two independent writes) came back a second
     time here after being fixed for the HTTP route (see that module's own
     comment on this: "a second, divergent implementation is how this class
-    of bug comes back," originally said about the receipt-URL validator)."""
+    of bug comes back," originally said about the receipt-URL validator).
+
+    changed_by (S8): "mcp:<client_id>" for an authenticated caller, "mcp" in
+    dev — see current_actor()'s own docstring in wrapper.py. Was a bare
+    "mcp" literal before S8; every expense created through this tool looked
+    identical in the revision history regardless of which MCP client
+    created it."""
     transaction.set(doc_ref, data)
     _write_revision_in_transaction(
-        transaction, db, doc_ref.id, 1, {**data, "id": doc_ref.id}, "mcp", "Created via MCP"
+        transaction, db, doc_ref.id, 1, {**data, "id": doc_ref.id}, changed_by, "Created via MCP"
     )
 
 
@@ -172,7 +178,7 @@ def create_expense(
     # _mcp_create_expense_logic's own docstring for why this reuses
     # routes/expenses.py's transactional helper rather than a second,
     # independent implementation.
-    _mcp_create_expense_transaction(db.transaction(), db, doc_ref, data)
+    _mcp_create_expense_transaction(db.transaction(), db, doc_ref, data, current_actor())
     data["id"] = doc_ref.id
 
     logger.info("MCP create_expense: %s %s (%s)", vendor, date, doc_ref.id)

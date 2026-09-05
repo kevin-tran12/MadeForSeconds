@@ -83,6 +83,23 @@ def _current_caller() -> tuple[str | None, str | None]:
     return token.client_id, token.subject
 
 
+def _actor_for(client_id: str | None) -> str:
+    return f"mcp:{client_id}" if client_id else "mcp"
+
+
+def current_actor() -> str:
+    """"mcp:<client_id>" for an authenticated caller, "mcp" in dev (no
+    client_id) — S8 of the MCP hardening epic. The one attribution string
+    both this module's own audit.record() calls (as the `actor` field) and
+    create_expense (as `changed_by`, a financial record) use, so a single
+    Firestore query or a human reading either sees the same identity for
+    the same request. Exported (no leading underscore, unlike
+    _current_caller) specifically so tools/*.py modules can call it without
+    importing the mcp SDK themselves — see the module docstring."""
+    client_id, _ = _current_caller()
+    return _actor_for(client_id)
+
+
 def mcp_tool(
     *,
     read_only: bool,
@@ -106,6 +123,10 @@ def mcp_tool(
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             client_id, subject = _current_caller()
+            # Same helper current_actor() calls — used directly here to
+            # reuse the client_id already fetched above rather than a
+            # second get_access_token() call.
+            actor = _actor_for(client_id)
             retry_after = rate_budgets.check_budget(budget, client_id)
             if retry_after is not None:
                 # Skip fn() entirely — falls through to the single shared
@@ -113,7 +134,7 @@ def mcp_tool(
                 result = {"error": "rate_limited", "retry_after_seconds": retry_after}
                 return _log_outcome_and_return(
                     tool_name=fn.__name__, result=result, client_id=client_id,
-                    subject=subject, read_only=read_only, kwargs=kwargs,
+                    subject=subject, actor=actor, read_only=read_only, kwargs=kwargs,
                 )
 
             idempotency_key = kwargs.get("idempotency_key")
@@ -124,7 +145,7 @@ def mcp_tool(
                 }
                 return _log_outcome_and_return(
                     tool_name=fn.__name__, result=result, client_id=client_id,
-                    subject=subject, read_only=read_only, kwargs=kwargs,
+                    subject=subject, actor=actor, read_only=read_only, kwargs=kwargs,
                 )
             if idempotency_key and client_id:
                 cached = idempotency.get_cached_result(client_id, idempotency_key)
@@ -134,7 +155,7 @@ def mcp_tool(
                     # Firestore write / Instagram call) a second time.
                     return _log_outcome_and_return(
                         tool_name=fn.__name__, result=cached, client_id=client_id,
-                        subject=subject, read_only=read_only, kwargs=kwargs,
+                        subject=subject, actor=actor, read_only=read_only, kwargs=kwargs,
                     )
 
             try:
@@ -200,7 +221,7 @@ def mcp_tool(
 
             return _log_outcome_and_return(
                 tool_name=fn.__name__, result=result, client_id=client_id,
-                subject=subject, read_only=read_only, kwargs=kwargs,
+                subject=subject, actor=actor, read_only=read_only, kwargs=kwargs,
             )
 
         wrapper.mcp_annotations = annotations
@@ -211,7 +232,8 @@ def mcp_tool(
 
 
 def _log_outcome_and_return(
-    tool_name: str, result, client_id: str | None, subject: str | None, read_only: bool, kwargs: dict,
+    tool_name: str, result, client_id: str | None, subject: str | None, actor: str,
+    read_only: bool, kwargs: dict,
 ):
     """The one MCP_TOOL outcome log line (plus a WARNING MCP_TOOL_FAILED
     marker for error kinds that mean something broke) and the one
@@ -230,7 +252,7 @@ def _log_outcome_and_return(
     if error_kind in _ALERT_ERROR_KINDS:
         logger.warning("MCP_TOOL_FAILED tool=%s error=%s client_id=%s", tool_name, error_kind, client_id)
     if not read_only:
-        audit.record(tool_name, kwargs, result, client_id, subject)
+        audit.record(tool_name, kwargs, result, client_id, subject, actor)
     return result
 
 
