@@ -66,8 +66,8 @@ Steps:
      admin route function app.routes.expenses.upload_receipt() with a real
      UploadFile. Exercises storage.objects.create through the exact code
      path production uses.
-  2. get_blob validation — calls app.mcp_server._resolve_receipt_url() on
-     the URL step 1 returned. Exercises storage.objects.get and confirms
+  2. get_blob validation — calls app.services.uploads.resolve_receipt_url()
+     on the URL step 1 returned. Exercises storage.objects.get and confirms
      the content-type round-trips correctly.
   3. Signed PUT — calls app.mcp_server.request_image_upload(kind="receipt")
      for a second object, then performs a real unauthenticated HTTP PUT to
@@ -239,8 +239,8 @@ def run(args: argparse.Namespace) -> int:
         # ── Impersonation: run the app's own storage.Client()/
         # google.auth.default() calls as the backend SA, without needing the
         # operator to switch their own ADC. Every module that does
-        # `from google.cloud import storage` (or a local import inside a
-        # function, as mcp_server._resolve_receipt_url does) looks up
+        # `from google.cloud import storage` (including
+        # app.services.uploads.resolve_receipt_url, called below) looks up
         # `storage.Client` on the shared module object at call time, so
         # patching the attribute here covers all of them.
         source_credentials, _ = google.auth.default()
@@ -287,8 +287,8 @@ def run(args: argparse.Namespace) -> int:
             _check("direct upload succeeded", receipt_url_1.startswith(f"gs://{bucket_name}/receipts/"), receipt_url_1)
 
             # ── 2: get_blob validation on the direct-uploaded object ────────
-            print("\n[2] get_blob validation (app.mcp_server._resolve_receipt_url)")
-            resolved_1 = mcp_server._resolve_receipt_url(receipt_url_1)
+            print("\n[2] get_blob validation (app.services.uploads.resolve_receipt_url)")
+            resolved_1 = uploads.resolve_receipt_url(receipt_url_1)
             _check("blob found and content-type round-tripped", resolved_1["receipt_content_type"] in ("application/pdf", "application/octet-stream"), str(resolved_1))
 
             # ── 3: signed PUT, then a real HTTP PUT against it ──────────────
@@ -306,7 +306,7 @@ def run(args: argparse.Namespace) -> int:
 
             # ── 4: get_blob validation on the signed-PUT object ─────────────
             print("\n[4] get_blob validation on the signed-PUT object")
-            resolved_2 = mcp_server._resolve_receipt_url(receipt_url_2)
+            resolved_2 = uploads.resolve_receipt_url(receipt_url_2)
             _check("PUT'd blob is found via get_blob", resolved_2["receipt_url"] == receipt_url_2, str(resolved_2))
 
             # ── 5: signed GET, then a real HTTP GET, byte-for-byte ──────────

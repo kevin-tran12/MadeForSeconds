@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     mcp_owner_subject: str = ""
     # Comma-separated OAuth scopes every MCP access token must carry,
     # enforced by the SDK itself (AuthSettings.required_scopes in
-    # mcp_server.py). Blank means no scope beyond a valid, owned token is
+    # mcp_server/server.py). Blank means no scope beyond a valid, owned token is
     # required.
     mcp_required_scopes: str = ""
     redis_url: str | None = None  # e.g. rediss://default:TOKEN@host.upstash.io:6379
@@ -173,8 +173,8 @@ def validate_production_settings(s: "Settings") -> None:
     # applied manually and separately. Crashing here on a missing bucket name
     # is what stops a revision deployed ahead of Terraform from silently
     # reporting fake upload success instead — see routes/admin.py and
-    # mcp_server.py's request_image_upload/upload_image_from_url, which used
-    # to fall back to a placeholder response whenever a bucket was unset,
+    # mcp_server/tools/images.py's request_image_upload/upload_image_from_url,
+    # which used to fall back to a placeholder response whenever a bucket was unset,
     # in production as much as in dev. Crashing at import time is also the
     # SAFE failure mode: cloudbuild.yaml deploys with --no-traffic, smoke-tests
     # the tagged candidate revision, and only then promotes that exact tag. A

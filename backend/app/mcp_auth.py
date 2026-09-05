@@ -23,7 +23,7 @@ this MCP resource or for the site owner specifically.
      no email claim at all was accepted anyway ("relying on WorkOS sign-in
      restriction") — that gap is what let (1) matter less than it should.
   3. Scopes — enforced by the MCP SDK itself via ``AuthSettings.required_scopes``
-     (see ``mcp_server.py``), not duplicated here.
+     (see ``mcp_server/server.py``), not duplicated here.
 """
 
 import logging
