@@ -1387,6 +1387,22 @@ without an OAuth `client_id` — dev's MCP server runs fully unauthenticated
 and trusted to a single operator, so there is no "many callers" scenario to
 budget against there; production is the only place this has any effect.
 
+**Audit trail.** Every mutating tool call (`read_only=False`; reads are
+never audited) writes one append-only doc to Firestore's `mcp_audit`
+collection — `app/mcp_server/audit.py` — success, a translated domain
+error, or a rate-limit rejection alike: `{tool, at, ok, error, client_id,
+subject, target, arg_keys}`. `target` names what was touched (`recipe_id`,
+`slug`, `expense_id`, `media_id`, or `ingredient_slug`, whichever apply);
+`arg_keys` is the sorted list of argument *names* the call was made with,
+never the values — this is a record of what was attempted, not a second
+copy of the mutation's payload. `subject` is reserved for the caller's
+WorkOS `sub` claim but is always `None` today — `WorkOSTokenVerifier`
+(`app/mcp_auth.py`) does not populate `AccessToken.subject` yet. Best-effort
+like the rate limiter's fallback counter: an audit write failure only logs
+a warning, never fails the mutation itself. No Terraform, no TTL — a
+personal site's mutation volume through this surface keeps this collection
+trivially inside the Firestore free tier indefinitely.
+
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
 `request_image_upload`, `upload_image_from_url`, `create_expense`,

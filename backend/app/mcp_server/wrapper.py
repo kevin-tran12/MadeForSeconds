@@ -31,6 +31,11 @@ hardening epic need on top:
   first call site. Carries only ids, never argument values: RedactionFilter
   scrubs a record's rendered message, not its extra fields, so anything
   free-form has no business landing there.
+- **Audit trail.** `audit.record(...)` (see that module) writes one
+  best-effort Firestore doc per mutating call (`read_only=False` only —
+  reads are never audited), success or failure alike, capturing WHAT was
+  touched (`target`) and WHICH argument names were passed (`arg_keys`,
+  never values) but never the mutation's actual payload.
 """
 
 import functools
@@ -43,7 +48,7 @@ from pydantic import ValidationError
 from ..services import ingredients
 from ..services import instagram
 from ..services import recipes as recipe_service
-from . import rate_budgets
+from . import audit, rate_budgets
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +61,18 @@ logger = logging.getLogger(__name__)
 _ALERT_ERROR_KINDS = frozenset({"internal", "instagram", "instagram_auth"})
 
 
-def _current_client_id() -> str | None:
-    """The OAuth client_id of the caller, or None outside an authenticated
-    request (dev mode, or an in-memory Client() test) — get_access_token()
-    itself already returns None rather than raising in that case."""
+def _current_caller() -> tuple[str | None, str | None]:
+    """(client_id, subject) of the OAuth caller, or (None, None) outside an
+    authenticated request (dev mode, or an in-memory Client() test) —
+    get_access_token() itself already returns None rather than raising in
+    that case. subject is WorkOSTokenVerifier's AccessToken.subject, which
+    that verifier does not populate today (see mcp_auth.py) — always None
+    in practice until it does, kept here (and in the audit doc) so nothing
+    needs to change when it does."""
     token = get_access_token()
-    return token.client_id if token else None
+    if not token:
+        return None, None
+    return token.client_id, token.subject
 
 
 def mcp_tool(
@@ -86,13 +97,16 @@ def mcp_tool(
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            client_id = _current_client_id()
+            client_id, subject = _current_caller()
             retry_after = rate_budgets.check_budget(budget, client_id)
             if retry_after is not None:
                 # Skip fn() entirely — falls through to the single shared
                 # outcome-log block below rather than duplicating it here.
                 result = {"error": "rate_limited", "retry_after_seconds": retry_after}
-                return _log_outcome_and_return(fn.__name__, result, client_id)
+                return _log_outcome_and_return(
+                    tool_name=fn.__name__, result=result, client_id=client_id,
+                    subject=subject, read_only=read_only, kwargs=kwargs,
+                )
 
             try:
                 result = fn(*args, **kwargs)
@@ -152,7 +166,10 @@ def mcp_tool(
                 logger.exception("MCP tool %s failed", fn.__name__)
                 result = {"error": "internal", "message": str(exc)}
 
-            return _log_outcome_and_return(fn.__name__, result, client_id)
+            return _log_outcome_and_return(
+                tool_name=fn.__name__, result=result, client_id=client_id,
+                subject=subject, read_only=read_only, kwargs=kwargs,
+            )
 
         wrapper.mcp_annotations = annotations
         wrapper.mcp_budget = budget
@@ -161,12 +178,14 @@ def mcp_tool(
     return decorator
 
 
-def _log_outcome_and_return(tool_name: str, result, client_id: str | None):
+def _log_outcome_and_return(
+    tool_name: str, result, client_id: str | None, subject: str | None, read_only: bool, kwargs: dict,
+):
     """The one MCP_TOOL outcome log line (plus a WARNING MCP_TOOL_FAILED
-    marker for error kinds that mean something broke), shared by both the
-    rate-limit short-circuit and the normal call/exception path above so
-    there is exactly one place this logging happens, not two copies that
-    could drift out of sync."""
+    marker for error kinds that mean something broke) and the one
+    audit.record() call, shared by both the rate-limit short-circuit and
+    the normal call/exception path above so there is exactly one place each
+    of those happens, not two copies that could drift out of sync."""
     error_kind = result.get("error") if isinstance(result, dict) else None
     ok = error_kind is None
     logger.info(
@@ -178,6 +197,8 @@ def _log_outcome_and_return(tool_name: str, result, client_id: str | None):
     )
     if error_kind in _ALERT_ERROR_KINDS:
         logger.warning("MCP_TOOL_FAILED tool=%s error=%s client_id=%s", tool_name, error_kind, client_id)
+    if not read_only:
+        audit.record(tool_name, kwargs, result, client_id, subject)
     return result
 
 
