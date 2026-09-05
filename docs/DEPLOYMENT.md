@@ -1358,6 +1358,22 @@ Built on the `mcp` Python SDK 2.x (`MCPServer`); clients on the older
 Local dev (`docker compose up`) runs the MCP server **unauthenticated** (no
 WorkOS dependency), matching the `require_admin` dev bypass.
 
+**Traces.** The `mcp` SDK instruments every `tools/call`, `tools/list` and
+`initialize` request with an OpenTelemetry span out of the box; `app/tracing.py`
+exports those spans to **Cloud Trace** in production (dev always skips this,
+regardless of `TRACE_ENABLED`). Find them under Trace Explorer filtered to
+`service.name=mfs-backend`; a `tools/call` from Claude typically shows up
+within a minute. `TRACE_ENABLED=false` turns the exporter off without a
+redeploy — useful while diagnosing an exporter-side issue — and
+`TRACE_SAMPLE_RATIO` (default `1.0`, every request) is the cost knob if volume
+ever outgrows the free tier. Spans export synchronously
+(`SimpleSpanProcessor`, not a batching processor) because Cloud Run only
+schedules CPU while a request is in flight — a background batch flush could
+simply never run and silently drop every span an instance ever produced. At
+this app's traffic, one call's worth of export latency is a better trade than
+that. Free tier: 2.5M spans/month, hundreds actually used — see
+[GCP free tier summary](#gcp-free-tier-summary).
+
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
 `request_image_upload`, `upload_image_from_url`, `create_expense`,
@@ -1585,6 +1601,7 @@ the same billed-delete caveat as `processed_events`.
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
 | Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded |
 | Cloud Scheduler | 3 free jobs per billing account | 3 jobs in use (weekly usage report, secret pruning, budget-breaker reset) — all free. With Instagram publishing enabled, `social-token-refresh` is a genuine 4th job at ~$0.10/month — accepted; see [Secret version pruning § Cost](#secret-version-pruning) |
+| Cloud Trace | 2.5M spans/mo | MCP tool-call spans only (see [MCP server § Traces](#mcp-server-recipeexpense-automation)) — hundreds/month at this app's call volume, far under the allowance |
 
 ### Artifact Registry: gcf-artifacts has no cleanup policy
 

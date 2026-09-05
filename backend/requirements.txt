@@ -25,6 +25,12 @@ Pillow>=12.3.0,<13.0.0
 # mcp 2.x (2026-07-28 spec; stateless core, built-in OpenTelemetry spans). v1 is
 # maintenance-only. Do not pin mcp-types separately; the SDK owns that version.
 mcp[cli]>=2.1.1,<3.0.0
+# Exports mcp's built-in spans to Cloud Trace (app/tracing.py). opentelemetry-api
+# is already pulled in transitively by mcp; the sdk package must be compatible
+# with whichever api version that resolves to, so let pip pick the matching
+# release rather than pinning sdk on its own.
+opentelemetry-sdk>=1.40.0,<2.0.0
+opentelemetry-exporter-gcp-trace>=1.10.0,<2.0.0
 # Sous Chef assistant (app/services/assistant.py). 1.x is built on httpx2, a
 # separate package from the httpx pin below, so the two never conflict.
 anthropic>=1.3.0,<2.0.0

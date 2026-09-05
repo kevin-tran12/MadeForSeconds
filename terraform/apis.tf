@@ -21,6 +21,7 @@ locals {
     "iamcredentials.googleapis.com", # signed URLs via IAM signBlob (no key file on Cloud Run)
     "monitoring.googleapis.com",     # uptime checks + alert policies
     "cloudscheduler.googleapis.com", # weekly Instagram token refresh
+    "cloudtrace.googleapis.com",     # MCP tool-call spans (backend/app/tracing.py)
   ]
 }
 
