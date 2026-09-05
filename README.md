@@ -162,6 +162,8 @@ Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev
 
 Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` to iterate → `request_image_upload` + `update_recipe(image_url=…)` → `publish_recipe`. Ingredient knowledge: `list_ingredients(coverage="missing")` → draft profiles in the owner's voice → `upsert_ingredient` once approved.
 
+Every tool carries MCP annotations (read-only/destructive/idempotent/open-world hints, advisory for clients) via a shared `mcp_tool(...)` decorator, which also emits one structured outcome log line per call.
+
 > The backend scales to zero, so the first call after an idle period takes ~10s.
 
 ---
@@ -198,7 +200,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (938 tests across 40 files)
+│   ├── tests/                  Pytest suite (947 tests across 41 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -301,7 +303,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (938 tests)
+npm run test:backend                    # Pytest (947 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -439,7 +441,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (938 tests, 40 files)
+### Backend — pytest (947 tests, 41 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing

@@ -8,12 +8,12 @@ from ...config import settings
 from ...firestore import get_db
 from ...models import RecipeCreate, RecipeUpdate
 from ...services import recipes as recipe_service
-from ..errors import iso, tool_errors
+from ..wrapper import iso, mcp_tool
 
 logger = logging.getLogger(__name__)
 
 
-@tool_errors
+@mcp_tool(read_only=True, budget="read")
 def list_recipes(published: bool | None = None, search: str = "", limit: int = 20) -> dict:
     """List recipes (drafts and published) as lightweight summaries.
 
@@ -81,19 +81,19 @@ def _lookup_recipe(recipe_id: str = "", slug: str = ""):
     return recipe_service.doc_to_admin_recipe(doc)
 
 
-@tool_errors
+@mcp_tool(read_only=True, budget="read")
 def get_recipe(recipe_id: str = "", slug: str = "") -> dict:
     """Fetch a full recipe by id or slug (drafts included)."""
     return _lookup_recipe(recipe_id, slug).model_dump(mode="json")
 
 
-@tool_errors
+@mcp_tool(read_only=True, budget="read")
 def list_categories() -> dict:
     """List the admin-configured categories valid for create_recipe/update_recipe."""
     return {"categories": recipe_service.get_categories(get_db())}
 
 
-@tool_errors
+@mcp_tool(read_only=False, budget="write")
 def create_recipe(
     title: str,
     description: str = "",
@@ -176,7 +176,7 @@ def create_recipe(
 _CLEARABLE_FIELDS = {"about", "image_url", "components", "sous_chef_notes"}
 
 
-@tool_errors
+@mcp_tool(read_only=False, idempotent=True, budget="write")
 def update_recipe(
     recipe_id: str,
     title: str | None = None,
@@ -249,7 +249,7 @@ def update_recipe(
     }
 
 
-@tool_errors
+@mcp_tool(read_only=False, idempotent=True, budget="write")
 def publish_recipe(recipe_id: str) -> dict:
     """Publish a recipe so it appears on the public site.
 
@@ -268,7 +268,7 @@ def publish_recipe(recipe_id: str) -> dict:
     }
 
 
-@tool_errors
+@mcp_tool(read_only=False, destructive=True, idempotent=True, budget="write")
 def unpublish_recipe(recipe_id: str) -> dict:
     """Take a published recipe off the public site (back to draft)."""
     recipe, _ = recipe_service.set_published(get_db(), recipe_id, False, source="mcp")
@@ -276,7 +276,7 @@ def unpublish_recipe(recipe_id: str) -> dict:
     return {"id": recipe.id, "slug": recipe.slug, "published": False}
 
 
-@tool_errors
+@mcp_tool(read_only=False, destructive=True, budget="write")
 def delete_recipe(recipe_id: str, confirm_title: str) -> dict:
     """Delete a DRAFT recipe and its stored image.
 
@@ -311,6 +311,8 @@ TOOLS = (
 
 def register(mcp) -> None:
     """Register this module's tools on the server. Explicit, so the tool
-    surface is this tuple, nothing else."""
+    surface is this tuple, nothing else. Each tool's annotations (set by the
+    @mcp_tool(...) decorator in wrapper.py) ride along so the server exposes
+    them to clients."""
     for tool in TOOLS:
-        mcp.tool()(tool)
+        mcp.tool(annotations=getattr(tool, "mcp_annotations", None))(tool)

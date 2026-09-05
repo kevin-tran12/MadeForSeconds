@@ -62,11 +62,16 @@ class TestInMemoryClient:
 
     @pytest.mark.asyncio
     async def test_snapshot_create_recipe_schema(self):
-        """Ground truth for later stories (typed inputs, outputSchema): today
-        `ingredients` is an untyped array of open objects
+        """Ground truth for a later story (typed inputs): today `ingredients`
+        is an untyped array of open objects
         ({"type": "object", "additionalProperties": True}) — S10 replaces this
-        with list[Ingredient] — no tool has an output schema, and no tool
-        carries annotations (both added later, S11/S4)."""
+        with list[Ingredient]. No tool has an output schema yet (S11).
+
+        Annotations now exist (added by S4's mcp_tool wrapper) — snapshot the
+        matrix here rather than asserting None, so a future accidental change
+        to any tool's read_only/destructive/idempotent/open_world hints shows
+        up as a failing assertion in this file, the same ground-truth role
+        this test already plays for schemas."""
         async with Client(mcp_server.mcp) as c:
             result = await c.list_tools()
         by_name = {t.name: t for t in result.tools}
@@ -75,7 +80,31 @@ class TestInMemoryClient:
         assert ingredients_schema["type"] == "array"
         assert ingredients_schema["items"] == {"type": "object", "additionalProperties": True}
         assert all(t.output_schema is None for t in result.tools)
-        assert all(t.annotations is None for t in result.tools)
+
+        def hints(name):
+            a = by_name[name].annotations
+            return (a.read_only_hint, a.destructive_hint, a.idempotent_hint, a.open_world_hint)
+
+        # (read_only, destructive, idempotent, open_world)
+        assert hints("list_recipes") == (True, False, False, False)
+        assert hints("get_recipe") == (True, False, False, False)
+        assert hints("list_categories") == (True, False, False, False)
+        assert hints("create_recipe") == (False, False, False, False)
+        assert hints("update_recipe") == (False, False, True, False)
+        assert hints("publish_recipe") == (False, False, True, False)
+        assert hints("unpublish_recipe") == (False, True, True, False)
+        assert hints("delete_recipe") == (False, True, False, False)
+        assert hints("request_image_upload") == (False, False, False, False)
+        assert hints("upload_image_from_url") == (False, False, False, False)
+        assert hints("create_expense") == (False, False, False, False)
+        assert hints("publish_instagram_post") == (False, False, False, True)
+        assert hints("publish_recipe_to_instagram") == (False, False, False, True)
+        assert hints("get_social_kit") == (True, False, False, False)
+        assert hints("social_status") == (True, False, False, False)
+        assert hints("list_ingredients") == (True, False, False, False)
+        assert hints("get_ingredient") == (True, False, False, False)
+        assert hints("upsert_ingredient") == (False, False, True, False)
+        assert hints("delete_ingredient") == (False, True, False, False)
 
     @pytest.mark.asyncio
     async def test_call_list_categories(self, db):
@@ -232,17 +261,21 @@ class TestPackageStructure:
             result = await c.list_tools()
         assert {t.name for t in result.tools} == expected
 
-    def test_sdk_is_imported_only_in_server_py(self):
-        """server.py is the only module in the package allowed to import the
-        mcp SDK — every tools/*.py module talks to it only through the `mcp`
-        object register(mcp) receives."""
+    def test_sdk_is_imported_only_in_server_py_or_wrapper_py(self):
+        """server.py and wrapper.py are the only modules in the package
+        allowed to import the mcp SDK. server.py builds the MCPServer itself;
+        wrapper.py needs mcp.types.ToolAnnotations for the tool-annotation
+        matrix and mcp.server.auth.middleware.auth_context.get_access_token
+        for the outcome log's client_id — every tools/*.py module talks to
+        the SDK only through the `mcp` object register(mcp) receives and the
+        @mcp_tool(...) decorator wrapper.py exports."""
         import ast
         from pathlib import Path
 
         package_dir = Path(mcp_server.__file__).parent
         offenders = []
         for path in package_dir.rglob("*.py"):
-            if path.name == "server.py":
+            if path.name in {"server.py", "wrapper.py"}:
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):

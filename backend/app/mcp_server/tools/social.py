@@ -13,7 +13,7 @@ from ...config import settings
 from ...firestore import get_db
 from ...services import instagram
 from ...services import social
-from ..errors import tool_errors
+from ..wrapper import mcp_tool
 from .recipes import _lookup_recipe
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def _build_recipe_caption(recipe) -> str:
     return "\n\n".join(parts)
 
 
-@tool_errors
+@mcp_tool(read_only=False, open_world=True, budget="publish_social")
 def publish_instagram_post(image_url: str, caption: str = "") -> dict:
     """Publish a single image to the linked Instagram account.
 
@@ -56,7 +56,7 @@ def publish_instagram_post(image_url: str, caption: str = "") -> dict:
     return {**result, "message": "Posted to Instagram."}
 
 
-@tool_errors
+@mcp_tool(read_only=False, open_world=True, budget="publish_social")
 def publish_recipe_to_instagram(
     slug: str = "", recipe_id: str = "", caption: str | None = None
 ) -> dict:
@@ -129,7 +129,7 @@ def _tag_list(csv: str) -> list[str]:
     return tags
 
 
-@tool_errors
+@mcp_tool(read_only=True, budget="read")
 def get_social_kit(recipe_id: str = "", slug: str = "") -> dict:
     """Everything needed to draft social posts for a recipe.
 
@@ -190,7 +190,7 @@ def get_social_kit(recipe_id: str = "", slug: str = "") -> dict:
     }
 
 
-@tool_errors
+@mcp_tool(read_only=True, budget="read")
 def social_status() -> dict:
     """Per-platform social publishing health: configured?, last successful
     refresh, token expiry, and the last error — as recorded by the
@@ -207,6 +207,8 @@ TOOLS = (publish_instagram_post, publish_recipe_to_instagram, get_social_kit, so
 
 def register(mcp) -> None:
     """Register this module's tools on the server. Explicit, so the tool
-    surface is this tuple, nothing else."""
+    surface is this tuple, nothing else. Each tool's annotations (set by the
+    @mcp_tool(...) decorator in wrapper.py) ride along so the server exposes
+    them to clients."""
     for tool in TOOLS:
-        mcp.tool()(tool)
+        mcp.tool(annotations=getattr(tool, "mcp_annotations", None))(tool)

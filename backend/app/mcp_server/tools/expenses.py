@@ -9,7 +9,7 @@ from ...firestore import get_db
 from ...models_expense import EXPENSE_CATEGORIES, ExpenseItem, recalculate_project_amounts
 from ...routes.expenses import _write_revision_in_transaction
 from ...services import uploads
-from ..errors import tool_errors
+from ..wrapper import mcp_tool
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def _mcp_create_expense_logic(transaction, db, doc_ref, data: dict) -> None:
 _mcp_create_expense_transaction = transactional(_mcp_create_expense_logic)
 
 
-@tool_errors
+@mcp_tool(read_only=False, budget="write")
 def create_expense(
     date: str,
     vendor: str,
@@ -197,6 +197,8 @@ TOOLS = (create_expense,)
 
 def register(mcp) -> None:
     """Register this module's tools on the server. Explicit, so the tool
-    surface is this tuple, nothing else."""
+    surface is this tuple, nothing else. Each tool's annotations (set by the
+    @mcp_tool(...) decorator in wrapper.py) ride along so the server exposes
+    them to clients."""
     for tool in TOOLS:
-        mcp.tool()(tool)
+        mcp.tool(annotations=getattr(tool, "mcp_annotations", None))(tool)

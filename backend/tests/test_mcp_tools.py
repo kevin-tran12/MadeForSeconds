@@ -1,7 +1,7 @@
 """Tests for the MCP tool surface (app/mcp_server/).
 
 Tools are called directly as functions — the mcp SDK 2.x's @mcp.tool() registers
-and returns the original callable, and errors.tool_errors translates domain
+and returns the original callable, and wrapper.mcp_tool translates domain
 errors into structured dicts.
 """
 
@@ -425,7 +425,7 @@ class TestUploadImageFromUrl:
     def test_storage_misconfiguration_surfaces_as_internal_not_invalid_request(self):
         """A missing bucket is a server problem, not something the caller
         could fix by adjusting its input — distinct from the ValueError case
-        above, which _tool_errors reports as invalid_request."""
+        above, which mcp_tool reports as invalid_request."""
         with patch(
             "app.services.uploads.fetch_image_to_gcs",
             side_effect=uploads.StorageNotConfiguredError("GCS_BUCKET_NAME is not configured"),

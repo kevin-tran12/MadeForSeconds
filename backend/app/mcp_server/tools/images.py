@@ -6,12 +6,12 @@ from uuid import uuid4
 
 from ...config import settings
 from ...services import uploads
-from ..errors import tool_errors
+from ..wrapper import mcp_tool
 
 logger = logging.getLogger(__name__)
 
 
-@tool_errors
+@mcp_tool(read_only=False, budget="write")
 def request_image_upload(filename: str, content_type: str, kind: str = "recipe_image") -> dict:
     """Get a short-lived signed PUT URL to upload a file directly to storage.
 
@@ -80,7 +80,7 @@ def request_image_upload(filename: str, content_type: str, kind: str = "recipe_i
     # config.validate_production_settings already refuses to start the
     # process in that state; this is the backstop in case that check ever has
     # a gap. Not a ValueError — this is a server misconfiguration, not bad
-    # input, so it should surface through tool_errors' generic
+    # input, so it should surface through mcp_tool's generic
     # `except Exception` branch as {"error": "internal", ...} and get logged,
     # not read like something the caller could fix by retrying differently.
     if not upload_bucket or (kind == "recipe_image" and not public_bucket):
@@ -98,7 +98,7 @@ def request_image_upload(filename: str, content_type: str, kind: str = "recipe_i
     }
 
 
-@tool_errors
+@mcp_tool(read_only=False, budget="write")
 def upload_image_from_url(source_url: str) -> dict:
     """Copy an image from a public https URL into the recipe images bucket.
 
@@ -116,6 +116,8 @@ TOOLS = (request_image_upload, upload_image_from_url)
 
 def register(mcp) -> None:
     """Register this module's tools on the server. Explicit, so the tool
-    surface is this tuple, nothing else."""
+    surface is this tuple, nothing else. Each tool's annotations (set by the
+    @mcp_tool(...) decorator in wrapper.py) ride along so the server exposes
+    them to clients."""
     for tool in TOOLS:
-        mcp.tool()(tool)
+        mcp.tool(annotations=getattr(tool, "mcp_annotations", None))(tool)
