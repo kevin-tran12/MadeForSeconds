@@ -99,7 +99,7 @@ The browser never touches Firestore. Every read and write goes through FastAPI, 
 
 ### Sous Chef (reader assistant)
 - Ask questions about the recipe on the page: substitutions, timing, technique, scaling, and what else on the site uses an ingredient
-- Grounded in the recipe, the owner's private per-recipe notes, and a compact catalogue index; a professional-chef persona that pitches each answer to the reader's saved cooking experience
+- Grounded in the recipe, the owner's private per-recipe notes, a compact catalogue index, and an owner-authored ingredient knowledge base retrievable across every recipe's notes (not just the page open); a professional-chef persona that pitches each answer to the reader's saved cooking experience
 - Hard-coded food-safety temperatures, refusals for canning/curing/infant food, an allergen disclaimer, a Haiku topic gate that refuses anything off-topic before the main model runs, and a rules-leak check
 - Google sign-in required; 5 questions/day free, 50/day + 400/month for supporters; a $10/month spend cap that fails closed without Redis
 - Thumbs up/down feedback (hashed reader, 180-day TTL) surfaces in the admin dashboard

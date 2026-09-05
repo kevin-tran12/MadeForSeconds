@@ -249,6 +249,21 @@
         ],
         "max_words": 260
       }
+    },
+    {
+      "_comment": "Needs no authoring to pass: the corpus is every published recipe's own Chef's Secrets/about/notes, retrievable from any OTHER recipe's page with zero new profiles. Proves services/knowledge.py's cross-recipe retrieval (source b) on its own.",
+      "id": "knowledge-cross-recipe-secret",
+      "slug": "fluffy-buttermilk-pancakes",
+      "question": "Why guanciale rather than pancetta?",
+      "expect": {
+        "knowledge_retrieved": [
+          "Why Guanciale, Not Pancetta"
+        ],
+        "contains_any": [
+          "fat"
+        ],
+        "max_words": 220
+      }
     }
   ]
 }

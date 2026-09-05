@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import settings  # noqa: E402
 from app.firestore import get_db  # noqa: E402
-from app.services import assistant, spokes  # noqa: E402
+from app.services import assistant, knowledge, spokes  # noqa: E402
 from app.services.recipes import get_all_published, get_published_doc  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "sous_chef_eval.json"
@@ -39,7 +39,7 @@ REFUSAL_MARKERS = ("only help with cooking", "can't help with that", "cannot hel
 ALLERGEN_MARKERS = ("check every product", "cross-contamination", "verify labels", "check the label")
 
 
-async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
+async def run_case(db, case: dict, catalogue: str, titles: set[str], kb: "knowledge.KnowledgeBase") -> dict:
     doc = get_published_doc(db, case["slug"])
     if doc is None:
         return {"id": case["id"], "ok": False, "notes": [f"recipe {case['slug']} not published here"], "answer": ""}
@@ -50,6 +50,7 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
     clarify: list[dict] = []
     sources: list[dict] = []
     final = None
+    built_kwargs = None
     if spoke == spokes.OFFTOPIC_SPOKE:
         answer, refused, stop = assistant.REFUSAL_TEXT, True, "router"
     else:
@@ -60,7 +61,9 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
             reader=case.get("reader"),
             clarified=bool(case.get("clarified")),
             supporter=bool(case.get("supporter")),
+            knowledge_base=kb,
         )
+        built_kwargs = kwargs
         parts: list[str] = []
         asked: list[dict] = []
         async for kind, payload in assistant.stream_answer(kwargs):
@@ -122,11 +125,21 @@ async def run_case(db, case: dict, catalogue: str, titles: set[str]) -> dict:
         mentioned = [t for t in titles if t.lower() in lower]
         if not mentioned:
             notes.append("no catalogue title mentioned")
+    if built_kwargs is not None:
+        recipe_text = built_kwargs["messages"][0]["content"][0]["text"]
+        last_turn_text = "\n".join(b.get("text", "") for b in built_kwargs["messages"][-1]["content"])
+        for name in expect.get("uses_profiles", []):
+            if name.lower() not in recipe_text.lower():
+                notes.append(f"profile {name!r} not in knowledge base (missing from <ingredients>)")
+        for name in expect.get("knowledge_retrieved", []):
+            if name.lower() not in last_turn_text.lower():
+                notes.append(f"{name!r} not retrieved into <knowledge>")
     if expect.get("cache_read_after_first"):
         second_kwargs = assistant.build_request(
             spoke=spoke,
             recipe_doc=doc, catalogue=catalogue, question=question, history=[],
             view={"servings": doc.get("servings") or 4, "unit_system": "metric"}, reader=case.get("reader"),
+            knowledge_base=kb,
         )
         second_final = None
         async for kind, payload in assistant.stream_answer(second_kwargs):
@@ -167,8 +180,9 @@ async def main() -> int:
     recipes = get_all_published(db, limit=assistant.CATALOGUE_LIMIT)
     catalogue = assistant.catalogue_index(recipes)
     titles = {r.title for r in recipes}
+    kb = knowledge.get_knowledge_base(db)
 
-    results = [await run_case(db, case, catalogue, titles) for case in cases]
+    results = [await run_case(db, case, catalogue, titles, kb) for case in cases]
 
     width = max(len(r["id"]) for r in results) if results else 4
     print(f"{'case'.ljust(width)}  ok    spoke        stop      words  notes")
