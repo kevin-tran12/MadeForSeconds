@@ -36,6 +36,14 @@ hardening epic need on top:
   reads are never audited), success or failure alike, capturing WHAT was
   touched (`target`) and WHICH argument names were passed (`arg_keys`,
   never values) but never the mutation's actual payload.
+- **Idempotency keys.** A tool that declares an `idempotency_key` parameter
+  (see idempotency.py) gets it checked here, generically, before the tool
+  runs: a repeat call with the same (client_id, key) returns the first
+  call's cached result without the underlying mutation happening again.
+  Only around the real call/exception path, deliberately not the rate-limit
+  short-circuit above — a rejection was never actually attempted, so
+  caching it would make a later, legitimate retry (once the budget window
+  passes) incorrectly replay a stale rejection forever.
 """
 
 import functools
@@ -48,7 +56,7 @@ from pydantic import ValidationError
 from ..services import ingredients
 from ..services import instagram
 from ..services import recipes as recipe_service
-from . import audit, rate_budgets
+from . import audit, idempotency, rate_budgets
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +116,27 @@ def mcp_tool(
                     subject=subject, read_only=read_only, kwargs=kwargs,
                 )
 
+            idempotency_key = kwargs.get("idempotency_key")
+            if idempotency_key and len(idempotency_key) > idempotency.MAX_KEY_LENGTH:
+                result = {
+                    "error": "invalid_request",
+                    "message": f"idempotency_key must be at most {idempotency.MAX_KEY_LENGTH} characters",
+                }
+                return _log_outcome_and_return(
+                    tool_name=fn.__name__, result=result, client_id=client_id,
+                    subject=subject, read_only=read_only, kwargs=kwargs,
+                )
+            if idempotency_key and client_id:
+                cached = idempotency.get_cached_result(client_id, idempotency_key)
+                if cached is not None:
+                    # A repeat within the TTL window — return the first
+                    # call's result without running fn() (and its real
+                    # Firestore write / Instagram call) a second time.
+                    return _log_outcome_and_return(
+                        tool_name=fn.__name__, result=cached, client_id=client_id,
+                        subject=subject, read_only=read_only, kwargs=kwargs,
+                    )
+
             try:
                 result = fn(*args, **kwargs)
             except ValidationError as exc:
@@ -165,6 +194,9 @@ def mcp_tool(
             except Exception as exc:
                 logger.exception("MCP tool %s failed", fn.__name__)
                 result = {"error": "internal", "message": str(exc)}
+
+            if idempotency_key and client_id:
+                idempotency.store_result(client_id, idempotency_key, result)
 
             return _log_outcome_and_return(
                 tool_name=fn.__name__, result=result, client_id=client_id,

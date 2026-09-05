@@ -59,6 +59,7 @@ def create_expense(
     merchant_id: str = "",
     receipt_url: str = "",
     currency: str = "USD",
+    idempotency_key: str | None = None,
 ) -> dict:
     """Create a new expense entry on MadeForSeconds for tax tracking.
 
@@ -85,6 +86,10 @@ def create_expense(
         receipt_url: final_url from request_image_upload(kind="receipt") after
             PUTting the file (a gs:// URL)
         currency: Currency code (default "USD")
+        idempotency_key: Optional, <=128 chars. Pass the same value on a
+            retry after a timeout to get back the original call's result
+            instead of logging a second expense (see server.py's
+            INSTRUCTIONS retry note).
     """
     # Validate category
     if category not in EXPENSE_CATEGORIES:

@@ -1403,6 +1403,24 @@ a warning, never fails the mutation itself. No Terraform, no TTL — a
 personal site's mutation volume through this surface keeps this collection
 trivially inside the Firestore free tier indefinitely.
 
+**Retries and idempotency.** `create_recipe`, `create_expense`,
+`publish_instagram_post` and `publish_recipe_to_instagram` accept an
+optional `idempotency_key` (≤128 chars) — `app/mcp_server/idempotency.py`.
+A repeat call with the same `(client_id, key)` pair returns the *first*
+call's result (success or failure alike) without the underlying mutation —
+a second Firestore write, a second Instagram post — happening again;
+cached under `sha256(client_id + key)` in Firestore's `mcp_idempotency`
+collection with a 24-hour TTL (`terraform/modules/storage/firestore.tf`).
+The four tools without a key, and every other mutating tool, keep today's
+behavior: check whether the write landed (`list_recipes` / `social_status`)
+before blindly retrying — see the MCP server's own instructions text,
+which tells the model exactly this. No client_id (dev mode) means no
+idempotency, same as the rate budgets above — there is no "did my earlier
+call from another session already land" ambiguity to resolve there, since
+dev is a single trusted operator working synchronously.
+
+
+
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
 `request_image_upload`, `upload_image_from_url`, `create_expense`,
