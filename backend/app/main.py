@@ -32,7 +32,7 @@ for _handler in logging.getLogger().handlers:
 logger = logging.getLogger(__name__)
 
 # ruff: noqa: E402 — deliberately after logging setup, see above.
-from .mcp_server import create_mcp_app  # noqa: E402
+from .mcp_server import create_mcp_app, mcp as mcp_server  # noqa: E402
 from .routes import (  # noqa: E402
     admin,
     assistant,
@@ -45,7 +45,7 @@ from .routes import (  # noqa: E402
     totp,
 )
 
-mcp_inner, mcp_app = create_mcp_app()
+mcp_app = create_mcp_app()
 
 
 def _warm_cache() -> None:
@@ -114,7 +114,9 @@ def _warm_cache() -> None:
 
 @asynccontextmanager
 async def lifespan(app):
-    async with mcp_inner.router.lifespan_context(app):
+    # mcp 2.x: the streamable-HTTP session manager owns a task group that must
+    # be running for any /mcp request; it exists only after create_mcp_app().
+    async with mcp_server.session_manager.run():
         _warm_cache()
         yield
 

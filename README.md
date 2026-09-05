@@ -112,7 +112,7 @@ The browser never touches Firestore. Every read and write goes through FastAPI, 
 
 ## MCP server
 
-The backend doubles as a remote [Model Context Protocol](https://modelcontextprotocol.io) server mounted at `/mcp`, so recipes can be written and published from a Claude conversation.
+The backend doubles as a remote [Model Context Protocol](https://modelcontextprotocol.io) server mounted at `/mcp`, so recipes can be written and published from a Claude conversation. Built on the `mcp` Python SDK 2.x (`MCPServer`); clients on the older `initialize` handshake still connect.
 
 ### Auth model
 
@@ -129,11 +129,11 @@ Claude ──── 2. discover + register + PKCE ──────►  WorkOS 
 Claude ──── 4. GET /mcp + Bearer token ─────────►  FastAPI
                                                    ├─ fetch JWKS (cached)
                                                    ├─ verify RS256 signature
-                                                   ├─ check issuer, exp
-                                                   └─ email ∈ ADMIN_EMAILS
+                                                   ├─ check issuer, exp, audience
+                                                   └─ owner identity (sub or email)
 ```
 
-Verification lives in [`backend/app/mcp_auth.py`](backend/app/mcp_auth.py). It pins `algorithms=["RS256"]`, so `alg: none` and symmetric-key confusion attacks are both rejected, and gates on `ADMIN_EMAILS` as defense-in-depth on top of the WorkOS-side sign-in restriction.
+Verification lives in [`backend/app/mcp_auth.py`](backend/app/mcp_auth.py). It pins `algorithms=["RS256"]`, so `alg: none` and symmetric-key confusion attacks are both rejected, then binds the token to this resource and this owner with three checks beyond signature and issuer: **audience** (`MCP_ENFORCE_AUDIENCE`, on by default, checked against `MCP_RESOURCE_URL`), **owner identity** (an admin email in `ADMIN_EMAILS` or an immutable WorkOS `sub` in `MCP_OWNER_SUBJECT` — no fallback), and **scopes** (optional, `MCP_REQUIRED_SCOPES`, enforced by the SDK itself).
 
 Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev bypass — there is no WorkOS dependency to stand up just to work on tools.
 
@@ -151,6 +151,8 @@ Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev
 | `publish_recipe` / `unpublish_recipe` | Toggle visibility; publish refuses incomplete recipes |
 | `delete_recipe` | Requires the title as confirmation |
 | `create_expense` | Add a ledger entry with an attached receipt |
+| `publish_instagram_post` | Post an already-hosted public HTTPS image to Instagram, with a caption |
+| `publish_recipe_to_instagram` | Post a recipe's own image, auto-building a caption from its title/description/link/hashtags |
 | `get_social_kit` | Recipe summary + brand voice + hashtag tiers + platform limits so the MCP client drafts Instagram/TikTok posts consistently (no server-side LLM) |
 | `social_status` | Per-platform token health from the twice-monthly refresh job |
 
@@ -188,7 +190,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (832 tests across 36 files)
+│   ├── tests/                  Pytest suite (845 tests across 37 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -291,7 +293,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (832 tests)
+npm run test:backend                    # Pytest (845 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -424,7 +426,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (832 tests, 36 files)
+### Backend — pytest (845 tests, 37 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing

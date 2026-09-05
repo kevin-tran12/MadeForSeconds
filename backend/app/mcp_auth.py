@@ -3,8 +3,8 @@
 WorkOS AuthKit is the OAuth 2.1 authorization server: it handles login, consent,
 PKCE, and dynamic client registration. This module is the *resource server* side
 — it only validates the access tokens WorkOS issues. The MCP SDK calls
-``WorkOSTokenVerifier.verify_token`` on every request (via ``BearerAuthBackend``);
-returning ``None`` makes the SDK reject the request with a 401 + a compliant
+``WorkOSTokenVerifier.verify_token`` on every request via the SDK's bearer auth
+middleware; returning ``None`` makes the SDK reject the request with a 401 + a compliant
 ``WWW-Authenticate`` challenge pointing at the protected-resource metadata.
 
 Tokens are WorkOS-signed JWTs verified against the AuthKit JWKS (RS256 only —
