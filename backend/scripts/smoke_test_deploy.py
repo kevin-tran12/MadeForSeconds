@@ -58,10 +58,22 @@ def _get_tolerating_cold_start(url: str, attempts: int = 4, timeout: float = 20.
     raise last_exc
 
 
-def _post_json(url: str, payload: dict, timeout: float = 15.0) -> tuple[int, bytes, dict]:
+def _post_json(url: str, payload: dict, timeout: float = 15.0):
     """Like _get, but a POST with a JSON body, returning response headers
     too — the MCP auth-challenge check below needs to read
-    WWW-Authenticate, which no other check in this script has needed."""
+    WWW-Authenticate, which no other check in this script has needed.
+
+    Returns the headers as the http.client.HTTPMessage urllib itself
+    already hands back (an email.message.Message subclass), NOT a plain
+    dict — .get() on that object is natively case-insensitive per RFC 9110
+    (HTTP header names are case-insensitive), which a bare dict(...)
+    conversion silently throws away. Caught this for real: Cloud Run's
+    front end returned a lowercased `www-authenticate` header against a
+    live candidate revision, and an earlier version of this function that
+    did `dict(resp.headers)` then looked it up as `headers.get(
+    "WWW-Authenticate")` — exact-case only — always found nothing,
+    failing every deploy at this check regardless of whether the
+    challenge was actually correct."""
     data = json.dumps(payload).encode()
     req = urllib.request.Request(
         url,
@@ -71,9 +83,9 @@ def _post_json(url: str, payload: dict, timeout: float = 15.0) -> tuple[int, byt
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - url is always this script's own --url argument
-            return resp.status, resp.read(), dict(resp.headers)
+            return resp.status, resp.read(), resp.headers
     except urllib.error.HTTPError as exc:
-        return exc.code, exc.read(), dict(exc.headers)
+        return exc.code, exc.read(), exc.headers
 
 
 _MCP_INITIALIZE_BODY = {
