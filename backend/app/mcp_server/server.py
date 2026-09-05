@@ -62,8 +62,11 @@ the draft over for manual posting. If a post fails with an auth error, call
 social_status() and report when the token expires or last failed.
 
 Note: the backend scales to zero; the first call after idle may take ~10s.
-If a call times out, retry reads only. For a timed-out write (create_recipe,
-create_expense, the Instagram publishers), first call list_recipes or
+If a call times out, retry reads only. create_recipe, create_expense,
+publish_instagram_post and publish_recipe_to_instagram take an
+idempotency_key — pass the same value again on a retry after a timeout to
+get back the original result instead of duplicating the write or the post.
+For a timed-out write to any other tool, first call list_recipes or
 social_status to see whether it landed — a blind retry duplicates it."""
 
 # One tools/*.py module per domain, in the order its workflow paragraph

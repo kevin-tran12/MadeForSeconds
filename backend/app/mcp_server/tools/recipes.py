@@ -112,8 +112,13 @@ def create_recipe(
     components: list[dict] | None = None,
     secrets: list[dict] = [],
     sous_chef_notes: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict:
     """Create a new recipe draft on MadeForSeconds.
+
+    idempotency_key (optional, <=128 chars): pass the same value on a retry
+    after a timeout to get back the original call's result instead of
+    creating a second recipe (see server.py's INSTRUCTIONS retry note).
 
     The recipe is saved unpublished — finish it with update_recipe, attach a
     photo (request_image_upload), then publish_recipe.

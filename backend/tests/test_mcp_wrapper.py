@@ -32,6 +32,17 @@ def mock_audit_db():
         yield
 
 
+@pytest.fixture(autouse=True)
+def mock_idempotency_db():
+    """Same reasoning as mock_audit_db above, for idempotency.py (S15) —
+    only reached when a test both supplies a client_id AND passes
+    idempotency_key, but mocked unconditionally so that combination never
+    silently starts hitting real Firestore in some future test that adds
+    one without the other having been present already."""
+    with patch("app.mcp_server.idempotency.get_db", return_value=MagicMock()):
+        yield
+
+
 def _caller(client_id: str, subject: str | None = None) -> SimpleNamespace:
     """A fake mcp AccessToken-shaped object — real ones have more fields
     (token, scopes, ...) but wrapper.py's _current_caller() only ever reads
@@ -287,3 +298,140 @@ class TestAuditTrail:
             result = fn()  # must not raise
 
         assert result == {"ok": True}
+
+
+def _fake_idempotency_db() -> MagicMock:
+    """A minimal fake Firestore client backing idempotency.py's
+    get/set-by-document-id calls with a real in-memory dict, so a test can
+    prove a second call with the same key genuinely returns the first
+    call's stored result — not just that some mock method was invoked."""
+    store: dict[str, dict] = {}
+
+    def fake_document(doc_id):
+        doc = MagicMock()
+        doc.set.side_effect = lambda data: store.__setitem__(doc_id, data)
+
+        def fake_get():
+            if doc_id in store:
+                snap = MagicMock(exists=True)
+                snap.to_dict.return_value = store[doc_id]
+                return snap
+            return MagicMock(exists=False)
+
+        doc.get.side_effect = fake_get
+        return doc
+
+    mock_db = MagicMock()
+    mock_db.collection.return_value.document.side_effect = fake_document
+    return mock_db
+
+
+class TestIdempotency:
+    """idempotency.py has its own thorough tests (test_mcp_idempotency.py)
+    for the cache primitives — this class checks only that mcp_tool() wires
+    them in at the right point: skipped without a client_id or a key,
+    consulted before fn() runs, and populated after.
+    """
+
+    def test_a_repeated_key_returns_the_cached_result_without_rerunning_fn(self):
+        calls = []
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn(idempotency_key=None):
+            calls.append(1)
+            return {"id": f"call-{len(calls)}"}
+
+        with (
+            patch("app.mcp_server.idempotency.get_db", return_value=_fake_idempotency_db()),
+            patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("client-idem")),
+        ):
+            first = fn(idempotency_key="key-1")
+            second = fn(idempotency_key="key-1")
+
+        assert first == {"id": "call-1"}
+        assert second == {"id": "call-1"}  # not "call-2" — fn() ran only once
+        assert len(calls) == 1
+
+    def test_a_different_key_runs_fn_again(self):
+        calls = []
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn(idempotency_key=None):
+            calls.append(1)
+            return {"id": f"call-{len(calls)}"}
+
+        with (
+            patch("app.mcp_server.idempotency.get_db", return_value=_fake_idempotency_db()),
+            patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("client-idem")),
+        ):
+            fn(idempotency_key="key-1")
+            second = fn(idempotency_key="key-2")
+
+        assert second == {"id": "call-2"}
+        assert len(calls) == 2
+
+    def test_no_key_means_todays_behavior_every_call_runs_fn(self):
+        calls = []
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn(idempotency_key=None):
+            calls.append(1)
+            return {"id": f"call-{len(calls)}"}
+
+        with patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("client-idem")):
+            fn()
+            fn()
+
+        assert len(calls) == 2
+
+    def test_a_failed_result_is_also_cached_and_replayed(self):
+        """Matches the plan's own acceptance wording ("same key twice ->
+        identical result") literally: a repeat of a call that failed
+        returns the SAME failure, not a fresh attempt. A transient failure
+        that genuinely needs retrying should use a new key."""
+        calls = []
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn(idempotency_key=None):
+            calls.append(1)
+            raise recipe_service.RecipeNotFound("r1")
+
+        with (
+            patch("app.mcp_server.idempotency.get_db", return_value=_fake_idempotency_db()),
+            patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("client-idem")),
+        ):
+            first = fn(idempotency_key="key-1")
+            second = fn(idempotency_key="key-1")
+
+        assert first == second == {"error": "not_found", "message": "Recipe not found: r1"}
+        assert len(calls) == 1
+
+    def test_without_a_client_id_idempotency_never_applies(self):
+        """dev mode / an in-memory Client() test: no client_id means no
+        identity to scope the cache to, so every call runs fn() — matches
+        rate_budgets.py's own no-client-id no-op precedent."""
+        calls = []
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn(idempotency_key=None):
+            calls.append(1)
+            return {"id": f"call-{len(calls)}"}
+
+        fn(idempotency_key="key-1")
+        fn(idempotency_key="key-1")
+
+        assert len(calls) == 2
+
+    def test_an_overlong_key_is_rejected_before_fn_runs(self):
+        calls = []
+
+        @mcp_tool(read_only=False, budget="write")
+        def fn(idempotency_key=None):
+            calls.append(1)
+            return {"ok": True}
+
+        with patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("client-idem")):
+            result = fn(idempotency_key="x" * 129)
+
+        assert result["error"] == "invalid_request"
+        assert len(calls) == 0

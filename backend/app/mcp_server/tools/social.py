@@ -43,13 +43,19 @@ def _build_recipe_caption(recipe) -> str:
 
 
 @mcp_tool(read_only=False, open_world=True, budget="publish_social")
-def publish_instagram_post(image_url: str, caption: str = "") -> dict:
+def publish_instagram_post(image_url: str, caption: str = "", idempotency_key: str | None = None) -> dict:
     """Publish a single image to the linked Instagram account.
 
     image_url must be a public https JPEG (recipe images in the site's GCS
     bucket work directly). caption <= 2200 chars and <= 30 hashtags. Returns
     the new media id and permalink. Subject to Instagram's 25-posts/24h limit;
     PNG/WebP images may be rejected by Instagram — prefer JPEG.
+
+    idempotency_key (optional, <=128 chars): pass the same value on a retry
+    after a timeout to get back the original post's result instead of
+    publishing a second time — see server.py's INSTRUCTIONS retry note.
+    Especially worth using here: unlike a Firestore write, an Instagram post
+    that actually went through cannot be silently deduplicated later.
     """
     result = instagram.publish_image(image_url, caption)
     logger.info("MCP publish_instagram_post: media=%s", result.get("id"))
@@ -58,13 +64,16 @@ def publish_instagram_post(image_url: str, caption: str = "") -> dict:
 
 @mcp_tool(read_only=False, open_world=True, budget="publish_social")
 def publish_recipe_to_instagram(
-    slug: str = "", recipe_id: str = "", caption: str | None = None
+    slug: str = "", recipe_id: str = "", caption: str | None = None, idempotency_key: str | None = None,
 ) -> dict:
     """Publish a recipe's photo to Instagram, building a caption if omitted.
 
     Looks up the recipe by slug or id, requires it to have an image, and posts
     it. When caption is None a caption is built from the recipe's title,
     description, link, and hashtags. Pass an explicit caption to override.
+
+    idempotency_key (optional, <=128 chars): same retry contract as
+    publish_instagram_post above.
     """
     recipe = _lookup_recipe(recipe_id=recipe_id, slug=slug)
     if not recipe.image_url:

@@ -164,6 +164,8 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 
 Every tool carries MCP annotations (read-only/destructive/idempotent/open-world hints, advisory for clients) via a shared `mcp_tool(...)` decorator, which also emits one structured outcome log line per call.
 
+`create_recipe`, `create_expense`, `publish_instagram_post`, and `publish_recipe_to_instagram` accept an optional `idempotency_key` — pass the same value on a retry after a timeout to get back the original result instead of a duplicate write or post.
+
 > The backend scales to zero, so the first call after an idle period takes ~10s.
 
 ---
@@ -200,7 +202,7 @@ Every tool carries MCP annotations (read-only/destructive/idempotent/open-world 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (980 tests across 43 files)
+│   ├── tests/                  Pytest suite (996 tests across 44 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -303,7 +305,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (980 tests)
+npm run test:backend                    # Pytest (996 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -441,12 +443,12 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (980 tests, 43 files)
+### Backend — pytest (996 tests, 44 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
 ```
-Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, social token rotation, log redaction, Cloud Trace export, MCP rate budgets and audit trail.
+Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, social token rotation, log redaction, Cloud Trace export, MCP rate budgets, audit trail, and idempotency keys.
 
 ### Frontend unit — vitest (143 tests, 22 files)
 ```bash
