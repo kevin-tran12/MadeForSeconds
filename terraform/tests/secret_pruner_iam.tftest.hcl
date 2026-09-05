@@ -60,6 +60,7 @@ run "pruner_role_is_exactly_list_and_destroy_with_all_features_enabled" {
     instagram_access_token = "placeholder-instagram-token"
     workos_authkit_domain  = "https://example.authkit.app"
     mcp_resource_url       = "https://backend.example.invalid/mcp"
+    mcp_owner_subject      = "user_01ABCDEFabcdef0123456789XY"
   }
 
   # Exact equality, not "contains" — this fails just as loudly if the role

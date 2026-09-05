@@ -56,3 +56,34 @@ CVE-2026-57433  # perl-base (Storable) — no fix published — added 2026-09-01
 CVE-2026-9538   # perl-base (perl-Archive-Tar) — no fix published — added 2026-09-01, expires 2026-10-01
 # Source-package match, not a reachable defect — see the note above.
 CVE-2026-16742  # libsystemd0/libudev1 — the bug is in systemd-homed, which this image does not install; local privesc needing a homed-managed user, an unlocked home and a writable ~/.identity, none of which exist here — added 2026-09-03, expires 2026-10-01
+#
+# ── WARNING: accepted risk, re-check monthly ────────────────────────────────
+# util-linux, added 2026-09-04 when a database update landed four mount/
+# nsenter CVEs against source package util-linux 2.41.5-0+deb13u1 with no
+# Debian fix published (empty "Fixed Version" in the deploy gate's own
+# output, run 36). One source package, nine binary packages flagged:
+# bsdutils, libblkid1, liblastlog2-2, libmount1, libsmartcols1, libuuid1,
+# login, mount, util-linux.
+#
+# Why waived rather than fixed: no fixed version exists for trixie, and a
+# base-image bump pulls the same packages. All four defects sit in the
+# mount(8) / nsenter(1) privileged code paths — X-mount post-hooks and
+# subdir resolution, restricted bind mounts, cgroup join — and each needs a
+# caller able to mount or enter namespaces. In this image PID 1 is uvicorn
+# as uid 1000, the container has no CAP_SYS_ADMIN, there is no fstab
+# user-mount entry, and the app never shells out to util-linux; the
+# libraries are present because apt and coreutils link against them. This
+# is an accepted risk of the same class as the perl/gzip/ncurses entries,
+# NOT a false positive like the systemd entry above.
+#
+# Re-check on or before the expiry, and whenever the base-image digest in
+# backend/Dockerfile is bumped:
+#   https://security-tracker.debian.org/tracker/source-package/util-linux
+#   trivy image --severity HIGH,CRITICAL backend:<sha>   (without --ignorefile)
+# If trixie has a fixed version, bump the base-image digest and DELETE these
+# four lines — do not re-date them. If it still has none, open a fresh dated
+# block with the tracker's current status; the expiry is the forcing function.
+CVE-2026-76642  # util-linux (mount) — failed external mount helper still runs privileged X-mount post-hooks — no fix published — added 2026-09-04, expires 2026-10-01
+CVE-2026-78408  # util-linux (nsenter) — --join-cgroup leaks root cgroup migration authority — no fix published — added 2026-09-04, expires 2026-10-01
+CVE-2026-78409  # util-linux (mount) — X-mount.subdir detached-tree resolution can escape via intermediate symlinks — no fix published — added 2026-09-04, expires 2026-10-01
+CVE-2026-78410  # util-linux (mount) — restricted bind mounts do not pin the source — no fix published — added 2026-09-04, expires 2026-10-01

@@ -57,6 +57,18 @@ variable "mcp_resource_url" {
   default     = ""
 }
 
+variable "mcp_owner_subject" {
+  description = "WorkOS user id (user_…) accepted as the MCP owner — the same account as production when one AuthKit environment serves both. Validated by the root module (required once workos_authkit_domain is set)"
+  type        = string
+  default     = ""
+}
+
+variable "mcp_enforce_audience" {
+  description = "Require the MCP token's aud claim to equal mcp_resource_url (staging's own URL must be a WorkOS Resource Indicator too)"
+  type        = bool
+  default     = true
+}
+
 variable "redis_url" {
   description = "Redis connection URL for staging's cache — a separate Upstash free-tier database, not production's"
   type        = string

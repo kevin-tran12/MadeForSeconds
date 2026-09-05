@@ -51,6 +51,7 @@ run "every_injected_secret_is_readable_with_all_features_enabled" {
     instagram_access_token = "placeholder-instagram-token"
     workos_authkit_domain  = "https://example.authkit.app"
     mcp_resource_url       = "https://backend.example.invalid/mcp"
+    mcp_owner_subject      = "user_01ABCDEFabcdef0123456789XY"
   }
 
   assert {
@@ -138,6 +139,7 @@ run "already_qualified_accessor_names_still_match" {
     instagram_access_token = "placeholder-instagram-token"
     workos_authkit_domain  = "https://example.authkit.app"
     mcp_resource_url       = "https://backend.example.invalid/mcp"
+    mcp_owner_subject      = "user_01ABCDEFabcdef0123456789XY"
   }
 
   override_module {

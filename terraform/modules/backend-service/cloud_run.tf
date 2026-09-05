@@ -172,6 +172,21 @@ resource "google_cloud_run_v2_service" "backend" {
         value = var.mcp_resource_url
       }
 
+      # MCP token binding — the owner's immutable WorkOS `sub` and the
+      # audience switch. Plain env, not secrets: a user id names an account,
+      # it cannot authenticate as one. Always written (blank / "true" are the
+      # backend defaults) so a value removed from tfvars is removed from the
+      # revision too, rather than lingering from a previous apply.
+      env {
+        name  = "MCP_OWNER_SUBJECT"
+        value = var.mcp_owner_subject
+      }
+
+      env {
+        name  = "MCP_ENFORCE_AUDIENCE"
+        value = tostring(var.mcp_enforce_audience)
+      }
+
       # Secret-backed optional env vars — each read from Secret Manager, each
       # injected only when its tfvar was supplied. See local.optional_secret_env
       # at the top of this file for the list and why it is a list.

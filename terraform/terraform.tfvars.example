@@ -64,6 +64,14 @@ frontend_url          = "https://madeforseconds.pages.dev"
 # validates tokens against its public JWKS, so no secret is needed here.
 workos_authkit_domain = ""   # https://<slug>.authkit.app
 mcp_resource_url      = ""   # https://<cloud-run-url>/mcp
+# Token binding: WorkOS access tokens carry no email claim by default, so the
+# owner is identified by the immutable `sub` (user_…) — find it in WorkOS →
+# Users, or in the backend's "no owner identity matched (sub=…)" log line.
+# mcp_resource_url must also be registered verbatim as a Resource Indicator in
+# WorkOS or no token carries a matching aud. Runbook: docs/DEPLOYMENT.md § MCP
+# token binding.
+mcp_owner_subject    = ""   # user_… — required once workos_authkit_domain is set
+mcp_enforce_audience = true # false only as the documented escape hatch
 
 # Shared cache. Without it the app falls back to in-memory, which resets on every
 # cold start — and this service scales to zero. Free tier at https://upstash.com
