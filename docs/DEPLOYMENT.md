@@ -1641,6 +1641,21 @@ the tool at all, but every reader gets the Weee! shop links, which cost
 nothing — `WEEE_AFFILIATE_QUERY` stays blank until the affiliate programme
 accepts the site, and plain links work in the meantime.
 
+**Ingredient knowledge base.** `backend/app/services/knowledge.py` and
+`services/ingredients.py` ground the assistant in owner-authored ingredient
+profiles (a plain Firestore `ingredients` collection — no Terraform, no
+index, no TTL) plus every published recipe's own Chef's Secrets, `about`,
+and `sous_chef_notes`, retrievable from any page, not just the one on
+screen. Retrieval is lexical and in-process (no embeddings, no vector
+service); the whole corpus is cached under the versioned `assistant:knowledge`
+key and rebuilt on the next request after any recipe or profile write, the
+same invalidation `get_published_doc`/`get_catalogue_index` already use.
+Profiles are authored and approved by the owner (MCP tools and an admin tab
+land in follow-up PRs) — never a server-side model call. If the corpus ever
+passes roughly a thousand entries, Firestore vector search (`find_nearest`)
+is the documented upgrade path; `KnowledgeBase.retrieve` in `knowledge.py`
+is the only seam that would need to change.
+
 **Cost.** No Secret Manager secret and no new Cloud Scheduler job. The only
 infrastructure addition is the `assistant_feedback` collection's 180-day
 Firestore TTL policy (`google_firestore_field.assistant_feedback_ttl`), with

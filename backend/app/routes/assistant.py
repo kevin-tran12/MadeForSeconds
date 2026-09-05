@@ -24,7 +24,7 @@ from ..config import settings
 from ..firestore import get_db
 from ..log_redaction import keyed_hash
 from ..rate_limit import rate_limit
-from ..services import assistant, entitlements, llm_budget, pii, spokes, users
+from ..services import assistant, entitlements, knowledge, llm_budget, pii, spokes, users
 from ..services.entitlements import Entitlement
 from ..services.recipes import get_published_doc
 from ..services.users import clean_text
@@ -211,12 +211,15 @@ async def ask(
     def _load():
         doc = get_published_doc(db, body.slug)
         if doc is None:
-            return None, "", None
-        return doc, assistant.get_catalogue_index(db), users.get_cooking_experience(db, user.uid)
+            return None, "", None, knowledge.EMPTY
+        return (
+            doc, assistant.get_catalogue_index(db), users.get_cooking_experience(db, user.uid),
+            knowledge.get_knowledge_base(db),
+        )
 
     # Firestore round-trips off the event loop: this response then pins the
     # single instance's loop for the length of the stream.
-    doc, catalogue, reader = await anyio.to_thread.run_sync(_load)
+    doc, catalogue, reader, kb = await anyio.to_thread.run_sync(_load)
     if doc is None:
         raise HTTPException(status_code=404, detail={"code": "recipe_not_found", "message": "Recipe not found"})
 
@@ -253,6 +256,7 @@ async def ask(
                 clarified=body.context.clarified,
                 supporter=ent.supporter,
                 can_search=can_search,
+                knowledge_base=kb,
             )
         except assistant.PromptTooLong:
             raise HTTPException(status_code=413, detail={"code": "prompt_too_long", "message": "That's a long one — start a fresh chat."})
