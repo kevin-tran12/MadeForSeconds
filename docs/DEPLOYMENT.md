@@ -1374,6 +1374,19 @@ this app's traffic, one call's worth of export latency is a better trade than
 that. Free tier: 2.5M spans/month, hundreds actually used — see
 [GCP free tier summary](#gcp-free-tier-summary).
 
+**Rate budgets.** Every tool is tagged `read`, `write`, or `publish_social`
+(the annotations sentence below) and the tag is enforced —
+`app/mcp_server/rate_budgets.py` — per authenticated caller: `read` 120/min,
+`write` 30/min, `publish_social` 5/hour **and** 20/day (both must hold). A
+budget is shared across every tool in its category, not tracked separately
+per tool name — 30 calls to any mix of `create_recipe`/`update_recipe`/etc.
+in a minute exhausts the `write` budget for all of them. A breach returns
+`{"error": "rate_limited", "retry_after_seconds": N}` without the tool
+running at all, and logs one `MCP_RATE_LIMITED` line. Enforcement is a no-op
+without an OAuth `client_id` — dev's MCP server runs fully unauthenticated
+and trusted to a single operator, so there is no "many callers" scenario to
+budget against there; production is the only place this has any effect.
+
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
 `request_image_upload`, `upload_image_from_url`, `create_expense`,

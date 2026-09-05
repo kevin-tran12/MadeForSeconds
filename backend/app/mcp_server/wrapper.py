@@ -1,8 +1,8 @@
 """mcp_tool(): the single decorator behind every MCP tool in this package.
 
 Replaces errors.py's tool_errors (absorbed here verbatim — see the exception
-handling below, unchanged from before) and adds what S4 of the MCP hardening
-epic needs on top:
+handling below, unchanged from before) and adds what S4 and S5 of the MCP
+hardening epic need on top:
 
 - **Annotations.** read_only/destructive/idempotent/open_world become the
   tool's `ToolAnnotations`, attached to the function as `.mcp_annotations` so
@@ -11,8 +11,12 @@ epic needs on top:
   the MCP spec — the SDK does not enforce them, a client might (e.g. to gate
   a destructive call behind confirmation).
 - **Budget.** `.mcp_budget` tags which rate-limit bucket ("read" | "write" |
-  "publish_social") the call belongs to. Read-only for now — nothing consults
-  it yet; S5 (per-tool rate budgets) is the consumer.
+  "publish_social") the call belongs to, enforced by
+  `rate_budgets.check_budget()` before the underlying tool ever runs — see
+  that module for the actual limits and why enforcement is a no-op without a
+  caller identity (dev mode). A rejection returns
+  `{"error": "rate_limited", "retry_after_seconds": N}` without calling the
+  wrapped function at all.
 - **Outcome log.** One structured `MCP_TOOL` line per call, success or
   translated-error alike, plus a WARNING `MCP_TOOL_FAILED` line when the
   error kind indicates something broke rather than the caller simply passing
@@ -39,6 +43,7 @@ from pydantic import ValidationError
 from ..services import ingredients
 from ..services import instagram
 from ..services import recipes as recipe_service
+from . import rate_budgets
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,14 @@ def mcp_tool(
     def decorator(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            client_id = _current_client_id()
+            retry_after = rate_budgets.check_budget(budget, client_id)
+            if retry_after is not None:
+                # Skip fn() entirely — falls through to the single shared
+                # outcome-log block below rather than duplicating it here.
+                result = {"error": "rate_limited", "retry_after_seconds": retry_after}
+                return _log_outcome_and_return(fn.__name__, result, client_id)
+
             try:
                 result = fn(*args, **kwargs)
             except ValidationError as exc:
@@ -139,25 +152,33 @@ def mcp_tool(
                 logger.exception("MCP tool %s failed", fn.__name__)
                 result = {"error": "internal", "message": str(exc)}
 
-            error_kind = result.get("error") if isinstance(result, dict) else None
-            ok = error_kind is None
-            client_id = _current_client_id()
-            logger.info(
-                "MCP_TOOL tool=%s ok=%s error=%s",
-                fn.__name__,
-                ok,
-                error_kind,
-                extra={"json_fields": {"tool": fn.__name__, "ok": ok, "error": error_kind, "client_id": client_id}},
-            )
-            if error_kind in _ALERT_ERROR_KINDS:
-                logger.warning("MCP_TOOL_FAILED tool=%s error=%s client_id=%s", fn.__name__, error_kind, client_id)
-            return result
+            return _log_outcome_and_return(fn.__name__, result, client_id)
 
         wrapper.mcp_annotations = annotations
         wrapper.mcp_budget = budget
         return wrapper
 
     return decorator
+
+
+def _log_outcome_and_return(tool_name: str, result, client_id: str | None):
+    """The one MCP_TOOL outcome log line (plus a WARNING MCP_TOOL_FAILED
+    marker for error kinds that mean something broke), shared by both the
+    rate-limit short-circuit and the normal call/exception path above so
+    there is exactly one place this logging happens, not two copies that
+    could drift out of sync."""
+    error_kind = result.get("error") if isinstance(result, dict) else None
+    ok = error_kind is None
+    logger.info(
+        "MCP_TOOL tool=%s ok=%s error=%s",
+        tool_name,
+        ok,
+        error_kind,
+        extra={"json_fields": {"tool": tool_name, "ok": ok, "error": error_kind, "client_id": client_id}},
+    )
+    if error_kind in _ALERT_ERROR_KINDS:
+        logger.warning("MCP_TOOL_FAILED tool=%s error=%s client_id=%s", tool_name, error_kind, client_id)
+    return result
 
 
 def iso(value) -> str | None:
