@@ -1362,11 +1362,21 @@ WorkOS dependency), matching the `require_admin` dev bypass.
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
 `request_image_upload`, `upload_image_from_url`, `create_expense`,
 `publish_instagram_post`, `publish_recipe_to_instagram`, `get_social_kit`,
-`social_status`.
+`social_status`, `list_ingredients`, `get_ingredient`, `upsert_ingredient`,
+`delete_ingredient`.
 
 **Recipe workflow**: `create_recipe` saves an unpublished draft (duplicate
 titles return a `slug_conflict` pointer instead of writing a second copy) →
 iterate with `update_recipe` → attach a photo → `publish_recipe`.
+
+**Ingredient knowledge**: `list_ingredients(coverage="missing")` lists the
+site's ingredients with no owner-authored profile yet, sorted by how many
+recipes use them. Claude drafts a batch of profiles in the owner's voice —
+what it is, its role, substitutions, buying, storage, mistakes, allergens —
+the operator reviews and corrects them in chat, and only the approved ones
+are saved with `upsert_ingredient` (no server-side model call anywhere in
+this flow). `upsert_ingredient` is idempotent on its slug, so re-running it
+with the same name converges rather than duplicating.
 
 **Image/receipt uploads** go directly to GCS via short-lived signed PUT URLs:
 `request_image_upload(filename, content_type, kind)` returns `upload_url` +

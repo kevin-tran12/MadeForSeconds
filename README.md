@@ -155,8 +155,12 @@ Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev
 | `publish_recipe_to_instagram` | Post a recipe's own image, auto-building a caption from its title/description/link/hashtags |
 | `get_social_kit` | Recipe summary + brand voice + hashtag tiers + platform limits so the MCP client drafts Instagram/TikTok posts consistently (no server-side LLM) |
 | `social_status` | Per-platform token health from the twice-monthly refresh job |
+| `list_ingredients` | Every distinct ingredient across the catalogue, with recipe counts and profile coverage — start here for an authoring session |
+| `get_ingredient` | Fetch a profile by slug or by resolving a name/alias |
+| `upsert_ingredient` | Create or update a profile (safe to retry — the slug is the key) |
+| `delete_ingredient` | Remove a profile from the knowledge base |
 
-Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` to iterate → `request_image_upload` + `update_recipe(image_url=…)` → `publish_recipe`.
+Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` to iterate → `request_image_upload` + `update_recipe(image_url=…)` → `publish_recipe`. Ingredient knowledge: `list_ingredients(coverage="missing")` → draft profiles in the owner's voice → `upsert_ingredient` once approved.
 
 > The backend scales to zero, so the first call after an idle period takes ~10s.
 
@@ -179,7 +183,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │   ├── validation.py       Shared validators (admin routes + MCP)
 │   │   ├── mcp_server/         MCP server package
 │   │   │   ├── server.py       MCPServer construction, auth/transport settings, instructions
-│   │   │   ├── tools/          One module per tool domain — recipes, images, social, expenses —
+│   │   │   ├── tools/          One module per tool domain — recipes, ingredients, images, social, expenses —
 │   │   │   │                   each exposing a TOOLS tuple and a register(mcp) function
 │   │   │   └── errors.py       tool_errors: domain errors → structured dicts
 │   │   ├── mcp_auth.py         WorkOS OAuth token verification (resource server)
@@ -194,7 +198,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (898 tests across 38 files)
+│   ├── tests/                  Pytest suite (916 tests across 38 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -297,7 +301,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (898 tests)
+npm run test:backend                    # Pytest (916 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -430,7 +434,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (898 tests, 38 files)
+### Backend — pytest (916 tests, 38 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing

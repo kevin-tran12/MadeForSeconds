@@ -9,8 +9,8 @@ Layout:
   and constructs the ``MCPServer``.
 - ``errors.py`` — ``tool_errors``, the decorator every tool wears that turns
   a domain exception into a structured dict instead of a raw traceback.
-- ``tools/<domain>.py`` — one module per kind of tool (recipes, images,
-  social, expenses). Each defines its tool functions as plain, undecorated-
+- ``tools/<domain>.py`` — one module per kind of tool (recipes, ingredients,
+  images, social, expenses). Each defines its tool functions as plain, undecorated-
   by-the-SDK callables (only ``@tool_errors`` applied directly), a ``TOOLS``
   tuple listing them in source order, and a ``register(mcp)`` function that
   calls ``mcp.tool()`` on each — so the tool surface is exactly the union of
@@ -25,6 +25,7 @@ single-module version this replaced.
 from .server import INSTRUCTIONS, TOOL_MODULES, build_app, build_server, create_mcp_app, mcp
 from .tools.expenses import create_expense
 from .tools.images import request_image_upload, upload_image_from_url
+from .tools.ingredients import delete_ingredient, get_ingredient, list_ingredients, upsert_ingredient
 from .tools.recipes import (
     create_recipe,
     delete_recipe,
@@ -45,10 +46,13 @@ __all__ = [
     "create_expense",
     "create_mcp_app",
     "create_recipe",
+    "delete_ingredient",
     "delete_recipe",
+    "get_ingredient",
     "get_recipe",
     "get_social_kit",
     "list_categories",
+    "list_ingredients",
     "list_recipes",
     "mcp",
     "publish_instagram_post",
@@ -59,4 +63,5 @@ __all__ = [
     "unpublish_recipe",
     "update_recipe",
     "upload_image_from_url",
+    "upsert_ingredient",
 ]

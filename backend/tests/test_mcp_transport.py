@@ -23,6 +23,7 @@ DOCUMENTED_TOOLS = {
     "request_image_upload", "upload_image_from_url", "create_expense",
     "publish_instagram_post", "publish_recipe_to_instagram", "get_social_kit",
     "social_status",
+    "list_ingredients", "get_ingredient", "upsert_ingredient", "delete_ingredient",
 }
 
 INITIALIZE_BODY = {

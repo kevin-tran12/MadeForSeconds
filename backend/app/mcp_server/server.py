@@ -31,7 +31,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from ..config import settings
 from ..mcp_auth import WorkOSTokenVerifier
-from .tools import expenses, images, recipes, social
+from .tools import expenses, images, ingredients, recipes, social
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,16 @@ update_recipe to iterate → request_image_upload + update_recipe(image_url=...)
 to attach a photo → publish_recipe. Use list_recipes/get_recipe to inspect
 existing content before creating — duplicate titles are rejected with a
 pointer to the existing recipe.
+
+Ingredient knowledge (the Sous Chef reads it): call
+list_ingredients(coverage="missing"), then draft profiles for the top
+uncovered ingredients in batches of about 10, in the owner's voice, ~150
+words each — what it is, its role (fat/acid/umami/aromatic/texture), swaps
+that work and don't and what changes, buying, storage, common mistakes,
+allergens. Aliases must include the forms recipes use ("garlic cloves",
+"green onions"). Show the batch to the operator; save only what they
+approve with upsert_ingredient; never save an unapproved draft.
+upsert_ingredient is safe to retry: the slug is the key.
 
 Social workflow (after publish_recipe): call get_social_kit(slug=...) for the
 recipe summary, brand voice, hashtag tiers, and per-platform limits. Draft an
@@ -60,7 +70,7 @@ social_status to see whether it landed — a blind retry duplicates it."""
 # appears in INSTRUCTIONS above. Each exposes TOOLS (a tuple, source order)
 # and register(mcp) — the tool surface is exactly the union of those tuples,
 # nothing registers by side effect.
-TOOL_MODULES = (recipes, images, social, expenses)
+TOOL_MODULES = (recipes, ingredients, images, social, expenses)
 
 
 def _auth_for(settings) -> tuple[AuthSettings | None, WorkOSTokenVerifier | None, TransportSecuritySettings]:
