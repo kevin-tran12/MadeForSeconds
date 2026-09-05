@@ -56,3 +56,30 @@ def test_urlerror_is_also_retried_not_just_timeout(smoke):
         result = smoke._get_tolerating_cold_start("https://example.test/api/health", attempts=3)
     assert result == (200, b"{}")
     assert mock_get.call_count == 2
+
+
+# ── _check_mcp_requires_auth (S9) ─────────────────────────────────────────────
+#
+# Same rationale as the cold-start retry tests above: a live run only ever
+# proves the check passed against one real revision at one moment — these
+# prove the assertion itself is correct by feeding it the two failure shapes
+# a compliant vs. a broken /mcp mount would actually produce.
+
+def test_passes_on_a_401_with_resource_metadata_in_the_challenge(smoke):
+    headers = {"WWW-Authenticate": 'Bearer error="invalid_token", resource_metadata="https://x/.well-known/oauth-protected-resource/mcp"'}
+    with patch.object(smoke, "_post_json", return_value=(401, b"", headers)):
+        smoke._check_mcp_requires_auth("https://example.test")  # must not raise
+
+
+def test_fails_on_a_401_missing_resource_metadata(smoke):
+    """A 401 alone isn't enough — a client can't discover WorkOS AuthKit
+    without the resource_metadata pointer in the challenge."""
+    with patch.object(smoke, "_post_json", return_value=(401, b"", {"WWW-Authenticate": "Bearer"})):
+        with pytest.raises(smoke.SmokeTestFailure):
+            smoke._check_mcp_requires_auth("https://example.test")
+
+
+def test_fails_when_the_endpoint_does_not_require_auth_at_all(smoke):
+    with patch.object(smoke, "_post_json", return_value=(200, b"{}", {})):
+        with pytest.raises(smoke.SmokeTestFailure):
+            smoke._check_mcp_requires_auth("https://example.test")
