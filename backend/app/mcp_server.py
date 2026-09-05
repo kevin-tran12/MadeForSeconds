@@ -25,8 +25,7 @@ from uuid import uuid4
 from google.cloud.firestore import transactional
 from google.cloud.firestore_v1.base_query import FieldFilter
 from mcp.server.auth.settings import AuthSettings
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.server import Settings as FastMCPSettings
+from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import ValidationError
 
@@ -47,12 +46,6 @@ from .services import uploads
 
 logger = logging.getLogger(__name__)
 
-# pydantic-settings 2.15 detects FastMCP's generic lifespan annotation as an
-# unresolved forward reference. Rebuild it before FastMCP constructs Settings
-# so environment-backed settings remain fully resolved and warning-free. MCP
-# 2.x removes this API entirely, so this can go with the planned 2.x migration.
-FastMCPSettings.model_rebuild()
-
 _INSTRUCTIONS = """Manage MadeForSeconds recipes and expenses.
 
 Recipe workflow: list_categories → create_recipe (saved as draft) →
@@ -70,7 +63,9 @@ the draft over for manual posting. If a post fails with an auth error, call
 social_status() and report when the token expires or last failed.
 
 Note: the backend scales to zero; the first call after idle may take ~10s.
-If a call times out, retry once before reporting an error."""
+If a call times out, retry reads only. For a timed-out write (create_recipe,
+create_expense, the Instagram publishers), first call list_recipes or
+social_status to see whether it landed — a blind retry duplicates it."""
 
 # OAuth: WorkOS AuthKit is the authorization server; this MCP server is the resource
 # server. When auth is configured the SDK serves /.well-known/oauth-protected-resource,
@@ -96,13 +91,11 @@ else:
         allowed_hosts=[_resource_host, f"{_resource_host}:*", "localhost", "localhost:*"],
     )
 
-mcp = FastMCP(
+mcp = MCPServer(
     "MadeForSeconds Recipe Creator",
-    stateless_http=True,
     instructions=_INSTRUCTIONS,
     auth=_auth,
     token_verifier=_token_verifier,
-    transport_security=_transport_security,
 )
 
 
@@ -950,12 +943,10 @@ def create_expense(
 
 
 def create_mcp_app():
-    """Create the ASGI app for mounting on FastAPI.
+    """ASGI app for mounting on FastAPI. Auth is enforced by the SDK when configured.
 
-    Auth is handled by the SDK (OAuth resource server) when configured — see the
-    FastMCP construction above. Returns (inner_app, mounted_app); both are the
-    same Starlette app — the first exposes ``.router.lifespan_context`` for
-    FastAPI's lifespan, the second is what gets mounted at ``/``.
+    transport_security MUST be passed here: in mcp 2.x streamable_http_app()
+    defaults to localhost-only DNS-rebinding protection when it is omitted,
+    which returns 421 for every request behind Cloud Run.
     """
-    app = mcp.streamable_http_app()
-    return app, app
+    return mcp.streamable_http_app(stateless_http=True, transport_security=_transport_security)

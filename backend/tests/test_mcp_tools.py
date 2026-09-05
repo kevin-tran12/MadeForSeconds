@@ -1,8 +1,8 @@
 """Tests for the MCP tool surface (app/mcp_server.py).
 
-Tools are called directly as functions — FastMCP's @mcp.tool() registers and
-returns the original callable, and _tool_errors translates domain errors into
-structured dicts.
+Tools are called directly as functions — the mcp SDK 2.x's @mcp.tool() registers
+and returns the original callable, and _tool_errors translates domain errors
+into structured dicts.
 """
 
 from datetime import datetime, timezone

@@ -1348,7 +1348,12 @@ then run `/mcp` to authenticate via the browser. No static token needed.
 
 Set `MCP_TIMEOUT=30000` in the client environment — the backend scales to
 zero, so the first call after idle takes ~10s while Cloud Run cold-starts.
-If a call times out, retry once.
+If a read times out, retry once; for a timed-out write (create_recipe,
+create_expense, either Instagram publisher), check whether it landed
+(list_recipes / social_status) before retrying — a blind retry duplicates it.
+
+Built on the `mcp` Python SDK 2.x (`MCPServer`); clients on the older
+`initialize` handshake still connect.
 
 Local dev (`docker compose up`) runs the MCP server **unauthenticated** (no
 WorkOS dependency), matching the `require_admin` dev bypass.
