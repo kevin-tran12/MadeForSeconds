@@ -198,7 +198,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (916 tests across 38 files)
+│   ├── tests/                  Pytest suite (933 tests across 39 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -301,7 +301,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (916 tests)
+npm run test:backend                    # Pytest (933 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -368,6 +368,11 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/admin/assistant/feedback` | Newest reader feedback, thumbs-down first (`?limit=`) |
+| GET | `/api/admin/ingredients/coverage` | Ingredients used across published recipes, with profile coverage, sorted by recipe count |
+| GET | `/api/admin/ingredients` | Every ingredient profile |
+| GET | `/api/admin/ingredients/{slug}` | One ingredient profile |
+| PUT | `/api/admin/ingredients/{slug}` | Create (201) or update (200) an ingredient profile |
+| DELETE | `/api/admin/ingredients/{slug}` | Delete an ingredient profile |
 
 ### Admin — expenses (requires auth + TOTP session)
 
@@ -434,18 +439,18 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (916 tests, 38 files)
+### Backend — pytest (933 tests, 39 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
 ```
 Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, social token rotation, log redaction.
 
-### Frontend unit — vitest (137 tests, 21 files)
+### Frontend unit — vitest (143 tests, 22 files)
 ```bash
 npm run test:unit
 ```
-Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components, support and donation-link pages, auth context and admin route gating, the Sous Chef drawer, hook, clarifying-question form, SSE parser, and streaming client.
+Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components, support and donation-link pages, auth context and admin route gating, the Sous Chef drawer, hook, clarifying-question form, SSE parser, streaming client, and the admin ingredient-profiles panel.
 
 ### E2E — Playwright (6 spec files)
 ```bash
