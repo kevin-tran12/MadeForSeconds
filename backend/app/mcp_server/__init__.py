@@ -7,14 +7,19 @@ Layout:
   SDK. Builds ``AuthSettings``/``TokenVerifier``/``TransportSecuritySettings``
   from app settings, holds the tool-workflow instructions the model reads,
   and constructs the ``MCPServer``.
-- ``errors.py`` — ``tool_errors``, the decorator every tool wears that turns
-  a domain exception into a structured dict instead of a raw traceback.
+- ``wrapper.py`` — ``mcp_tool(...)``, the decorator every tool wears. Turns a
+  domain exception into a structured dict instead of a raw traceback (what
+  used to be ``errors.py``'s ``tool_errors``), attaches MCP tool annotations
+  (read-only/destructive/idempotent/open-world hints) and a rate-limit budget
+  tag to the function, and logs one structured outcome line per call. The
+  only other module besides ``server.py`` allowed to import the ``mcp`` SDK
+  (see ``test_mcp_transport.py``'s AST check).
 - ``tools/<domain>.py`` — one module per kind of tool (recipes, ingredients,
   images, social, expenses). Each defines its tool functions as plain, undecorated-
-  by-the-SDK callables (only ``@tool_errors`` applied directly), a ``TOOLS``
+  by-the-SDK callables (only ``@mcp_tool(...)`` applied directly), a ``TOOLS``
   tuple listing them in source order, and a ``register(mcp)`` function that
-  calls ``mcp.tool()`` on each — so the tool surface is exactly the union of
-  those tuples, never an accident of import order.
+  calls ``mcp.tool(annotations=...)`` on each — so the tool surface is
+  exactly the union of those tuples, never an accident of import order.
 
 Everything below re-exports the flat surface the rest of the app, the test
 suite, and ``scripts/smoke_test_receipt_role.py`` import as

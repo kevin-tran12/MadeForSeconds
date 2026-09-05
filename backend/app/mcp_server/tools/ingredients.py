@@ -11,12 +11,12 @@ from ...firestore import get_db
 from ...services import ingredients as ingredient_service
 from ...services import recipes as recipe_service
 from ...services.recipes import generate_slug
-from ..errors import tool_errors
+from ..wrapper import mcp_tool
 
 logger = logging.getLogger(__name__)
 
 
-@tool_errors
+@mcp_tool(read_only=True, budget="read")
 def list_ingredients(coverage: str = "missing", search: str = "", limit: int = 50) -> dict:
     """Every distinct ingredient across the published catalogue, with which
     recipes use it and whether an owner-authored profile covers it — the
@@ -63,7 +63,7 @@ def list_ingredients(coverage: str = "missing", search: str = "", limit: int = 5
     }
 
 
-@tool_errors
+@mcp_tool(read_only=True, budget="read")
 def get_ingredient(slug: str = "", name: str = "") -> dict:
     """Fetch a profile by its slug, or resolve a name/alias through the same
     index list_ingredients and the assistant use, and fetch that. Provide
@@ -83,7 +83,7 @@ def get_ingredient(slug: str = "", name: str = "") -> dict:
     raise ValueError("Provide slug or name")
 
 
-@tool_errors
+@mcp_tool(read_only=False, idempotent=True, budget="write")
 def upsert_ingredient(
     name: str,
     slug: str = "",
@@ -156,7 +156,7 @@ def upsert_ingredient(
     }
 
 
-@tool_errors
+@mcp_tool(read_only=False, destructive=True, budget="write")
 def delete_ingredient(slug: str) -> dict:
     """Delete an ingredient profile. The ingredient itself is unaffected —
     this only removes the owner's notes about it from the knowledge base."""
@@ -171,6 +171,8 @@ TOOLS = (list_ingredients, get_ingredient, upsert_ingredient, delete_ingredient)
 
 def register(mcp) -> None:
     """Register this module's tools on the server. Explicit, so the tool
-    surface is this tuple, nothing else."""
+    surface is this tuple, nothing else. Each tool's annotations (set by the
+    @mcp_tool(...) decorator in wrapper.py) ride along so the server exposes
+    them to clients."""
     for tool in TOOLS:
-        mcp.tool()(tool)
+        mcp.tool(annotations=getattr(tool, "mcp_annotations", None))(tool)
