@@ -1021,3 +1021,105 @@ class TestIngredientTools:
         result = mcp_server.delete_ingredient("ghost")
         assert result["error"] == "not_found"
         db.delete.assert_not_called()
+
+
+# ── S14: publish history ──────────────────────────────────────────────────────
+
+class TestPublishHistory:
+    """Both publishers record every attempt, including the ones that fail.
+
+    The failure path is the point: a post that Instagram rejected is exactly
+    what the operator wants to see later, and it is also the path most likely
+    to be skipped by an implementation that only records on success.
+    """
+
+    def test_successful_post_is_recorded_with_the_media_id(self, db):
+        with patch("app.mcp_server.tools.social.social.record_post") as record:
+            mcp_server.publish_instagram_post("https://storage.googleapis.com/b/img.jpg", "Caption")
+        entry = record.call_args.args[2]
+        assert entry["ok"] is True
+        assert entry["media_id"] == "dev-ig-media"
+        assert entry["caption"] == "Caption"
+
+    def test_failed_post_is_recorded_and_the_error_still_reaches_the_caller(self, db):
+        """Recording must not swallow or reshape the error: wrapper.py still
+        has to map it to an "instagram" dict and fire MCP_TOOL_FAILED."""
+        with patch("app.services.instagram.publish_image", side_effect=instagram.InstagramError("API failure")), \
+             patch("app.mcp_server.tools.social.social.record_post") as record:
+            result = mcp_server.publish_instagram_post("https://example.com/img.jpg", "Caption")
+        entry = record.call_args.args[2]
+        assert entry["ok"] is False
+        assert "API failure" in entry["error"]
+        assert result["error"] == "instagram"
+
+    def test_recipe_post_records_the_slug(self, db):
+        db.stream.return_value = iter([_doc()])
+        with patch("app.mcp_server.tools.social.social.record_post") as record:
+            mcp_server.publish_recipe_to_instagram(slug="test-recipe")
+        entry = record.call_args.args[2]
+        assert entry["ok"] is True and entry["slug"] == "test-recipe"
+
+    def test_failed_recipe_post_records_the_slug_too(self, db):
+        db.stream.return_value = iter([_doc()])
+        with patch("app.services.instagram.publish_image", side_effect=instagram.InstagramError("nope")), \
+             patch("app.mcp_server.tools.social.social.record_post") as record:
+            result = mcp_server.publish_recipe_to_instagram(slug="test-recipe")
+        entry = record.call_args.args[2]
+        assert entry["ok"] is False and entry["slug"] == "test-recipe"
+        assert result["error"] == "instagram"
+
+    def test_a_recording_failure_does_not_fail_the_post(self, db):
+        """The post already reached Instagram, so a history failure must not
+        report a failure that did not happen.
+
+        The first version of this test asserted result["error"] == "internal",
+        which contradicted its own name and encoded the bug as correct: the
+        publish really did fail. CI caught it, because the three
+        TestPublishInstagramPost tests take no db fixture and so hit a real
+        get_db() with no credentials on a runner.
+        """
+        with patch("app.mcp_server.tools.social.social.record_post", side_effect=RuntimeError("boom")):
+            result = mcp_server.publish_instagram_post("https://storage.googleapis.com/b/img.jpg")
+        assert "error" not in result
+        assert result["id"] == "dev-ig-media"
+
+    def test_an_unreachable_firestore_does_not_fail_the_post(self):
+        """Deliberately no db fixture: this is CI's condition, where get_db()
+        itself raises. record_post guards its own writes, but get_db() is
+        resolved by the caller — so the guard has to wrap both."""
+        with patch("app.mcp_server.tools.social.get_db", side_effect=RuntimeError("no credentials")):
+            result = mcp_server.publish_instagram_post("https://storage.googleapis.com/b/img.jpg", "Caption")
+        assert "error" not in result
+        assert result["id"] == "dev-ig-media"
+
+    def test_social_status_carries_recent_posts(self, db):
+        with patch("app.mcp_server.tools.social.social.recent_posts", return_value=[{"ok": True, "media_id": "m1"}]):
+            result = mcp_server.social_status()
+        assert result["recent_posts"] == [{"ok": True, "media_id": "m1"}]
+        # History is a sibling of the platform mapping, not an entry in it.
+        assert "recent_posts" not in result["platforms"]
+
+
+    def test_a_replayed_idempotency_key_does_not_record_a_second_post(self, db):
+        """S15 short-circuits before the function body, so a retry after a
+        timeout returns the stored result without touching Instagram — and
+        must not append a second history row for a post that happened once.
+        This is the interaction between the two stories, so assert it rather
+        than assume the ordering holds.
+        """
+        from tests.test_mcp_wrapper import _caller, _fake_idempotency_db
+
+        with (
+            patch("app.mcp_server.idempotency.get_db", return_value=_fake_idempotency_db()),
+            patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("client-ig")),
+            patch("app.mcp_server.tools.social.social.record_post") as record,
+        ):
+            first = mcp_server.publish_instagram_post(
+                "https://storage.googleapis.com/b/img.jpg", "Caption", idempotency_key="key-1"
+            )
+            second = mcp_server.publish_instagram_post(
+                "https://storage.googleapis.com/b/img.jpg", "Caption", idempotency_key="key-1"
+            )
+
+        assert first == second
+        assert record.call_count == 1
