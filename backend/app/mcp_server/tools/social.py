@@ -138,16 +138,14 @@ def _tag_list(csv: str) -> list[str]:
     return tags
 
 
-@mcp_tool(read_only=True, budget="read")
-def get_social_kit(recipe_id: str = "", slug: str = "") -> dict:
-    """Everything needed to draft social posts for a recipe.
+def build_social_kit(recipe_id: str = "", slug: str = "") -> dict:
+    """The social kit for one recipe, as a plain dict.
 
-    Returns {recipe, brand_voice, hashtags, platforms, workflow}: a recipe
-    summary with its public URL, image, key ingredients and "Chef's Secrets"
-    titles; the site's brand voice (tone / do / don't / call to action);
-    hashtag tiers (brand — always; recipe — from its categories and labels;
-    cuisine and niche — pick a few); per-platform limits; and the steps to
-    follow. Draft, show the operator, and only publish after approval.
+    Split out from the ``get_social_kit`` tool so ``resources.py`` can serve
+    the same payload at ``social-kit://{slug}`` without going through the
+    tool layer (a resource read carries no rate budget and no audit row).
+    The tool below is the only thing that adds those; this function is pure
+    assembly plus two reads.
     """
     recipe = _lookup_recipe(recipe_id=recipe_id, slug=slug)
     voice = _social_settings(get_db())
@@ -197,6 +195,20 @@ def get_social_kit(recipe_id: str = "", slug: str = "") -> dict:
             "Report the Instagram permalink back.",
         ],
     }
+
+
+@mcp_tool(read_only=True, budget="read")
+def get_social_kit(recipe_id: str = "", slug: str = "") -> dict:
+    """Everything needed to draft social posts for a recipe.
+
+    Returns {recipe, brand_voice, hashtags, platforms, workflow}: a recipe
+    summary with its public URL, image, key ingredients and "Chef's Secrets"
+    titles; the site's brand voice (tone / do / don't / call to action);
+    hashtag tiers (brand — always; recipe — from its categories and labels;
+    cuisine and niche — pick a few); per-platform limits; and the steps to
+    follow. Draft, show the operator, and only publish after approval.
+    """
+    return build_social_kit(recipe_id=recipe_id, slug=slug)
 
 
 @mcp_tool(read_only=True, budget="read")

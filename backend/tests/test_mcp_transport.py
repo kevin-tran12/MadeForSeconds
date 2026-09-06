@@ -67,7 +67,12 @@ class TestInMemoryClient:
         values from models.py), not an untyped array of open objects — that
         was this story's whole point to falsify, the same way S4 falsified
         this test's earlier "no tool carries annotations" assertion.
-        No tool has an output schema yet (S11).
+        No tool has an output schema, and that is now permanent: S11 was
+        dropped in favour of keeping the structured-dict error contract.
+        The SDK derives a tool's output schema from its return annotation
+        and then validates every returned value against it, so declaring one
+        would make each `{"error": ...}` return fail validation. See the
+        dropped-S11 rationale; do not "fix" this by annotating return types.
 
         Annotations (added by S4's mcp_tool wrapper) — snapshot the matrix
         here rather than asserting None, so a future accidental change to
@@ -150,8 +155,12 @@ class TestInMemoryClient:
 
     @pytest.mark.asyncio
     async def test_call_get_recipe_not_found_is_structured(self, db):
-        """Today's contract: a domain "not found" is structured content, not an
-        error result. S11 changes this to isError=true."""
+        """A domain "not found" is structured content, not an error result.
+
+        This is deliberate and permanent. isError means the tool failed to
+        execute; "no such recipe" is a legitimate answer a model should read
+        and act on, not a malfunction to apologise for. S11 would have
+        flipped it and was dropped for exactly this reason."""
         db.get.return_value.exists = False
         db.stream.side_effect = lambda *a, **k: iter([])
         async with Client(mcp_server.mcp) as c:

@@ -20,6 +20,12 @@ tool lives in its own module under ``tools/`` (one per domain: recipes,
 images, social, expenses), each exposing a ``TOOLS`` tuple and a
 ``register(mcp)`` function. ``TOOL_MODULES`` below lists them in the order
 their workflow paragraph appears above.
+
+``resources.py`` and ``prompts.py`` follow the same ``register(mcp)``
+contract and are listed in ``FEATURE_MODULES``: resources expose the read
+data by URI, prompts expose the three workflows worth starting from a slash
+command. Both are additive — no tool's signature, result or error contract
+depends on them.
 """
 
 import logging
@@ -31,6 +37,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from ..config import settings
 from ..mcp_auth import WorkOSTokenVerifier
+from . import prompts, resources
 from .tools import expenses, images, ingredients, recipes, social
 
 logger = logging.getLogger(__name__)
@@ -74,6 +81,11 @@ social_status to see whether it landed — a blind retry duplicates it."""
 # and register(mcp) — the tool surface is exactly the union of those tuples,
 # nothing registers by side effect.
 TOOL_MODULES = (recipes, ingredients, images, social, expenses)
+
+# Resources (read-only, URI-addressed) and prompts (operator-chosen starting
+# points). Same explicit register(mcp) contract as the tool modules, and
+# additive: neither changes any tool's signature, result or error contract.
+FEATURE_MODULES = (resources, prompts)
 
 
 def _auth_for(settings) -> tuple[AuthSettings | None, WorkOSTokenVerifier | None, TransportSecuritySettings]:
@@ -119,7 +131,7 @@ def build_server(settings) -> MCPServer:
         auth=auth,
         token_verifier=token_verifier,
     )
-    for module in TOOL_MODULES:
+    for module in TOOL_MODULES + FEATURE_MODULES:
         module.register(server)
     return server
 
