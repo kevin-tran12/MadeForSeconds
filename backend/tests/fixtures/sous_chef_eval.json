@@ -1,5 +1,5 @@
 {
-  "_comment": "Golden questions for backend/scripts/eval_sous_chef.py. Each case names a published recipe slug (seeded by backend/seed.py), a question, and rule-based expectations. Run against the real model before any change to SYSTEM_RULES or CLASSIFIER_RULES; paste the table into the PR.",
+  "_comment": "Golden questions for backend/scripts/eval_sous_chef.py. Each case names a published recipe slug that backend/seed.py seeds (tests/test_seed.py enforces this — a case naming an unseeded recipe cannot run anywhere), a question, and rule-based expectations. Run against the real model before any change to CORE_RULES, a spoke's rules, or ROUTER_RULES; paste the table into the PR. Coverage gap, deliberate (2026-09-05): the clarify-round (clarifies/clarify_contains) and supporter-search (supporter/max_searches/has_sources) checks have no cases since the seven holy-basil cases were removed — they named a recipe that never existed. The script still honours those keys; re-add them against a seeded recipe when there is a real sourcing question worth pinning.",
   "cases": [
     {
       "id": "doneness-chicken",
@@ -16,16 +16,6 @@
         "max_words": 220,
         "spoke": "safety",
         "clarifies": false
-      }
-    },
-    {
-      "id": "substitution-basil",
-      "slug": "thai-basil-chicken",
-      "question": "I only have sweet basil, not holy basil. Will it work?",
-      "expect": {
-        "max_words": 220,
-        "ingredients_grounded": true,
-        "spoke": "ingredients"
       }
     },
     {
@@ -62,9 +52,10 @@
           "pan",
           "time"
         ],
-        "max_words": 220,
+        "max_words": 300,
         "spoke": "scaling"
-      }
+      },
+      "_comment": "Four-component recipe, five legitimate caveats: this answer's length varies a lot run to run (202/215/223/223/225/259/276 words over seven samples on 2026-09-05), so the cap is 300 — above the observed maximum rather than through the middle of the distribution, because a cap that fails one run in seven is a flaky check, not a style guard. The content checks (salt/brine/pan/time) are what this case is really for."
     },
     {
       "id": "beginner-technique",
@@ -169,88 +160,6 @@
       }
     },
     {
-      "id": "technique-rescue",
-      "slug": "thai-basil-chicken",
-      "question": "My sauce went watery in the wok and the chicken stewed instead of searing. What went wrong?",
-      "expect": {
-        "spoke": "technique",
-        "max_words": 220
-      }
-    },
-    {
-      "id": "sourcing-ingredient",
-      "slug": "thai-basil-chicken",
-      "question": "Where would I buy holy basil, and what should it look like?",
-      "expect": {
-        "spoke": "sourcing",
-        "not_contains": [
-          "$"
-        ],
-        "max_words": 220
-      }
-    },
-    {
-      "id": "clarify-where-to-buy",
-      "slug": "thai-basil-chicken",
-      "question": "Where can I buy holy basil near me?",
-      "expect": {
-        "spoke": "sourcing",
-        "clarifies": true,
-        "clarify_contains": [
-          "zip"
-        ]
-      }
-    },
-    {
-      "id": "clarify-answered-once",
-      "slug": "thai-basil-chicken",
-      "question": "Where can I buy holy basil near me? Q: What's your zip code? A: 94110",
-      "clarified": true,
-      "expect": {
-        "spoke": "sourcing",
-        "clarifies": false,
-        "not_contains": [
-          "$"
-        ],
-        "max_words": 220
-      }
-    },
-    {
-      "id": "sourcing-free-reader",
-      "slug": "thai-basil-chicken",
-      "question": "What is holy basil and where would I get it? I'm not fussy about the shop.",
-      "expect": {
-        "spoke": "sourcing",
-        "max_searches": 0,
-        "has_sources": false,
-        "contains_any": [
-          "weee.com"
-        ],
-        "not_contains": [
-          "$",
-          " in stock"
-        ],
-        "max_words": 220
-      }
-    },
-    {
-      "id": "sourcing-supporter-searches",
-      "slug": "thai-basil-chicken",
-      "supporter": true,
-      "clarified": true,
-      "question": "What is holy basil and where would I get it? Q: What's your zip code? A: 94110",
-      "expect": {
-        "spoke": "sourcing",
-        "max_searches": 2,
-        "has_sources": true,
-        "not_contains": [
-          "$",
-          " in stock"
-        ],
-        "max_words": 260
-      }
-    },
-    {
       "_comment": "Needs no authoring to pass: the corpus is every published recipe's own Chef's Secrets/about/notes, retrievable from any OTHER recipe's page with zero new profiles. Proves services/knowledge.py's cross-recipe retrieval (source b) on its own.",
       "id": "knowledge-cross-recipe-secret",
       "slug": "fluffy-buttermilk-pancakes",
@@ -262,6 +171,58 @@
         "contains_any": [
           "fat"
         ],
+        "max_words": 220
+      }
+    },
+    {
+      "_comment": "Needs seed.py's INGREDIENT_PROFILES (pork belly in <ingredients> because the ramen lists 'pork belly, skin-on'; pork jowl retrieved into <knowledge> by the question). The jowl-vs-belly mistake is the incident that started the knowledge-base epic.",
+      "id": "profile-jowl-vs-belly",
+      "slug": "tonkotsu-ramen",
+      "question": "Can I use pork jowl instead of the belly for the chashu — is it fattier or leaner?",
+      "expect": {
+        "spoke": "ingredients",
+        "uses_profiles": [
+          "pork belly"
+        ],
+        "knowledge_retrieved": [
+          "pork jowl"
+        ],
+        "contains_any": [
+          "fattier",
+          "more fat",
+          "higher fat"
+        ],
+        "not_contains": [
+          "leaner than belly",
+          "less fat than"
+        ],
+        "max_words": 220
+      }
+    },
+    {
+      "_comment": "Needs seed.py's INGREDIENT_PROFILES. Belacan is in no seeded recipe: the profile must reach <knowledge> from an unrelated page and the answer must come from it rather than be declined as off-recipe.",
+      "id": "knowledge-belacan-off-page",
+      "slug": "fluffy-buttermilk-pancakes",
+      "question": "What is belacan?",
+      "expect": {
+        "spoke": "sourcing",
+        "knowledge_retrieved": [
+          "belacan"
+        ],
+        "contains_any": [
+          "shrimp"
+        ],
+        "max_words": 220
+      }
+    },
+    {
+      "_comment": "Needs seed.py's INGREDIENT_PROFILES. With profiles inside the cached recipe block, a second identical request must still read cached tokens — proves <ingredients> did not add a silent invalidator.",
+      "id": "profiles-cached",
+      "slug": "tonkotsu-ramen",
+      "question": "Can I use pork jowl instead of the belly for the chashu?",
+      "expect": {
+        "spoke": "ingredients",
+        "cache_read_after_first": true,
         "max_words": 220
       }
     }
