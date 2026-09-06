@@ -15,7 +15,7 @@ with no profiles, exactly as production does until the owner authors real
 ones. A fresh emulator (or --force) is what seeds them."""
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from google.cloud.firestore import Client
 
@@ -1050,9 +1050,18 @@ def main():
             doc.reference.delete()
 
     now = datetime.now(timezone.utc)
-    for recipe in RECIPES:
-        recipe["created_at"] = now
-        recipe["updated_at"] = now
+    # One second apart, newest first, so RECIPES' own order IS the order the
+    # site shows. Recipe lists sort by created_at DESCENDING, and with equal
+    # timestamps Firestore falls back to document id — which is random per
+    # seed run, so "the first recipe" used to be a coin flip. That cost a
+    # ~1-in-5 E2E flake (the multi-component recipe renders no top-level
+    # Instructions heading) and hid a real cursor page-skip, since start_after
+    # keyed on created_at alone cannot separate tied documents. Seconds, not
+    # microseconds, so the gap survives any timestamp rounding.
+    for offset, recipe in enumerate(RECIPES):
+        stamp = now - timedelta(seconds=offset)
+        recipe["created_at"] = stamp
+        recipe["updated_at"] = stamp
         doc_ref = collection.document()
         doc_ref.set(recipe)
         print(f"  Created: {recipe['title']}")
