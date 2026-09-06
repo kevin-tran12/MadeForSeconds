@@ -47,14 +47,16 @@ def _recipes_query(published: bool | None):
     # new: a `start_after` cursor keyed on `created_at` alone has no
     # tiebreaker, so two recipes sharing the exact same microsecond
     # timestamp would land on the same cursor "position" and one could be
-    # silently skipped across a page boundary. Found this for real —
-    # seed.py computes one `now` and reuses it for every seeded recipe,
-    # which reproduces the tie deterministically — not a hypothetical.
-    # Not fixed here: real recipe creation (one MCP/HTTP call at a time)
-    # makes an exact microsecond collision astronomically unlikely, and a
-    # proper fix (a compound (created_at, doc_id) cursor) is a change to a
-    # pattern used in two places, not a one-line addition — worth its own
-    # follow-up rather than folding into this story's scope.
+    # silently skipped across a page boundary. This was found for real, not
+    # theorised: seed.py used to write one `now` to every recipe, which
+    # reproduced the tie deterministically. Seed data now spaces recipes a
+    # second apart, so reproducing it again means constructing the tie
+    # yourself rather than reaching for seed.py.
+    # Still not fixed, deliberately (owner's call, 2026-09-06): real recipe
+    # creation is one call at a time at microsecond precision, so a genuine
+    # collision is astronomically unlikely, and a compound
+    # (created_at, doc_id) cursor would change a public cursor format and
+    # possibly need new Firestore indexes to buy that.
     query = get_db().collection("recipes")
     if published is not None:
         query = query.where(filter=FieldFilter("published", "==", published))

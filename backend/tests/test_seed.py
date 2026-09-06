@@ -19,6 +19,7 @@ connection until main(), so importing it here is safe.
 
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -110,3 +111,22 @@ def test_seeded_profiles_resolve_from_the_recipe_items_that_need_them():
     assert index.resolve(belly_item)[0] == "pork-belly"
     assert index.resolve("pork jowl")[0] == "pork-jowl"
     assert index.resolve("belacan")[0] == "belacan"
+
+
+def test_seeding_gives_every_recipe_a_distinct_decreasing_timestamp():
+    """Seeded recipes must not share a created_at.
+
+    Recipe lists sort by created_at DESCENDING; with equal timestamps
+    Firestore falls back to document id, which is random per seed run. That
+    made "the first recipe" a coin flip, which cost a ~1-in-5 E2E flake and
+    hid a real cursor page-skip. Asserting the loop's arithmetic here rather
+    than round-tripping through Firestore keeps this a unit test.
+    """
+    now = datetime(2026, 9, 6, 12, 0, tzinfo=timezone.utc)
+    stamps = [now - timedelta(seconds=offset) for offset, _ in enumerate(seed.RECIPES)]
+
+    assert len(set(stamps)) == len(seed.RECIPES)
+    assert stamps == sorted(stamps, reverse=True), "RECIPES order must be newest-first"
+    # The site shows newest first, so the first entry in RECIPES is the first
+    # recipe a visitor sees — the property the E2E suite reads.
+    assert stamps[0] == max(stamps)
