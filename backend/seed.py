@@ -5,7 +5,14 @@ docker-compose.yml / ci.yml's E2E job). Pass --project to target a real
 project instead — e.g. staging, seeded once by .github/workflows/deploy.yml
 so its Playwright run has real content to assert against. Safe to call on
 every merge: without --force this is a no-op once recipes already exist, so
-repeated pipeline runs never re-wipe staging's data."""
+repeated pipeline runs never re-wipe staging's data.
+
+The ingredient profiles (INGREDIENT_PROFILES) are sample data for
+scripts/eval_sous_chef.py's profile cases. They are effectively local-only:
+main() returns early when recipes already exist, so a staging run that is
+already seeded never reaches them, and staging's Sous Chef keeps answering
+with no profiles, exactly as production does until the owner authors real
+ones. A fresh emulator (or --force) is what seeds them."""
 
 import argparse
 from datetime import datetime, timezone
@@ -228,6 +235,505 @@ RECIPES = [
             {"label": "Total Sugars",       "value": 8,   "unit": "g"},
             {"label": "Protein",            "value": 52,  "unit": "g"},
         ],
+    },
+    # The production Hainanese Chicken Rice, copied verbatim (four components, no
+    # top-level ingredients, no secrets) so tests/fixtures/sous_chef_eval.json's
+    # cases run against the emulator. Re-fetch with the MCP get_recipe tool if
+    # the live recipe changes; drift is harmless for a sample.
+    {
+        "title": "Hainanese Chicken Rice (海南鸡饭)",
+        "slug": "hainanese-chicken-rice",
+        "description": "Hainanese chicken rice looks minimalist on the plate, but the dish is really a flavor system: the chicken gives broth and fat, the rice absorbs both, and the sauces sharpen everything. The rice is the anchor — when the rice is right, glossy, aromatic, and savory, you can eat a bowl of it alone and still feel satisfied. This is a balanced home batch for 4 servings, scaled so nothing feels excessive while still maintaining proper ratios used in hawker kitchens. MSG is included intentionally; it deepens the chicken flavor rather than making the dish salty.",
+        "about": None,
+        "ingredients": [],
+        "prep_steps": [],
+        "instructions": [],
+        "prep_time_minutes": 35,
+        "cook_time_minutes": 55,
+        "servings": 4,
+        "difficulty": "medium",
+        "categories": [
+            "Chinese",
+            "Singaporean",
+            "Malaysian",
+            "Rice Dishes"
+        ],
+        "image_url": "https://storage.googleapis.com/made-for-seconds-images/b85f04b6-4867-4730-a53c-a7bf27096d97-738FE502-5014-4631-9EE3-17041029FBDA.JPG",
+        "published": True,
+        "nutrition": [
+            {
+                "label": "Calories",
+                "value": 685.0,
+                "unit": "kcal"
+            },
+            {
+                "label": "Total Fat",
+                "value": 28.0,
+                "unit": "g"
+            },
+            {
+                "label": "Saturated Fat",
+                "value": 8.0,
+                "unit": "g"
+            },
+            {
+                "label": "Trans Fat",
+                "value": 0.0,
+                "unit": "g"
+            },
+            {
+                "label": "Polyunsaturated Fat",
+                "value": 5.0,
+                "unit": "g"
+            },
+            {
+                "label": "Monounsaturated Fat",
+                "value": 12.0,
+                "unit": "g"
+            },
+            {
+                "label": "Cholesterol",
+                "value": 145.0,
+                "unit": "mg"
+            },
+            {
+                "label": "Sodium",
+                "value": 1120.0,
+                "unit": "mg"
+            },
+            {
+                "label": "Total Carbohydrate",
+                "value": 58.0,
+                "unit": "g"
+            },
+            {
+                "label": "Dietary Fiber",
+                "value": 1.5,
+                "unit": "g"
+            },
+            {
+                "label": "Total Sugars",
+                "value": 3.0,
+                "unit": "g"
+            },
+            {
+                "label": "Added Sugars",
+                "value": 1.0,
+                "unit": "g"
+            },
+            {
+                "label": "Protein",
+                "value": 46.0,
+                "unit": "g"
+            },
+            {
+                "label": "Vitamin A",
+                "value": 35.0,
+                "unit": "mcg"
+            },
+            {
+                "label": "Vitamin C",
+                "value": 18.0,
+                "unit": "mg"
+            },
+            {
+                "label": "Vitamin K",
+                "value": 12.0,
+                "unit": "mcg"
+            },
+            {
+                "label": "Niacin",
+                "value": 14.0,
+                "unit": "mg"
+            },
+            {
+                "label": "Vitamin B6",
+                "value": 0.8,
+                "unit": "mg"
+            },
+            {
+                "label": "Folate",
+                "value": 28.0,
+                "unit": "mcg"
+            },
+            {
+                "label": "Calcium",
+                "value": 35.0,
+                "unit": "mg"
+            },
+            {
+                "label": "Iron",
+                "value": 2.8,
+                "unit": "mg"
+            },
+            {
+                "label": "Potassium",
+                "value": 420.0,
+                "unit": "mg"
+            },
+            {
+                "label": "Phosphorus",
+                "value": 310.0,
+                "unit": "mg"
+            },
+            {
+                "label": "Zinc",
+                "value": 3.2,
+                "unit": "mg"
+            },
+            {
+                "label": "Selenium",
+                "value": 32.0,
+                "unit": "mcg"
+            }
+        ],
+        "components": [
+            {
+                "title": "Hainanese Poached Chicken",
+                "description": "Gentle poaching keeps the meat silky and produces the broth needed for the rice and sauces. Done when thickest part of thigh reaches 165°F / 74°C.",
+                "ingredients": [
+                    {
+                        "item": "whole chicken, cleaned",
+                        "amount": "1",
+                        "unit": "whole (3–3½ lb)",
+                        "group": "Poaching"
+                    },
+                    {
+                        "item": "water",
+                        "amount": "2.5",
+                        "unit": "L",
+                        "group": "Poaching"
+                    },
+                    {
+                        "item": "ginger, sliced",
+                        "amount": "30",
+                        "unit": "g",
+                        "group": "Poaching"
+                    },
+                    {
+                        "item": "scallions, smashed",
+                        "amount": "2",
+                        "unit": "",
+                        "group": "Poaching"
+                    },
+                    {
+                        "item": "salt",
+                        "amount": "2",
+                        "unit": "tsp",
+                        "group": "Poaching"
+                    },
+                    {
+                        "item": "MSG",
+                        "amount": "0.75",
+                        "unit": "tsp",
+                        "group": "Poaching"
+                    },
+                    {
+                        "item": "cold water",
+                        "amount": "1.5",
+                        "unit": "L",
+                        "group": "Ice Bath"
+                    },
+                    {
+                        "item": "ice",
+                        "amount": "1",
+                        "unit": "cup",
+                        "group": "Ice Bath"
+                    },
+                    {
+                        "item": "sesame oil",
+                        "amount": "0.5",
+                        "unit": "tsp",
+                        "group": "Glaze"
+                    }
+                ],
+                "prep_steps": [],
+                "instructions": [
+                    {
+                        "step": 1,
+                        "text": "Rub the entire chicken with 2 tsp salt, gently massaging the skin. Rinse thoroughly under cold water.",
+                        "tip": "This removes impurities and tightens the skin so it cooks smooth instead of loose and wrinkled."
+                    },
+                    {
+                        "step": 2,
+                        "text": "In a large pot combine 2.5L water, sliced ginger, smashed scallions, and MSG. Bring to a gentle simmer.",
+                        "tip": "MSG strengthens the natural chicken flavor of the broth without increasing saltiness."
+                    },
+                    {
+                        "step": 3,
+                        "text": "Lower the chicken into the pot breast-side down. The water should barely bubble. Simmer 30–35 minutes.",
+                        "tip": "If the water boils aggressively the meat will tighten and the broth becomes cloudy."
+                    },
+                    {
+                        "step": 4,
+                        "text": "Transfer the chicken immediately to an ice bath for 5 minutes.",
+                        "tip": "Rapid cooling firms the skin and creates the slightly gelatinous texture prized in Singapore hawker stalls."
+                    },
+                    {
+                        "step": 5,
+                        "text": "Remove chicken from the ice bath and let it rest 10 minutes. Rub lightly with sesame oil.",
+                        "tip": "Sesame oil gives the glossy finish typical of restaurant chicken rice."
+                    }
+                ],
+                "prep_time_minutes": 15,
+                "cook_time_minutes": 35,
+                "yield_description": None
+            },
+            {
+                "title": "Hainanese Chicken Rice",
+                "description": "This is the heart of the dish. Each grain should smell like ginger, garlic, and chicken fat.",
+                "ingredients": [
+                    {
+                        "item": "jasmine rice, rinsed well",
+                        "amount": "2",
+                        "unit": "cups",
+                        "group": None
+                    },
+                    {
+                        "item": "chicken fat (skimmed from broth or rendered from cavity)",
+                        "amount": "2",
+                        "unit": "tbsp",
+                        "group": None
+                    },
+                    {
+                        "item": "shallots, finely diced",
+                        "amount": "2",
+                        "unit": "",
+                        "group": None
+                    },
+                    {
+                        "item": "garlic, minced",
+                        "amount": "3",
+                        "unit": "cloves",
+                        "group": None
+                    },
+                    {
+                        "item": "ginger, minced",
+                        "amount": "15",
+                        "unit": "g",
+                        "group": None
+                    },
+                    {
+                        "item": "pandan leaf, tied into a knot (optional)",
+                        "amount": "1",
+                        "unit": "",
+                        "group": None
+                    },
+                    {
+                        "item": "hot chicken broth",
+                        "amount": "2.25",
+                        "unit": "cups",
+                        "group": None
+                    },
+                    {
+                        "item": "salt",
+                        "amount": "0.5",
+                        "unit": "tsp",
+                        "group": None
+                    },
+                    {
+                        "item": "MSG",
+                        "amount": "0.5",
+                        "unit": "tsp",
+                        "group": None
+                    }
+                ],
+                "prep_steps": [],
+                "instructions": [
+                    {
+                        "step": 1,
+                        "text": "Rinse 2 cups jasmine rice under cold water until mostly clear. Drain completely.",
+                        "tip": "Removing excess starch keeps grains fluffy instead of sticky."
+                    },
+                    {
+                        "step": 2,
+                        "text": "Heat 2 tbsp chicken fat in a pot over medium heat. Add diced shallots, minced garlic, and minced ginger. Cook until fragrant and lightly golden.",
+                        "tip": "This aromatic base is what makes the rice smell incredible even before broth is added."
+                    },
+                    {
+                        "step": 3,
+                        "text": "Add the rinsed rice and stir for 2 minutes so every grain is coated in fat.",
+                        "tip": "Toasting seals the grain surface and keeps the rice separate."
+                    },
+                    {
+                        "step": 4,
+                        "text": "Add 2¼ cups hot chicken broth, salt, MSG, and pandan leaf. Bring to a simmer, cover, and cook 15 minutes on very low heat.",
+                        "tip": "The broth should taste slightly salty before cooking — rice absorbs seasoning."
+                    },
+                    {
+                        "step": 5,
+                        "text": "Turn off heat and rest 10 minutes covered. Fluff gently with chopsticks.",
+                        "tip": "Chopsticks separate grains without crushing them."
+                    }
+                ],
+                "prep_time_minutes": 10,
+                "cook_time_minutes": 18,
+                "yield_description": None
+            },
+            {
+                "title": "Hainanese Chili Sauce",
+                "description": "Bright, spicy, and slightly savory.",
+                "ingredients": [
+                    {
+                        "item": "red Fresno chilies",
+                        "amount": "4",
+                        "unit": "",
+                        "group": None
+                    },
+                    {
+                        "item": "Thai bird chili (optional)",
+                        "amount": "1",
+                        "unit": "",
+                        "group": None
+                    },
+                    {
+                        "item": "garlic cloves",
+                        "amount": "4",
+                        "unit": "",
+                        "group": None
+                    },
+                    {
+                        "item": "ginger",
+                        "amount": "30",
+                        "unit": "g",
+                        "group": None
+                    },
+                    {
+                        "item": "galangal",
+                        "amount": "5",
+                        "unit": "g",
+                        "group": None
+                    },
+                    {
+                        "item": "salt",
+                        "amount": "0.5",
+                        "unit": "tsp",
+                        "group": None
+                    },
+                    {
+                        "item": "sugar",
+                        "amount": "1",
+                        "unit": "tsp",
+                        "group": None
+                    },
+                    {
+                        "item": "MSG",
+                        "amount": "0.25",
+                        "unit": "tsp",
+                        "group": None
+                    },
+                    {
+                        "item": "light soy sauce",
+                        "amount": "1.5",
+                        "unit": "tbsp",
+                        "group": None
+                    },
+                    {
+                        "item": "chicken fat",
+                        "amount": "2",
+                        "unit": "tbsp",
+                        "group": None
+                    },
+                    {
+                        "item": "chicken broth",
+                        "amount": "1–3",
+                        "unit": "tbsp",
+                        "group": None
+                    }
+                ],
+                "prep_steps": [],
+                "instructions": [
+                    {
+                        "step": 1,
+                        "text": "Blend chilies, garlic, ginger, and galangal until coarse. Season with salt, sugar, MSG, and soy sauce.",
+                        "tip": None
+                    },
+                    {
+                        "step": 2,
+                        "text": "Heat chicken fat until hot, then bloom the blended aromatics in the oil for 30 seconds. Stir in chicken broth to reach desired consistency.",
+                        "tip": "Too long in oil dulls the chili aroma — 30 seconds is enough."
+                    }
+                ],
+                "prep_time_minutes": None,
+                "cook_time_minutes": None,
+                "yield_description": "About ½–¾ cup"
+            },
+            {
+                "title": "Ginger Scallion Sauce",
+                "description": "Warm, aromatic, and deeply savory.",
+                "ingredients": [
+                    {
+                        "item": "ginger, minced",
+                        "amount": "80",
+                        "unit": "g",
+                        "group": None
+                    },
+                    {
+                        "item": "scallions, sliced",
+                        "amount": "2",
+                        "unit": "",
+                        "group": None
+                    },
+                    {
+                        "item": "salt",
+                        "amount": "0.5",
+                        "unit": "tsp",
+                        "group": None
+                    },
+                    {
+                        "item": "sugar",
+                        "amount": "0.25",
+                        "unit": "tsp",
+                        "group": None
+                    },
+                    {
+                        "item": "MSG",
+                        "amount": "0.25",
+                        "unit": "tsp",
+                        "group": None
+                    },
+                    {
+                        "item": "chicken fat",
+                        "amount": "3",
+                        "unit": "tbsp",
+                        "group": None
+                    },
+                    {
+                        "item": "sesame oil",
+                        "amount": "1",
+                        "unit": "tsp",
+                        "group": None
+                    }
+                ],
+                "prep_steps": [],
+                "instructions": [
+                    {
+                        "step": 1,
+                        "text": "Combine minced ginger and sliced scallions in a heatproof bowl. Season with salt, sugar, and MSG.",
+                        "tip": None
+                    },
+                    {
+                        "step": 2,
+                        "text": "Heat chicken fat and sesame oil until very hot. Pour the hot oil over the seasoned ginger mixture and stir.",
+                        "tip": "Pouring hot oil over the ginger releases aroma while preventing the bitterness that comes from frying it directly."
+                    }
+                ],
+                "prep_time_minutes": None,
+                "cook_time_minutes": None,
+                "yield_description": "About ½ cup"
+            }
+        ],
+        "receipt_urls": [],
+        "labels": [
+            "chinese",
+            "singaporean",
+            "malaysian",
+            "chicken",
+            "rice",
+            "poultry"
+        ],
+        "secrets": [],
+        "sous_chef_notes": None
     },
 ]
 
@@ -455,10 +961,72 @@ ABOUT_PAGE = {
 }
 
 
+# Sample ingredient profiles for the Sous Chef's knowledge base — the shape of
+# models.IngredientProfileIn, seeded so scripts/eval_sous_chef.py's profile
+# cases (profile-jowl-vs-belly, knowledge-belacan-off-page, profiles-cached)
+# run locally. "slug" is what generate_slug(name) produces; tests/test_seed.py
+# checks that so seed.py needs no app import (the staging-seed job runs it
+# without the app's environment).
+INGREDIENT_PROFILES = [
+    {
+        "slug": "pork-belly",
+        "name": "pork belly",
+        "aliases": ["belly", "samgyeopsal", "liempo"],
+        "what_it_is": (
+            "The fatty slab from the underside of the pig: layers of fat and meat with the skin on top. "
+            "It is what the chashu in this ramen is rolled from, and what samgyeopsal and lechon kawali are built on."
+        ),
+        "role": "Fat and richness. The layers render slowly and baste the meat from inside, so a long braise turns it silky rather than dry.",
+        "substitutions": (
+            "Pork shoulder works for a braise but is leaner and firmer: expect a drier, shreddier result. "
+            "Pork jowl goes the other way, fattier and richer than belly, so trim less and skim more. "
+            "Bacon does not work here; it is cured and smoked."
+        ),
+        "buying": "One skin-on slab with even, straight layers of fat and meat, not a thin, wavy end piece. Asian grocers sell it in the right shape for rolling.",
+        "storage": "Two days raw in the fridge, well wrapped. Braised belly keeps four days and slices cleanly once chilled overnight.",
+        "mistakes": "Slicing it warm (it shreds; chill it first), and rendering over too high a heat so the outside scorches before the fat gives.",
+        "allergens": "",
+    },
+    {
+        "slug": "pork-jowl",
+        "name": "pork jowl",
+        "aliases": ["jowl", "pork cheek", "hangjeongsal", "guanciale cut"],
+        "what_it_is": (
+            "The cheek: a small cut with a higher fat-to-meat ratio than belly, marbled all the way through "
+            "rather than in layers. Cured, it becomes guanciale."
+        ),
+        "role": "Fat, more of it than belly. It renders into a richer, silkier braise and the meat stays moist even when pushed.",
+        "substitutions": (
+            "It stands in for pork belly in chashu and braises: expect more rendered fat, so trim less before and skim more after. "
+            "It is fattier than belly, never leaner. Belly stands in for jowl the other way, slightly leaner."
+        ),
+        "buying": "Sold as a skin-on flap at Korean and Chinese butchers, often labelled hangjeongsal or pork cheek; look for firm white fat.",
+        "storage": "Two days raw in the fridge, well wrapped; freezes well for three months.",
+        "mistakes": "Treating it like a lean cut and trimming the fat away; the fat is the point. And slicing it thick for a sear: it wants thin slices or a long braise.",
+        "allergens": "",
+    },
+    {
+        "slug": "belacan",
+        "name": "belacan",
+        "aliases": ["shrimp paste", "terasi", "kapi"],
+        "what_it_is": (
+            "Malaysian fermented shrimp paste, sold as a dense dark block. Pungent raw, deeply savoury once toasted; "
+            "the backbone of sambal belacan and the sambal on nasi lemak."
+        ),
+        "role": "Umami and salt. A small toasted piece gives a whole sambal or stir-fry its savoury depth.",
+        "substitutions": "Thai kapi and Indonesian terasi are the same thing under other names. Fish sauce gives salt and some funk but not the body; miso is not a substitute.",
+        "buying": "A firm, dry block, dark brown to purple, from any Southeast Asian grocer. Avoid soft, crumbly or greyish blocks.",
+        "storage": "Wrapped twice and kept in the fridge it lasts a year. It smells, so seal it in a jar.",
+        "mistakes": "Using it raw: toast a slice in a dry pan or in foil until fragrant first. And using too much; start with a thumbnail-sized piece.",
+        "allergens": "Shellfish (shrimp).",
+    },
+]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--project", default="madefor-seconds-local", help="GCP project id (default: the local emulator project)")
-    parser.add_argument("--force", action="store_true", help="Clear existing recipes/subscribers/expenses and reseed")
+    parser.add_argument("--force", action="store_true", help="Clear existing recipes/subscribers/expenses/ingredient profiles and reseed")
     args = parser.parse_args()
 
     force = args.force
@@ -476,6 +1044,9 @@ def main():
             doc.reference.delete()
         print("Clearing existing supporters...")
         for doc in db.collection("subscribers").stream():
+            doc.reference.delete()
+        print("Clearing existing ingredient profiles...")
+        for doc in db.collection("ingredients").stream():
             doc.reference.delete()
 
     now = datetime.now(timezone.utc)
@@ -496,6 +1067,19 @@ def main():
             db.collection("subscribers").document().set(data)
             print(f"  Created supporter: {supporter['display_name']}")
         print(f"Seeded {len(SUPPORTERS)} supporters.")
+
+    # Seed sample ingredient profiles (ingredients/{slug}). updated_via must be
+    # a value models.IngredientProfile accepts, so "admin", not "seed".
+    # Unreachable on an already-seeded project because of the early return
+    # above — see the module docstring.
+    existing_profiles = list(db.collection("ingredients").limit(1).stream())
+    if not existing_profiles or force:
+        for profile in INGREDIENT_PROFILES:
+            data = {k: v for k, v in profile.items() if k != "slug"}
+            data.update({"created_at": now, "updated_at": now, "updated_via": "admin"})
+            db.collection("ingredients").document(profile["slug"]).set(data)
+            print(f"  Created ingredient profile: {profile['name']}")
+        print(f"Seeded {len(INGREDIENT_PROFILES)} ingredient profiles.")
 
     # Seed sample expenses
     if force:
