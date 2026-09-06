@@ -170,6 +170,28 @@ Every tool carries MCP annotations (read-only/destructive/idempotent/open-world 
 
 > The backend scales to zero, so the first call after an idle period takes ~10s.
 
+### Resources and prompts
+
+Alongside the tools, the server exposes the same read data as **resources** (fetched by URI, so a client can attach one to a conversation or cache it instead of calling a tool) and three **prompts** (workflows the operator starts deliberately).
+
+| Resource | What it serves |
+|----------|----------------|
+| `recipe://{slug}` | A full recipe, drafts included — the owner's view, with `sous_chef_notes` |
+| `ingredient://{slug}` | One ingredient profile |
+| `social-kit://{slug}` | Brand voice, hashtag tiers, platform limits and drafting workflow for a recipe |
+| `categories://list` | The category allowlist |
+| `social://status` | Per-platform publishing health |
+
+Resources are reads only: no rate budget, no audit row, no idempotency key, because none of them writes. Every mutating path is still a tool, so the audit trail stays complete. A missing URI fails the read rather than returning a success whose body describes a failure — the opposite of the tools' deliberate `{"error": …}` convention, which exists so a model gets structured, in-band failure it can reason about.
+
+| Prompt | What it starts |
+|--------|----------------|
+| `draft_social_post` | Draft Instagram and TikTok posts for a recipe, in the site's voice |
+| `review_before_publish` | Check a draft for what blocks publishing versus what merely weakens it |
+| `draft_ingredient_profiles` | Draft profiles for the most-used ingredients that lack one |
+
+Each prompt that can lead to a public or persisted write repeats the approval rule itself, since a prompt may be the first thing in a conversation. MCP sends prompt arguments as strings, so `draft_ingredient_profiles(limit)` coerces rather than receiving an int.
+
 ---
 
 ## Project structure
@@ -191,7 +213,9 @@ Every tool carries MCP annotations (read-only/destructive/idempotent/open-world 
 │   │   │   ├── server.py       MCPServer construction, auth/transport settings, instructions
 │   │   │   ├── tools/          One module per tool domain — recipes, ingredients, images, social, expenses —
 │   │   │   │                   each exposing a TOOLS tuple and a register(mcp) function
-│   │   │   └── errors.py       tool_errors: domain errors → structured dicts
+│   │   │   ├── wrapper.py      mcp_tool: domain errors → structured dicts, annotations, budgets, audit, idempotency
+│   │   │   ├── resources.py    URI-addressed reads (recipe://, ingredient://, social-kit://, categories://, social://)
+│   │   │   └── prompts.py      Operator-chosen workflows (draft posts, review before publish, draft profiles)
 │   │   ├── mcp_auth.py         WorkOS OAuth token verification (resource server)
 │   │   ├── services/
 │   │   │   ├── recipes.py      Recipe domain logic shared by routes and MCP
@@ -204,7 +228,7 @@ Every tool carries MCP annotations (read-only/destructive/idempotent/open-world 
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (1080 tests across 47 files)
+│   ├── tests/                  Pytest suite (1096 tests across 48 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -307,7 +331,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (1080 tests)
+npm run test:backend                    # Pytest (1096 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -445,7 +469,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (1080 tests, 47 files)
+### Backend — pytest (1096 tests, 48 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing

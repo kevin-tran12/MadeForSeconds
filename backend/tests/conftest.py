@@ -97,6 +97,10 @@ def mcp_db():
     mock rather than reusing `mock`: several existing tests assert exact
     call counts on `mock` itself (e.g. `db.set.assert_not_called()`), and
     audit's own unrelated `.set()` call would silently break those.
+    Also patches app.mcp_server.resources.get_db (S12): resources.py binds
+    its own `get_db` for the reads it serves directly, so without it a
+    resource read would reach real Firestore even though every tool here is
+    mocked.
     """
     mock = _chain_db()
     with (
@@ -104,6 +108,7 @@ def mcp_db():
         patch("app.mcp_server.tools.ingredients.get_db", return_value=mock),
         patch("app.mcp_server.tools.social.get_db", return_value=mock),
         patch("app.mcp_server.tools.expenses.get_db", return_value=mock),
+        patch("app.mcp_server.resources.get_db", return_value=mock),
         patch("app.mcp_server.audit.get_db", return_value=_chain_db()),
         patch("app.services.recipes.cache"),
         patch("app.services.ingredients.cache"),
