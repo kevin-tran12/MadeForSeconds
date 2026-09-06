@@ -1069,12 +1069,28 @@ class TestPublishHistory:
         assert result["error"] == "instagram"
 
     def test_a_recording_failure_does_not_fail_the_post(self, db):
-        """record_post is best-effort inside itself, but assert it here too:
-        the post already reached Instagram, so raising would report a failure
-        that did not happen."""
+        """The post already reached Instagram, so a history failure must not
+        report a failure that did not happen.
+
+        The first version of this test asserted result["error"] == "internal",
+        which contradicted its own name and encoded the bug as correct: the
+        publish really did fail. CI caught it, because the three
+        TestPublishInstagramPost tests take no db fixture and so hit a real
+        get_db() with no credentials on a runner.
+        """
         with patch("app.mcp_server.tools.social.social.record_post", side_effect=RuntimeError("boom")):
             result = mcp_server.publish_instagram_post("https://storage.googleapis.com/b/img.jpg")
-        assert result["error"] == "internal"
+        assert "error" not in result
+        assert result["id"] == "dev-ig-media"
+
+    def test_an_unreachable_firestore_does_not_fail_the_post(self):
+        """Deliberately no db fixture: this is CI's condition, where get_db()
+        itself raises. record_post guards its own writes, but get_db() is
+        resolved by the caller — so the guard has to wrap both."""
+        with patch("app.mcp_server.tools.social.get_db", side_effect=RuntimeError("no credentials")):
+            result = mcp_server.publish_instagram_post("https://storage.googleapis.com/b/img.jpg", "Caption")
+        assert "error" not in result
+        assert result["id"] == "dev-ig-media"
 
     def test_social_status_carries_recent_posts(self, db):
         with patch("app.mcp_server.tools.social.social.recent_posts", return_value=[{"ok": True, "media_id": "m1"}]):

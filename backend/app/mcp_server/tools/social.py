@@ -24,6 +24,21 @@ def _hashtag(text: str) -> str:
     return "".join(c for c in text.lower() if c.isalnum())
 
 
+def _record_attempt(entry: dict) -> None:
+    """Record one publish attempt, and never let doing so fail the publish.
+
+    record_post guards its own Firestore writes, but ``get_db()`` is resolved
+    by the caller, outside that guard — so a project with no credentials (or a
+    Firestore outage) would raise here and turn a post that actually reached
+    Instagram into an "internal" error. The whole thing has to be inside the
+    try, not just the write.
+    """
+    try:
+        social.record_post(get_db(), "instagram", entry)
+    except Exception:
+        logger.warning("social: could not record instagram post", exc_info=True)
+
+
 def _build_recipe_caption(recipe) -> str:
     """Compose a default caption from a recipe: title, blurb, link, hashtags."""
     link = f"{settings.frontend_url.rstrip('/')}/recipes/{recipe.slug}/"
@@ -63,12 +78,10 @@ def publish_instagram_post(image_url: str, caption: str = "", idempotency_key: s
         # Record the failure, then re-raise unchanged so wrapper.py still maps
         # it to an "instagram" error dict and fires MCP_TOOL_FAILED. The
         # history is a side note; it must not swallow or reshape the error.
-        social.record_post(get_db(), "instagram", {"ok": False, "error": str(exc), "caption": caption})
+        _record_attempt({"ok": False, "error": str(exc), "caption": caption})
         raise
-    social.record_post(
-        get_db(),
-        "instagram",
-        {"ok": True, "media_id": result.get("id"), "permalink": result.get("permalink"), "caption": caption},
+    _record_attempt(
+        {"ok": True, "media_id": result.get("id"), "permalink": result.get("permalink"), "caption": caption}
     )
     logger.info("MCP publish_instagram_post: media=%s", result.get("id"))
     return {**result, "message": "Posted to Instagram."}
@@ -94,22 +107,16 @@ def publish_recipe_to_instagram(
     try:
         result = instagram.publish_image(recipe.image_url, text)
     except instagram.InstagramError as exc:
-        social.record_post(
-            get_db(),
-            "instagram",
-            {"ok": False, "error": str(exc), "caption": text, "slug": recipe.slug},
-        )
+        _record_attempt({"ok": False, "error": str(exc), "caption": text, "slug": recipe.slug})
         raise
-    social.record_post(
-        get_db(),
-        "instagram",
+    _record_attempt(
         {
             "ok": True,
             "media_id": result.get("id"),
             "permalink": result.get("permalink"),
             "caption": text,
             "slug": recipe.slug,
-        },
+        }
     )
     logger.info("MCP publish_recipe_to_instagram: recipe=%s media=%s", recipe.slug, result.get("id"))
     return {**result, "slug": recipe.slug, "title": recipe.title, "message": "Posted to Instagram."}
