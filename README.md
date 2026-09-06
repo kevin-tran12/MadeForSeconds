@@ -156,7 +156,7 @@ Structured fields (ingredients, instructions, nutrition, recipe secrets/componen
 | `publish_instagram_post` | Post an already-hosted public HTTPS image to Instagram, with a caption |
 | `publish_recipe_to_instagram` | Post a recipe's own image, auto-building a caption from its title/description/link/hashtags |
 | `get_social_kit` | Recipe summary + brand voice + hashtag tiers + platform limits so the MCP client drafts Instagram/TikTok posts consistently (no server-side LLM) |
-| `social_status` | Per-platform token health from the twice-monthly refresh job |
+| `social_status` | Per-platform token health from the twice-monthly refresh job, plus `recent_posts`: the last few publish attempts (successes and failures), newest first |
 | `list_ingredients` | Every distinct ingredient across the catalogue, with recipe counts and profile coverage — start here for an authoring session |
 | `get_ingredient` | Fetch a profile by slug or by resolving a name/alias |
 | `upsert_ingredient` | Create or update a profile (safe to retry — the slug is the key) |
@@ -228,7 +228,7 @@ Each prompt that can lead to a public or persisted write repeats the approval ru
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (1096 tests across 48 files)
+│   ├── tests/                  Pytest suite (1110 tests across 48 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -331,7 +331,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (1096 tests)
+npm run test:backend                    # Pytest (1110 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -469,7 +469,7 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (1096 tests, 48 files)
+### Backend — pytest (1110 tests, 48 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing

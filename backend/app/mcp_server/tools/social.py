@@ -57,7 +57,19 @@ def publish_instagram_post(image_url: str, caption: str = "", idempotency_key: s
     Especially worth using here: unlike a Firestore write, an Instagram post
     that actually went through cannot be silently deduplicated later.
     """
-    result = instagram.publish_image(image_url, caption)
+    try:
+        result = instagram.publish_image(image_url, caption)
+    except instagram.InstagramError as exc:
+        # Record the failure, then re-raise unchanged so wrapper.py still maps
+        # it to an "instagram" error dict and fires MCP_TOOL_FAILED. The
+        # history is a side note; it must not swallow or reshape the error.
+        social.record_post(get_db(), "instagram", {"ok": False, "error": str(exc), "caption": caption})
+        raise
+    social.record_post(
+        get_db(),
+        "instagram",
+        {"ok": True, "media_id": result.get("id"), "permalink": result.get("permalink"), "caption": caption},
+    )
     logger.info("MCP publish_instagram_post: media=%s", result.get("id"))
     return {**result, "message": "Posted to Instagram."}
 
@@ -79,7 +91,26 @@ def publish_recipe_to_instagram(
     if not recipe.image_url:
         raise ValueError("recipe has no image; attach one first (request_image_upload)")
     text = caption if caption is not None else _build_recipe_caption(recipe)
-    result = instagram.publish_image(recipe.image_url, text)
+    try:
+        result = instagram.publish_image(recipe.image_url, text)
+    except instagram.InstagramError as exc:
+        social.record_post(
+            get_db(),
+            "instagram",
+            {"ok": False, "error": str(exc), "caption": text, "slug": recipe.slug},
+        )
+        raise
+    social.record_post(
+        get_db(),
+        "instagram",
+        {
+            "ok": True,
+            "media_id": result.get("id"),
+            "permalink": result.get("permalink"),
+            "caption": text,
+            "slug": recipe.slug,
+        },
+    )
     logger.info("MCP publish_recipe_to_instagram: recipe=%s media=%s", recipe.slug, result.get("id"))
     return {**result, "slug": recipe.slug, "title": recipe.title, "message": "Posted to Instagram."}
 
@@ -215,10 +246,14 @@ def get_social_kit(recipe_id: str = "", slug: str = "") -> dict:
 def social_status() -> dict:
     """Per-platform social publishing health: configured?, last successful
     refresh, token expiry, and the last error — as recorded by the
-    twice-monthly social-token-refresh job. Use it to tell the operator when
-    a token has lapsed and a re-auth is needed."""
+    twice-monthly social-token-refresh job, plus recent_posts: the last few
+    publish attempts (successes and failures), newest first, so the operator
+    can see what actually went out without opening Instagram. Use it to tell
+    them when a token has lapsed and a re-auth is needed."""
+    db = get_db()
     return {
-        "platforms": social.status(get_db()),
+        "platforms": social.status(db),
+        "recent_posts": social.recent_posts(db),
         "refresh_schedule": "04:00 UTC on the 1st and the 15th (Cloud Scheduler job social-token-refresh)",
     }
 
