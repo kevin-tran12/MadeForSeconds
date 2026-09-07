@@ -1348,9 +1348,11 @@ then run `/mcp` to authenticate via the browser. No static token needed.
 
 Set `MCP_TIMEOUT=30000` in the client environment — the backend scales to
 zero, so the first call after idle takes ~10s while Cloud Run cold-starts.
-If a read times out, retry once; for a timed-out write (create_recipe,
-create_expense, either Instagram publisher), check whether it landed
-(list_recipes / social_status) before retrying — a blind retry duplicates it.
+If a read times out, retry once. For a timed-out write, pass an
+`idempotency_key` on the original call and repeat it verbatim on the retry —
+see "Retries and idempotency" below. Without one, check whether the write
+landed (`list_recipes` / `social_status`) before retrying, because a blind
+retry duplicates it.
 
 Built on the `mcp` Python SDK 2.x (`MCPServer`); clients on the older
 `initialize` handshake still connect.
