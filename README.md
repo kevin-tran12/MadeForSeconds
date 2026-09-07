@@ -209,20 +209,32 @@ Each prompt that can lead to a public or persisted write repeats the approval ru
 │   │   ├── models_expense.py   Pydantic schemas (Expense, ExpenseItem…)
 │   │   ├── totp.py             TOTP 2FA logic and session JWT
 │   │   ├── validation.py       Shared validators (admin routes + MCP)
+│   │   ├── tracing.py          Cloud Trace export for the MCP SDK's built-in spans
 │   │   ├── mcp_server/         MCP server package
 │   │   │   ├── server.py       MCPServer construction, auth/transport settings, instructions
 │   │   │   ├── tools/          One module per tool domain — recipes, ingredients, images, social, expenses —
 │   │   │   │                   each exposing a TOOLS tuple and a register(mcp) function
-│   │   │   ├── wrapper.py      mcp_tool: domain errors → structured dicts, annotations, budgets, audit, idempotency
+│   │   │   ├── wrapper.py      mcp_tool: domain errors → structured dicts, annotations, outcome log,
+│   │   │   │                   and the call into the three modules below
+│   │   │   ├── rate_budgets.py Per-category rate limits (read / write / publish_social)
+│   │   │   ├── audit.py        Append-only record of every mutating call
+│   │   │   ├── idempotency.py  Replay cache for idempotency_key, so a retry is not a second write
+│   │   │   ├── schemas.py      Typed tool inputs that don't already live in models.py
 │   │   │   ├── resources.py    URI-addressed reads (recipe://, ingredient://, social-kit://, categories://, social://)
 │   │   │   └── prompts.py      Operator-chosen workflows (draft posts, review before publish, draft profiles)
 │   │   ├── mcp_auth.py         WorkOS OAuth token verification (resource server)
 │   │   ├── services/
 │   │   │   ├── recipes.py      Recipe domain logic shared by routes and MCP
+│   │   │   ├── assistant.py    Sous Chef prompt assembly, grounding, cache breakpoints
+│   │   │   ├── spokes.py       Per-question specialist rules the router picks between
+│   │   │   ├── ingredients.py  Ingredient profiles: normalisation, alias index, coverage, CRUD
+│   │   │   ├── knowledge.py    The retrievable corpus (profiles + every recipe's notes) and its cache
 │   │   │   └── uploads.py      GCS upload, signed URLs, content sniffing
 │   │   └── routes/
 │   │       ├── public.py       GET /api/recipes, /categories, /sitemap.xml, /feed.xml
 │   │       ├── admin.py        Admin recipe CRUD, image upload, supporter moderation
+│   │       ├── assistant.py    Sous Chef ask/feedback endpoints (streamed, metered)
+│   │       ├── me.py           Reader profile and entitlements
 │   │       ├── subscriptions.py Stripe checkout, webhooks, cancel flow
 │   │       ├── internal.py     Scheduler-invoked jobs (Google OIDC gated)
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
