@@ -30,7 +30,7 @@
     "undici": ">=7.28.1"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.51.1",
+    "@cloudflare/vite-plugin": "^1.54.7",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.0",
@@ -44,6 +44,6 @@
     "typescript": "^7.0.2",
     "vite": "^8.0.0",
     "vitest": "^4.1.0",
-    "wrangler": "^4.73.0"
+    "wrangler": "^4.131.0"
   }
 }
