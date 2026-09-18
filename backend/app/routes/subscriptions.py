@@ -882,23 +882,59 @@ async def cancel_confirm(body: CancelConfirmRequest):
     data = doc.to_dict()
     subscription_id = data.get("stripe_subscription_id")
 
+    now = datetime.now(timezone.utc)
+
     if subscription_id:
-    
+        # Cancel at period end, not immediately: the donor has already paid
+        # for the current month, and SupportPage's disclaimer promises them
+        # that month. Status stays "active" at Stripe until the period ends,
+        # so perks and the supporters listing survive until then — the
+        # customer.subscription.deleted webhook flips both when it lands.
+        # Idempotent, so a donor clicking the emailed link twice is harmless.
         try:
-            stripe.Subscription.cancel(subscription_id)
+            stripe.Subscription.modify(subscription_id, cancel_at_period_end=True)
         except stripe.InvalidRequestError:
             logger.warning("Stripe subscription already canceled (doc=%s)", doc.id)
 
-    db.collection("subscribers").document(doc.id).update({
-        "status": "canceled",
-        "updated_at": datetime.now(timezone.utc),
-    })
+        db.collection("subscribers").document(doc.id).update({
+            "cancel_at_period_end": True,
+            "updated_at": now,
+        })
+    else:
+        # No Stripe subscription to wind down — nothing will be billed, so
+        # there is no paid period to honour and the record closes now.
+        db.collection("subscribers").document(doc.id).update({
+            "status": "canceled",
+            "updated_at": now,
+        })
 
     # No Stripe event_id in this flow — it's a direct user action (a link
     # click), not webhook processing. keyed_hash lets repeated log lines
     # about the same person still correlate without logging their email.
-    logger.info("Subscription canceled via email confirmation (donor=%s)", keyed_hash(email))
-    return {"message": "Your subscription has been canceled. Thank you for your support!"}
+    logger.info(
+        "Subscription %s via email confirmation (donor=%s)",
+        "set to cancel at period end" if subscription_id else "canceled",
+        keyed_hash(email),
+    )
+
+    if not subscription_id:
+        return {"message": "Your subscription has been canceled. Thank you for your support!"}
+
+    # Name the date when we know it. Built from parts rather than strftime's
+    # %-d/%#d, which is platform-specific (Linux in production, Windows in dev).
+    period_end = data.get("current_period_end")
+    until = (
+        f"{period_end:%B} {period_end.day}, {period_end:%Y}"
+        if isinstance(period_end, datetime)
+        else None
+    )
+    ends = f"until {until}, the end of" if until else "until the end of"
+    return {
+        "message": (
+            f"Your recurring donation has been canceled. It stays active {ends} "
+            "the period you've already paid for. Thank you for your support!"
+        )
+    }
 
 
 # ── Linking a past donation to a Google account ──────────────────────────────

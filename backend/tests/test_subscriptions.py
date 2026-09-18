@@ -198,17 +198,55 @@ def test_cancel_request_sends_email(client, mock_db):
         mock_post.assert_called_once()
 
 def test_cancel_confirm_valid_token(client, mock_db, mock_stripe):
-    """Cancels Stripe subscription with valid token."""
+    """Cancels at period end — the donor keeps the month they already paid for."""
     with patch("app.routes.subscriptions.verify_cancel_token", return_value="test@example.com"):
         mock_doc = MagicMock()
         mock_doc.id = "sub_doc_1"
         mock_doc.to_dict.return_value = {"stripe_subscription_id": "sub_123"}
         mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream.return_value = iter([mock_doc])
-        
+
         response = client.post("/api/subscribe/cancel-confirm", json={"token": "valid_token"})
         assert response.status_code == 200
-        mock_stripe.Subscription.cancel.assert_called_once_with("sub_123")
+        mock_stripe.Subscription.modify.assert_called_once_with("sub_123", cancel_at_period_end=True)
+        mock_stripe.Subscription.cancel.assert_not_called()
         mock_db.collection.return_value.document.return_value.update.assert_called_once()
+
+
+def test_cancel_confirm_does_not_revoke_the_paid_period(client, mock_db, mock_stripe):
+    """SupportPage promises access until the period ends, so the local record
+    must NOT flip to canceled here — the subscription.deleted webhook does that
+    when the period actually runs out."""
+    with patch("app.routes.subscriptions.verify_cancel_token", return_value="test@example.com"):
+        mock_doc = MagicMock()
+        mock_doc.id = "sub_doc_1"
+        mock_doc.to_dict.return_value = {
+            "stripe_subscription_id": "sub_123",
+            "current_period_end": datetime(2026, 10, 1, tzinfo=timezone.utc),
+        }
+        mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream.return_value = iter([mock_doc])
+
+        response = client.post("/api/subscribe/cancel-confirm", json={"token": "valid_token"})
+        assert response.status_code == 200
+
+        written = mock_db.collection.return_value.document.return_value.update.call_args[0][0]
+        assert written["cancel_at_period_end"] is True
+        assert "status" not in written  # perks and the wall listing survive
+        assert "October 1, 2026" in response.json()["message"]
+
+
+def test_cancel_confirm_closes_a_record_with_no_stripe_subscription(client, mock_db, mock_stripe):
+    """Nothing will be billed, so there is no paid period to honour."""
+    with patch("app.routes.subscriptions.verify_cancel_token", return_value="test@example.com"):
+        mock_doc = MagicMock()
+        mock_doc.id = "sub_doc_1"
+        mock_doc.to_dict.return_value = {"stripe_subscription_id": None}
+        mock_db.collection.return_value.where.return_value.where.return_value.limit.return_value.stream.return_value = iter([mock_doc])
+
+        response = client.post("/api/subscribe/cancel-confirm", json={"token": "valid_token"})
+        assert response.status_code == 200
+        mock_stripe.Subscription.modify.assert_not_called()
+        written = mock_db.collection.return_value.document.return_value.update.call_args[0][0]
+        assert written["status"] == "canceled"
 
 def _supporters_query_mocks(sub_docs, don_docs):
     """Builds the two per-collection query-chain mocks list_supporters issues:
