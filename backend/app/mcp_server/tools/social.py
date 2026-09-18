@@ -135,7 +135,7 @@ _SOCIAL_KIT_DEFAULTS = {
         "No clickbait, no 'secret hack', no all-caps, at most one emoji per line, "
         "no health or nutrition claims."
     ),
-    "cta": "Full recipe on madeforseconds.com — link in bio.",
+    "cta": "Full recipe at the link in bio.",
     "hashtags_brand": "madeforseconds, homecooking",
     "hashtags_cuisine": "asianfood, malaysianfood, singaporefood, vietnamesefood, chinesefood, thaifood",
     "hashtags_niche": "laksa, hainanesechickenrice, bakkutteh, rendang, satay",
