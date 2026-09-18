@@ -939,20 +939,14 @@ HOME_PAGE = {
 ABOUT_PAGE = {
     "heading": "About MadeForSeconds",
     "body": (
-        "MadeForSeconds is where I keep and share the recipes I cook.\n\n"
-        "It started as a place to organize my own recipes so they didn't get lost in random notes, "
-        "screenshots, and half-written documents. Eventually it turned into this site.\n\n"
-        "My background is a bit all over the place. I spent most of my early working years in the food "
-        "and service industry starting at 16, mostly serving and bartending, with some time around kitchens "
-        "as well. Restaurants teach you a lot about food, but they also teach speed, repetition, and how to "
-        "handle chaos while people are hungry.\n\n"
-        "In my mid-20s I moved into software engineering and spent the next four years building applications. "
-        "More recently I've been moving deeper into cloud infrastructure.\n\n"
-        "This project sits somewhere in the overlap of those worlds. It's a place for recipes I want to keep "
-        "cooking and also a small technical playground where I can build something real.\n\n"
-        "The food here doesn't stick to one cuisine or style. Some recipes are quick things to make on a "
-        "random night. Others take time. If it tastes good and I want to make it again, it gets written down here.\n\n"
-        "No long life stories before the recipe. Just ingredients, steps, and food that works."
+        "MadeForSeconds is where I keep and share the recipes I actually cook.\n\n"
+        "It started because my recipes were scattered everywhere: notes, screenshots, text messages, bookmarks, and half-written documents. I wanted one place to keep the ones worth making again, so I built it.\n\n"
+        "Food has been part of my life a lot longer than software. I started working in restaurants at 16 and spent most of my early working years in the service industry, mostly serving and bartending, with some time around kitchens too. Restaurants teach you a lot beyond food. You learn how to move quickly, communicate clearly, improvise when something goes wrong, and keep things moving when everyone needs something at once.\n\n"
+        "In my mid-20s, I moved into software engineering. I spent the next several years building production applications, and eventually started MadeForSeconds as a way to combine both sides of my background.\n\n"
+        "Today, the site is part recipe collection and part product I get to continuously improve. I build the application, the publishing tools, the automation, and the infrastructure behind it. If something feels repetitive or annoying to manage, I usually end up finding a way to make it simpler.\n\n"
+        "The food itself doesn't follow one cuisine or style. Some recipes are quick weeknight meals. Others take an unreasonable amount of time because sometimes that's the fun part.\n\n"
+        "The only real requirement is that I'd make it again.\n\n"
+        "And there are no three-page life stories before the recipe. Just the food."
     ),
     "callout_title": "Why \"MadeForSeconds\"?",
     "callout_body": "Because the best compliment a dish can get is someone going back for another plate.",
