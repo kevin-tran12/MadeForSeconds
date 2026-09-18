@@ -240,7 +240,7 @@ Each prompt that can lead to a public or persisted write repeats the approval ru
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (1112 tests across 48 files)
+│   ├── tests/                  Pytest suite (1123 tests across 49 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -289,7 +289,7 @@ Each prompt that can lead to a public or persisted write repeats the approval ru
 
 **1. Clone and enter the repo**
 ```bash
-git clone https://github.com/YOUR_USERNAME/MadeForSeconds.git
+git clone https://github.com/kevin-tran12/MadeForSeconds.git
 cd MadeForSeconds
 ```
 
@@ -343,7 +343,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (1112 tests)
+npm run test:backend                    # Pytest (1123 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -481,14 +481,14 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (1112 tests, 48 files)
+### Backend — pytest (1123 tests, 49 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
 ```
 Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, social token rotation, log redaction, Cloud Trace export, MCP rate budgets, audit trail, and idempotency keys.
 
-### Frontend unit — vitest (143 tests, 22 files)
+### Frontend unit — vitest (147 tests, 23 files)
 ```bash
 npm run test:unit
 ```
@@ -589,7 +589,7 @@ gcloud logging read 'resource.labels.service_name="mfs-backend" AND textPayload:
 
 | Branch | Deployment |
 |--------|-----------|
-| `main` | Production — your custom domain |
+| `main` | Production — `madeforseconds.pages.dev` |
 | Any other branch | Preview — `<branch-name>.madeforseconds.pages.dev` |
 
 All `*.madeforseconds.pages.dev` preview URLs are pre-approved in the backend CORS config.

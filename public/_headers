@@ -2,7 +2,7 @@
 # Cloudflare reads this file natively when serving static assets — same
 # mechanism as public/_redirects. No application code is involved.
 #
-# Verify after deploy:  curl -sI https://madeforseconds.com | grep -i -E 'content-security|strict-transport|x-frame'
+# Verify after deploy:  curl -sI https://madeforseconds.pages.dev | grep -i -E 'content-security|strict-transport|x-frame'
 #
 # CSP notes — the non-obvious constraints, so nobody relaxes these by accident:
 #

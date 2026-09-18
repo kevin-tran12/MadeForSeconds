@@ -134,6 +134,7 @@ module "backend-service" {
   mcp_owner_subject      = var.mcp_owner_subject
   mcp_enforce_audience   = var.mcp_enforce_audience
   frontend_url           = var.frontend_url
+  resend_from            = var.resend_from
   alert_email            = var.alert_email
   instagram_user_id      = var.instagram_user_id
   instagram_access_token = var.instagram_access_token

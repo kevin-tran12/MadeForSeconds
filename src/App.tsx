@@ -9,6 +9,8 @@ import { HomePage } from './pages/HomePage'
 import { RecipesPage } from './pages/RecipesPage'
 import { RecipeDetailPage } from './pages/RecipeDetailPage'
 import { AboutPage } from './pages/AboutPage'
+import { PrivacyPage } from './pages/PrivacyPage'
+import { DisclaimerPage } from './pages/DisclaimerPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { SupportPage } from './pages/SupportPage'
 import { SupportSuccessPage } from './pages/SupportSuccessPage'
@@ -62,6 +64,8 @@ const router = createBrowserRouter([
           { path: 'recipes/', element: <RecipesPage /> },
           { path: 'recipes/:slug/', element: <RecipeDetailPage /> },
           { path: 'about/', element: <AboutPage /> },
+          { path: 'privacy/', element: <PrivacyPage /> },
+          { path: 'disclaimer/', element: <DisclaimerPage /> },
           { path: 'support/', element: <SupportPage /> },
           { path: 'support/success/', element: <SupportSuccessPage /> },
           { path: 'support/cancel/', element: <SupportCancelPage /> },

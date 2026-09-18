@@ -119,7 +119,7 @@ def mcp_db():
 @pytest.fixture
 def mock_admin():
     """Returns a mock admin email."""
-    return "admin@madeforseconds.com"
+    return "admin@example.com"
 
 
 @pytest.fixture

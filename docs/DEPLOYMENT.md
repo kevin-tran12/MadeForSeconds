@@ -51,6 +51,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `stripe_product_id` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `subscriber_jwt_secret` | 32+ character secret for cancel link JWTs |
 | `resend_api_key` | Resend API key for cancellation emails |
+| `resend_from` | (Optional) From: address for transactional email. Must be on a domain verified in Resend. Defaults to Resend's sandbox sender, which only delivers to the Resend account owner's own address — enough for the weekly usage report and ops alerts, but supporter mail will 403 until a domain is verified |
 | `anthropic_federation_rule_id`, `anthropic_organization_id`, `anthropic_service_account_id` | (Optional) The Sous Chef assistant's Anthropic Workload Identity Federation ids — plain values, not secrets. All blank keeps the feature off; set together, and only alongside `redis_url` (see [Sous Chef assistant](#sous-chef-assistant)). `anthropic_workspace_id` only when the rule spans more than one workspace |
 | `frontend_url` | Your production frontend URL (used in email links) |
 | `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
@@ -1259,6 +1260,7 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `STRIPE_PRODUCT_ID` | GCP Secret Manager | Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | GCP Secret Manager | Secret for signing cancel link JWTs (32+ chars) |
 | `RESEND_API_KEY` | GCP Secret Manager | Resend API key for cancellation emails |
+| `RESEND_FROM` | `terraform.tfvars → resend_from` | From: address for transactional email (not a secret — just the visible sender) |
 | `ANTHROPIC_FEDERATION_RULE_ID` | Plain env (Terraform, optional) | Anthropic federation rule the Sous Chef assistant exchanges Cloud Run's identity token under; blank keeps the feature off |
 | `ANTHROPIC_ORGANIZATION_ID` | Plain env (Terraform, optional) | Anthropic organization UUID (with the rule and service-account ids) |
 | `ANTHROPIC_SERVICE_ACCOUNT_ID` | Plain env (Terraform, optional) | Anthropic service account the minted token acts as |

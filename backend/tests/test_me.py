@@ -1,10 +1,12 @@
-"""Route tests for /api/me (reader profile + delete-my-data)."""
+"""Route tests for /api/me (reader profile, export-my-data, delete-my-data)."""
 
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
 from app.cache import cache
+from app.log_redaction import keyed_hash
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +80,79 @@ def test_delete_my_data(user_client, mock_db):
 
 def test_delete_my_data_requires_a_signed_in_reader(client, mock_db):
     assert client.delete("/api/me/data").status_code == 401
+
+
+# ── subject-access export ────────────────────────────────────────────────────
+
+def _doc(data):
+    doc = MagicMock()
+    doc.to_dict.return_value = data
+    return doc
+
+
+def test_export_my_data_returns_every_source(user_client, mock_db):
+    """The export gathers all five sources, in export_user_data's stream order:
+    assistant_feedback, subscribers, donations, donation_transactions."""
+    mock_db.get.return_value.exists = True
+    mock_db.get.return_value.to_dict.return_value = {
+        "created_at": datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc),
+        "answers_total": 3,
+    }
+    mock_db.stream.side_effect = [
+        iter([_doc({"rating": "up", "question": "why rest the dough?"})]),
+        iter([_doc({"email": "reader@example.com", "status": "active"})]),
+        iter([]),
+        iter([_doc({"gross_cents": 500, "currency": "usd"})]),
+    ]
+
+    response = user_client.get("/api/me/data")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["email"] == "reader@example.com"
+    assert body["profile"]["answers_total"] == 3
+    assert len(body["assistant_feedback"]) == 1
+    assert len(body["subscribers"]) == 1
+    assert body["donations"] == []
+    assert body["donation_transactions"][0]["gross_cents"] == 500
+
+
+def test_export_my_data_serialises_firestore_datetimes(user_client, mock_db):
+    """Firestore hands back datetimes; the response has to survive JSON."""
+    mock_db.get.return_value.exists = True
+    mock_db.get.return_value.to_dict.return_value = {
+        "created_at": datetime(2026, 9, 1, 12, 0, tzinfo=timezone.utc),
+    }
+    mock_db.stream.side_effect = [iter([]), iter([]), iter([]), iter([])]
+
+    body = user_client.get("/api/me/data").json()
+    assert body["profile"]["created_at"] == "2026-09-01T12:00:00+00:00"
+
+
+def test_export_my_data_is_empty_when_nothing_is_stored(user_client, mock_db):
+    _empty_streams(mock_db)
+    body = user_client.get("/api/me/data").json()
+    assert body["profile"] is None
+    assert body["assistant_feedback"] == []
+    assert body["donation_transactions"] == []
+
+
+def test_export_my_data_looks_up_only_the_callers_own_keys(user_client, mock_db):
+    """The uid and email hash come from the verified token, never the request."""
+    _empty_streams(mock_db)
+    user_client.get("/api/me/data")
+
+    # uid for the supporter records, keyed_hash(email) for feedback/ledger.
+    filters = [call.kwargs["filter"] for call in mock_db.where.call_args_list]
+    values = {f.value for f in filters}
+    assert "uid-reader" in values
+    assert keyed_hash("reader@example.com") in values
+    mock_db.document.assert_any_call("uid-reader")
+
+
+def test_export_my_data_requires_a_signed_in_reader(client, mock_db):
+    _empty_streams(mock_db)
+    assert client.get("/api/me/data").status_code == 401
 
 
 # ── cooking experience ───────────────────────────────────────────────────────

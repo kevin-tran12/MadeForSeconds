@@ -86,6 +86,13 @@ subscriber_jwt_secret = ""   # min 32 chars; production startup aborts if short
 # Cancellation confirmation emails.
 resend_api_key = ""
 
+# From: address for transactional email. Must be on a domain verified in the
+# Resend account. Leave blank to keep the default sandbox sender
+# (onboarding@resend.dev), which ONLY delivers to the Resend account owner's
+# own address — fine for the weekly usage report and ops alerts, but supporter
+# cancellation/donation-link mail will 403 until a real domain is verified.
+# resend_from = "MadeForSeconds <noreply@example.com>"
+
 # Sous Chef assistant (Claude). Authenticates with Anthropic Workload Identity
 # Federation — these are ids, not secrets; the Cloud Run service account's own
 # identity token is the credential. All three blank keeps the feature off.
