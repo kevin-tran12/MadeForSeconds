@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     stripe_product_id: str = ""  # Stripe Product ID for support subscription
     subscriber_jwt_secret: str = "dev-subscriber-secret-change-in-prod"
     resend_api_key: str = ""  # Resend API key for sending cancellation emails
+    # Sender for every outbound transactional email. Resend only accepts a
+    # `from` on a domain verified in the account; the default is Resend's
+    # always-verified sandbox sender, which can ONLY deliver to the account
+    # owner's own address. That is enough for owner-directed mail (the weekly
+    # usage report and ops alerts, both sent to alert_email) but NOT for mail
+    # to supporters — set this to an address on a verified domain before
+    # relying on the cancellation/donation-link flows.
+    resend_from: str = "MadeForSeconds <onboarding@resend.dev>"
     frontend_url: str = "http://localhost:5173"  # Frontend URL for building links in emails
     # Instagram (Meta Graph API, "Instagram API with Instagram Login" path).
     instagram_user_id: str = ""  # IG Business/Creator account numeric id

@@ -20,14 +20,27 @@ async def send_email(to: str, subject: str, html: str) -> None:
         return
 
     async with httpx.AsyncClient() as client:
-        await client.post(
+        resp = await client.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {settings.resend_api_key}"},
             json={
-                "from": "MadeForSeconds <noreply@madeforseconds.com>",
+                "from": settings.resend_from,
                 "to": [to],
                 "subject": subject,
                 "html": html,
             },
             timeout=10.0,
+        )
+
+    # Sending stays best-effort — callers treat email as non-fatal (see
+    # subscriptions._alert) — but a rejection must not pass silently. Resend
+    # answers 403 for an unverified `from` domain, which previously looked
+    # identical to success from here.
+    if resp.status_code >= 400:
+        logger.error(
+            "Resend rejected email to %s (%s): %s %s",
+            to,
+            subject,
+            resp.status_code,
+            resp.text,
         )

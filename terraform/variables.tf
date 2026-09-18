@@ -192,6 +192,16 @@ variable "frontend_url" {
   default     = "https://madeforseconds.pages.dev"
 }
 
+# There is no custom domain, so no sender domain is verified in Resend. The
+# default is Resend's sandbox sender, which only delivers to the account
+# owner's own address — enough for the weekly usage report and ops alerts,
+# not for supporter mail. Point this at a verified domain when one exists.
+variable "resend_from" {
+  description = "From: address for transactional email; must be on a domain verified in Resend"
+  type        = string
+  default     = "MadeForSeconds <onboarding@resend.dev>"
+}
+
 # ─── Instagram (MCP publishing) ─────────────────────────────────────────────
 
 variable "instagram_user_id" {
