@@ -30,6 +30,14 @@ export function Footer() {
         {/* Copyright — truly centered */}
         <p className="mb-5 text-center text-xs text-content-muted">
           &copy; {new Date().getFullYear()} MadeForSeconds · Recipes worth making again.
+          {' · '}
+          <Link to="/privacy/" className="text-content-muted hover:text-content-body transition-colors underline">
+            Privacy
+          </Link>
+          {' · '}
+          <Link to="/disclaimer/" className="text-content-muted hover:text-content-body transition-colors underline">
+            Disclaimer
+          </Link>
         </p>
 
         <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
