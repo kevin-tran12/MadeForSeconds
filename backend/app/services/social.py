@@ -24,7 +24,14 @@ logger = logging.getLogger(__name__)
 
 STATUS_COLLECTION = "config"
 STATUS_DOC = "social"
+POSTS_COLLECTION = "social_posts"
 _MAX_ERROR_CHARS = 300
+# Captions are the operator's own copy, sometimes long and sometimes personal.
+# The history only needs enough to recognise a post, so store a prefix and the
+# real length rather than the whole thing — the same reasoning that caps
+# recorded errors above.
+_MAX_CAPTION_PREVIEW_CHARS = 80
+_DEFAULT_RECENT_POSTS = 5
 
 # name -> (is_configured, refresh). TikTok slots in here when it lands. Both
 # are resolved lazily on purpose: settings are read at call time, and the
@@ -41,6 +48,56 @@ def _record(db, platform: str, entry: dict) -> None:
         db.collection(STATUS_COLLECTION).document(STATUS_DOC).set({platform: entry}, merge=True)
     except Exception:
         logger.warning("social: could not record %s status", platform, exc_info=True)
+
+
+def record_post(db, platform: str, entry: dict, now: datetime | None = None) -> None:
+    """Append one publish attempt to ``social_posts`` and update ``config/social``.
+
+    Best-effort, exactly like ``_record``: a history write must never turn a
+    post that actually reached Instagram into a failure the caller reports.
+    An unrecorded post is a gap in the log; a raised exception here would be
+    a lie about what happened.
+
+    ``entry`` carries ``ok`` plus whatever the attempt produced (media_id,
+    permalink, slug) or ``error``. A ``caption`` is replaced by its length and
+    first 80 characters before anything is written.
+    """
+    now = now or datetime.now(timezone.utc)
+    caption = entry.pop("caption", None)
+    record = {**entry, "platform": platform, "at": now}
+    if caption is not None:
+        record["caption_chars"] = len(caption)
+        record["caption_preview"] = caption[:_MAX_CAPTION_PREVIEW_CHARS]
+    try:
+        db.collection(POSTS_COLLECTION).document().set(record)
+        if entry.get("ok"):
+            _record(
+                db,
+                platform,
+                {
+                    "last_post_at": now,
+                    "last_post_media_id": entry.get("media_id"),
+                    "last_post_permalink": entry.get("permalink"),
+                },
+            )
+    except Exception:
+        logger.warning("social: could not record %s post", platform, exc_info=True)
+
+
+def recent_posts(db, limit: int = _DEFAULT_RECENT_POSTS) -> list[dict]:
+    """The most recent publish attempts, newest first. Never raises: an
+    unreadable history must not take down the status tool that reports it."""
+    try:
+        docs = (
+            db.collection(POSTS_COLLECTION)
+            .order_by("at", direction="DESCENDING")
+            .limit(limit)
+            .stream()
+        )
+        return [_jsonable(doc.to_dict() or {}) for doc in docs]
+    except Exception:
+        logger.warning("social: could not read post history", exc_info=True)
+        return []
 
 
 def refresh_all(db, now: datetime | None = None) -> dict:
@@ -82,7 +139,13 @@ def _jsonable(value):
 
 
 def status(db) -> dict:
-    """Per-platform configuration and the last recorded refresh outcome."""
+    """Per-platform configuration and the last recorded refresh outcome.
+
+    Deliberately still keyed by platform name only: publish history is a
+    sibling of this mapping, not an entry in it, so the ``social_status``
+    tool composes the two rather than this returning a "recent_posts"
+    key that would read like another platform.
+    """
     snap = db.collection(STATUS_COLLECTION).document(STATUS_DOC).get()
     data = (snap.to_dict() or {}) if getattr(snap, "exists", False) else {}
     return {

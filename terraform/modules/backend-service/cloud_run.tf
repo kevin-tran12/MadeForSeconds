@@ -218,6 +218,15 @@ resource "google_cloud_run_v2_service" "backend" {
         value = var.frontend_url
       }
 
+      # RESEND_FROM — sender for transactional email. Not a secret: Resend
+      # authenticates with RESEND_API_KEY above, this is just the visible
+      # From: address. Must be on a domain verified in the Resend account, or
+      # Resend answers 403 and nothing is delivered.
+      env {
+        name  = "RESEND_FROM"
+        value = var.resend_from
+      }
+
       # ALERT_EMAIL — destination for the weekly usage report (same address as
       # the budget/uptime/error alerts configured in terraform/billing.tf and
       # terraform/logging_alerts.tf)

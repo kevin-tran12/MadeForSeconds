@@ -73,6 +73,12 @@ variable "frontend_url" {
   type        = string
 }
 
+variable "resend_from" {
+  description = "From: address for transactional email; must be on a domain verified in Resend"
+  type        = string
+  default     = "MadeForSeconds <onboarding@resend.dev>"
+}
+
 variable "alert_email" {
   description = "Destination for the weekly usage report"
   type        = string

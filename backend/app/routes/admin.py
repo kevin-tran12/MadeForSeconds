@@ -3,8 +3,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, File
 from google.cloud import storage
+from pydantic import ValidationError
 
 from ..auth import require_admin
 from ..cache import cache
@@ -12,6 +13,7 @@ from ..config import settings
 from ..firestore import get_db
 from ..models import AdminRecipe, PageContent, RecipeCreate, RecipeUpdate, ReceiptDeleteBody
 from ..routes.subscriptions import compute_public_listing
+from ..services import ingredients as ingredient_service
 from ..services import receipt_ledger
 from ..services import recipes as recipe_service
 from ..services import uploads
@@ -419,3 +421,79 @@ async def admin_list_assistant_feedback(limit: int = 50):
         })
     rows.sort(key=lambda r: r["rating"] != "down")  # stable: down first, newest within each
     return rows
+
+
+# ── Ingredient knowledge base ────────────────────────────────────────────────
+# The MCP tools (app/mcp_server/tools/ingredients.py) are the primary authoring
+# path — this is the minimal admin-UI equivalent, both backed by the same
+# services/ingredients.py so a profile behaves identically regardless of which
+# path wrote it.
+
+@router.get("/ingredients/coverage")
+async def admin_ingredients_coverage():
+    """Every distinct ingredient across the published catalogue, with which
+    recipes use it and whether an owner-authored profile covers it."""
+    db = get_db()
+    # Explicit order (recipes, then profiles) — Python evaluates function
+    # arguments left to right, so nesting these calls would silently reverse
+    # it. Same fix as mcp_server/tools/ingredients.py::list_ingredients.
+    docs = recipe_service.get_all_published_docs(db)
+    profiles = ingredient_service.list_profiles(db)
+    return ingredient_service.coverage(profiles, docs)
+
+
+@router.get("/ingredients")
+async def admin_list_ingredients():
+    db = get_db()
+    return ingredient_service.list_profiles(db)
+
+
+@router.get("/ingredients/{slug}")
+async def admin_get_ingredient(slug: str):
+    db = get_db()
+    try:
+        profile = ingredient_service.get_profile(db, slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Ingredient not found")
+    return profile
+
+
+@router.put("/ingredients/{slug}")
+async def admin_upsert_ingredient(slug: str, body: dict, response: Response):
+    """body is the raw (uncleaned) profile fields — services/ingredients.py
+    cleans and validates them, the same as the upsert_ingredient MCP tool."""
+    db = get_db()
+    try:
+        profile, created = ingredient_service.upsert_profile(db, slug, body, source="admin")
+    except ingredient_service.AliasConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"key": exc.key, "existing_slug": exc.existing_slug},
+        )
+    except ValidationError as exc:
+        # exc.errors() is not JSON-safe as-is: pydantic includes the raw
+        # exception object in a custom validator's error["ctx"] (our own
+        # combined-prose-cap check in models.py), which json.dumps cannot
+        # serialise. Same {field, message, type} shape the MCP tools' own
+        # tool_errors decorator returns for a validation error.
+        raise HTTPException(status_code=422, detail=[
+            {"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"], "type": e["type"]}
+            for e in exc.errors()
+        ])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    response.status_code = 201 if created else 200
+    return profile
+
+
+@router.delete("/ingredients/{slug}", status_code=204)
+async def admin_delete_ingredient(slug: str):
+    db = get_db()
+    try:
+        deleted = ingredient_service.delete_profile(db, slug)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Ingredient not found")

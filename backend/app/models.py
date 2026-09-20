@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Input bounds — generous for real recipes, tight enough that a malformed or
 # hostile payload can't balloon a Firestore doc toward its 1 MiB limit.
@@ -34,6 +34,66 @@ class NutritionEntry(BaseModel):
 class RecipeSecret(BaseModel):
     title: Annotated[str, Field(max_length=200)]
     body: LongText
+
+
+# The seven prose fields of an ingredient profile, and the cap on their
+# combined length — the block services/knowledge.py renders straight into
+# the prompt, so this is a token-cost knob, not just a Firestore-doc-size
+# guard. ~1,000 chars is ~180 tokens typical, ~250 worst case for a profile
+# that uses every field to its individual max.
+PROFILE_PROSE_FIELDS = ("what_it_is", "role", "substitutions", "buying", "storage", "mistakes", "allergens")
+MAX_PROFILE_CHARS = 1_000
+
+
+class IngredientProfileIn(BaseModel):
+    """An owner-authored ingredient profile: what it is, its role in a dish,
+    what stands in for it, buying, storage, common mistakes, allergens.
+
+    Callers (services/ingredients.py) run every string through
+    services.users.clean_text before validating here, the same convention
+    every other free-text field in this app follows — this model only
+    enforces shape and length, it does not sanitise.
+    """
+
+    name: Annotated[str, Field(min_length=1, max_length=80)]
+    aliases: Annotated[list[Annotated[str, Field(max_length=60)]], Field(max_length=12)] = []
+    what_it_is: Annotated[str, Field(min_length=1, max_length=300)]
+    role: Annotated[str, Field(max_length=200)] = ""  # fat / acid / umami / aromatic / texture
+    substitutions: Annotated[str, Field(max_length=400)] = ""  # what works, what doesn't, what changes
+    buying: Annotated[str, Field(max_length=250)] = ""
+    storage: Annotated[str, Field(max_length=200)] = ""
+    mistakes: Annotated[str, Field(max_length=250)] = ""
+    allergens: Annotated[str, Field(max_length=100)] = ""
+
+    @model_validator(mode="after")
+    def _normalise_aliases_and_cap_prose(self) -> "IngredientProfileIn":
+        # Dedup case-insensitively, drop blanks, and drop anything that's
+        # just the name spelled differently — a "garlic" profile listing
+        # "garlic" as its own alias buys nothing and doubles up in coverage.
+        seen = {self.name.strip().casefold()}
+        deduped: list[str] = []
+        for alias in self.aliases:
+            alias = alias.strip()
+            key = alias.casefold()
+            if alias and key not in seen:
+                seen.add(key)
+                deduped.append(alias)
+        self.aliases = deduped
+
+        total = sum(len(getattr(self, field)) for field in PROFILE_PROSE_FIELDS)
+        if total > MAX_PROFILE_CHARS:
+            raise ValueError(
+                f"profile prose is {total} chars, over the {MAX_PROFILE_CHARS}-char cap "
+                "(this block is rendered directly into the assistant's prompt)"
+            )
+        return self
+
+
+class IngredientProfile(IngredientProfileIn):
+    slug: str
+    created_at: datetime
+    updated_at: datetime
+    updated_via: Literal["mcp", "admin"]
 
 
 class RecipeComponent(BaseModel):

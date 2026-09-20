@@ -1,8 +1,8 @@
-"""Tests for the MCP tool surface (app/mcp_server.py).
+"""Tests for the MCP tool surface (app/mcp_server/).
 
-Tools are called directly as functions — FastMCP's @mcp.tool() registers and
-returns the original callable, and _tool_errors translates domain errors into
-structured dicts.
+Tools are called directly as functions — the mcp SDK 2.x's @mcp.tool() registers
+and returns the original callable, and wrapper.mcp_tool translates domain
+errors into structured dicts.
 """
 
 from datetime import datetime, timezone
@@ -11,18 +11,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app import mcp_server
-from app.services import uploads
-
-
-def _chain_db():
-    mock = MagicMock()
-    mock.collection.return_value = mock
-    mock.document.return_value = mock
-    mock.where.return_value = mock
-    mock.order_by.return_value = mock
-    mock.limit.return_value = mock
-    mock.select.return_value = mock
-    return mock
+from app.mcp_server.tools import expenses as expenses_tools
+from app.services import instagram, uploads
 
 
 def _recipe_data(**over):
@@ -55,13 +45,16 @@ def _doc(id="doc-id", exists=True, **data):
 
 
 @pytest.fixture
-def db():
-    mock = _chain_db()
-    with (
-        patch("app.mcp_server.get_db", return_value=mock),
-        patch("app.services.recipes.cache"),
-    ):
-        yield mock
+def db(mcp_db):
+    """The pre-split fixture name, kept so every test below reads unchanged.
+
+    mcp_db (conftest.py) patches get_db in each of the four tools/*.py
+    modules that call it, plus the recipe and ingredient services' own
+    cache — the same combination this fixture's own single
+    app.mcp_server.get_db patch provided before the mcp_server package
+    split.
+    """
+    return mcp_db
 
 
 # ── create_recipe ─────────────────────────────────────────────────────────────
@@ -116,6 +109,28 @@ class TestCreateRecipeTool:
         assert result["error"] == "invalid_categories"
         assert result["invalid"] == ["desserts"]
         assert result["valid_categories"] == ["mains", "sides"]
+
+    def test_six_components_is_a_validation_error_not_a_silent_truncation(self, db):
+        """S10: create_recipe used to pass `components[:5]` to RecipeCreate,
+        silently dropping a 6th component instead of rejecting it. Now the
+        full list reaches RecipeCreate as-is, so its own Field(max_length=5)
+        does the rejecting."""
+        components = [{"title": f"Part {i}"} for i in range(6)]
+
+        result = mcp_server.create_recipe(title="X", components=components)
+
+        assert result["error"] == "validation_error"
+        assert any(e["field"] == "components" for e in result["field_errors"])
+        db.set.assert_not_called()
+
+    def test_five_components_is_accepted(self, db):
+        db.stream.return_value = iter([])
+        db.id = "new-id"
+
+        components = [{"title": f"Part {i}"} for i in range(5)]
+        result = mcp_server.create_recipe(title="X", components=components)
+
+        assert "error" not in result
 
 
 # ── update_recipe ─────────────────────────────────────────────────────────────
@@ -254,6 +269,109 @@ class TestListAndGetTools:
         assert result["count"] == 1
         assert result["recipes"][0]["id"] == "b"
 
+
+# ── list_recipes cursor pagination (S7) ─────────────────────────────────────
+
+class TestListRecipesPagination:
+    def test_first_page_without_cursor_sets_next_cursor_when_more_exist(self, db):
+        # limit=2 -> fetch_limit=3; 3 docs returned means a 3rd page exists.
+        docs = [
+            _doc(id=f"r{i}", created_at=datetime(2026, 1, 10 - i, tzinfo=timezone.utc))
+            for i in range(3)
+        ]
+        db.stream.return_value = iter(docs)
+
+        result = mcp_server.list_recipes(limit=2)
+
+        assert [r["id"] for r in result["recipes"]] == ["r0", "r1"]
+        assert result["exhausted"] is False
+        assert result["next_cursor"] == "2026-01-09T00:00:00+00:00"  # r1's created_at
+
+    def test_a_two_page_walk_yields_disjoint_ids_and_ends_with_no_cursor(self, db):
+        page1 = [_doc(id=f"r{i}", created_at=datetime(2026, 1, 10 - i, tzinfo=timezone.utc)) for i in range(3)]
+        page2 = [_doc(id="r3", created_at=datetime(2026, 1, 6, tzinfo=timezone.utc))]
+        db.stream.side_effect = [iter(page1), iter(page2)]
+
+        first = mcp_server.list_recipes(limit=2)
+        assert [r["id"] for r in first["recipes"]] == ["r0", "r1"]
+        assert first["next_cursor"] is not None
+
+        second = mcp_server.list_recipes(limit=2, cursor=first["next_cursor"])
+        assert [r["id"] for r in second["recipes"]] == ["r3"]
+        assert second["next_cursor"] is None
+        assert second["exhausted"] is True
+
+        first_ids = {r["id"] for r in first["recipes"]}
+        second_ids = {r["id"] for r in second["recipes"]}
+        assert first_ids.isdisjoint(second_ids)
+
+    def test_invalid_cursor_is_rejected_before_any_query(self, db):
+        result = mcp_server.list_recipes(cursor="not-a-real-cursor")
+
+        assert result["error"] == "invalid_request"
+        db.stream.assert_not_called()
+
+    def test_search_finds_a_match_only_on_the_second_scanned_page(self, db):
+        # limit=2 -> page_fetch_limit = min(2*3, 100) = 6. A full, non-matching
+        # first page must not stop the scan — it should continue to page 2.
+        page1 = [
+            _doc(id=f"a{i}", title=f"Tom Yum {i}", created_at=datetime(2026, 1, 20 - i, tzinfo=timezone.utc))
+            for i in range(6)
+        ]
+        page2 = [_doc(id="b0", title="Pho", created_at=datetime(2026, 1, 13, tzinfo=timezone.utc))]
+        db.stream.side_effect = [iter(page1), iter(page2)]
+
+        result = mcp_server.list_recipes(search="pho", limit=2)
+
+        assert result["count"] == 1
+        assert result["recipes"][0]["id"] == "b0"
+        assert db.stream.call_count == 2
+
+    def test_search_marks_exhausted_when_the_scanned_page_is_short(self, db):
+        docs = [_doc(id="a0", title="Pho", created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))]
+        db.stream.return_value = iter(docs)  # fewer than page_fetch_limit -> exhausted
+
+        result = mcp_server.list_recipes(search="pho", limit=5)
+
+        assert result["exhausted"] is True
+        assert result["next_cursor"] is None
+
+
+# ── _resolve_recipe_slugs chunking (S7) ─────────────────────────────────────
+
+class TestResolveRecipeSlugsChunking:
+    def test_31_slugs_issues_two_where_calls(self, db):
+        db.stream.side_effect = [iter([]), iter([])]
+
+        expenses_tools._resolve_recipe_slugs([f"slug-{i}" for i in range(31)])
+
+        assert db.where.call_count == 2
+
+    def test_more_than_100_distinct_slugs_is_rejected(self, db):
+        with pytest.raises(ValueError, match="too many distinct recipe_slug"):
+            expenses_tools._resolve_recipe_slugs([f"slug-{i}" for i in range(101)])
+        db.where.assert_not_called()
+
+    def test_duplicate_slugs_are_deduplicated_before_chunking(self, db):
+        db.stream.return_value = iter([])
+
+        expenses_tools._resolve_recipe_slugs(["same-slug"] * 50)
+
+        # 50 duplicates collapse to 1 distinct slug -> a single chunk.
+        assert db.where.call_count == 1
+
+    def test_results_from_every_chunk_are_merged(self, db):
+        chunk1_doc = _doc(id="r1", slug="slug-0")
+        chunk2_doc = _doc(id="r2", slug="slug-30")
+        db.stream.side_effect = [iter([chunk1_doc]), iter([chunk2_doc])]
+
+        result = expenses_tools._resolve_recipe_slugs(
+            [f"slug-{i}" for i in range(30)] + ["slug-30"]
+        )
+
+        assert result["slug-0"] == ("r1", "Test Recipe")
+        assert result["slug-30"] == ("r2", "Test Recipe")
+
     def test_get_recipe_by_id(self, db):
         db.get.return_value = _doc()
         result = mcp_server.get_recipe(recipe_id="doc-id")
@@ -315,7 +433,7 @@ class TestRequestImageUpload:
             "expires_in_seconds": 900,
         }
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url", return_value=signed) as signer,
         ):
             mock_settings.is_dev = False
@@ -341,7 +459,7 @@ class TestRequestImageUpload:
         applied manually and separately, so a revision can genuinely reach
         production with this unset."""
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url") as signer,
         ):
             mock_settings.is_dev = False
@@ -356,7 +474,7 @@ class TestRequestImageUpload:
 
     def test_raises_in_production_when_public_bucket_not_configured(self):
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url") as signer,
         ):
             mock_settings.is_dev = False
@@ -370,7 +488,7 @@ class TestRequestImageUpload:
 
     def test_raises_in_production_when_receipts_bucket_not_configured(self):
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url") as signer,
         ):
             mock_settings.is_dev = False
@@ -394,7 +512,7 @@ class TestRequestImageUpload:
     def test_production_receipt_goes_to_private_bucket(self):
         signed = {"upload_url": "u", "method": "PUT", "required_headers": {}, "expires_in_seconds": 900}
         with (
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.mcp_server.tools.images.settings") as mock_settings,
             patch("app.services.uploads.signed_put_url", return_value=signed) as signer,
         ):
             mock_settings.is_dev = False
@@ -433,7 +551,7 @@ class TestUploadImageFromUrl:
     def test_storage_misconfiguration_surfaces_as_internal_not_invalid_request(self):
         """A missing bucket is a server problem, not something the caller
         could fix by adjusting its input — distinct from the ValueError case
-        above, which _tool_errors reports as invalid_request."""
+        above, which mcp_tool reports as invalid_request."""
         with patch(
             "app.services.uploads.fetch_image_to_gcs",
             side_effect=uploads.StorageNotConfiguredError("GCS_BUCKET_NAME is not configured"),
@@ -526,6 +644,65 @@ class TestCreateExpenseReceiptUrl:
         assert result["receipt_uploaded"] is False
         assert result["item_count"] == 1
 
+    def test_changed_by_defaults_to_mcp_without_a_client_id(self, db):
+        """S8: no OAuth context in this test environment, matching dev
+        mode's own unauthenticated MCP server — changed_by falls back to
+        the bare "mcp" literal, not a crash or an empty string."""
+        mcp_server.create_expense(**self._BASE)
+        revision = db.transaction.return_value.set.call_args_list[1][0][1]
+        assert revision["changed_by"] == "mcp"
+
+    def test_changed_by_carries_the_client_id_when_authenticated(self, db):
+        from types import SimpleNamespace
+        with patch(
+            "app.mcp_server.wrapper.get_access_token",
+            return_value=SimpleNamespace(client_id="claude-code", subject=None),
+        ):
+            mcp_server.create_expense(**self._BASE)
+        revision = db.transaction.return_value.set.call_args_list[1][0][1]
+        assert revision["changed_by"] == "mcp:claude-code"
+
+
+# ── create_expense typed items (S10) ────────────────────────────────────────
+
+class TestCreateExpenseTypedItems:
+    _BASE = dict(
+        date="2026-03-08",
+        vendor="Test Market",
+        raw_subtotal=1000,
+        raw_tax=80,
+        raw_total=1080,
+    )
+
+    def test_missing_required_field_is_a_validation_error(self, db):
+        """items is typed list[ExpenseItemInput] in the signature, but a
+        direct call (like every test in this file) still passes plain
+        dicts — the tool re-validates explicitly, which is what actually
+        catches a malformed item, not the type hint itself. Two items, only
+        the second broken, to also confirm the error names the right one
+        (index 1) rather than losing that information."""
+        result = mcp_server.create_expense(
+            **self._BASE,
+            items=[
+                {"name": "Fine", "unit_price": 100, "total_price": 100},
+                {"quantity": 1, "unit_price": 100, "total_price": 100},  # missing "name"
+            ],
+        )
+
+        assert result["error"] == "validation_error"
+        assert any(e["field"] == "1.name" for e in result["field_errors"])
+        db.transaction.return_value.set.assert_not_called()
+
+    def test_unit_price_and_total_price_default_to_zero(self, db):
+        """Matches the exact pre-S10 behavior (item.get("unit_price", 0)) —
+        these two fields were never required, only name was."""
+        result = mcp_server.create_expense(**self._BASE, items=[{"name": "Mystery item"}])
+
+        assert "error" not in result
+        written = db.transaction.return_value.set.call_args_list[0][0][1]
+        assert written["items"][0]["unit_price"] == 0
+        assert written["items"][0]["total_price"] == 0
+
 
 # ── publish_instagram_post ────────────────────────────────────────────────────
 
@@ -539,22 +716,22 @@ class TestPublishInstagramPost:
         assert result["message"] == "Posted to Instagram."
 
     def test_instagram_error_maps_to_instagram_dict(self):
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
-            mock_pub.side_effect = mcp_server.instagram.InstagramError("API failure")
+        with patch("app.services.instagram.publish_image") as mock_pub:
+            mock_pub.side_effect = instagram.InstagramError("API failure")
             result = mcp_server.publish_instagram_post("https://example.com/img.jpg")
         assert result["error"] == "instagram"
         assert "API failure" in result["message"]
 
     def test_instagram_auth_error_maps_to_instagram_auth_dict(self):
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
-            mock_pub.side_effect = mcp_server.instagram.InstagramError(
+        with patch("app.services.instagram.publish_image") as mock_pub:
+            mock_pub.side_effect = instagram.InstagramError(
                 "bad token", auth=True
             )
             result = mcp_server.publish_instagram_post("https://example.com/img.jpg")
         assert result["error"] == "instagram_auth"
 
     def test_value_error_maps_to_invalid_request(self):
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+        with patch("app.services.instagram.publish_image") as mock_pub:
             mock_pub.side_effect = ValueError("image_url must be a public https URL")
             result = mcp_server.publish_instagram_post("http://not-https.com/img.jpg")
         assert result["error"] == "invalid_request"
@@ -566,7 +743,7 @@ class TestPublishInstagramPost:
 class TestPublishRecipeToInstagram:
     def test_recipe_with_image_returns_permalink(self, db):
         db.stream.return_value = iter([_doc()])
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+        with patch("app.services.instagram.publish_image") as mock_pub:
             mock_pub.return_value = {
                 "id": "ig-123",
                 "permalink": "https://www.instagram.com/p/abc/",
@@ -580,8 +757,8 @@ class TestPublishRecipeToInstagram:
     def test_auto_caption_contains_title_and_link(self, db):
         db.stream.return_value = iter([_doc()])
         with (
-            patch("app.mcp_server.instagram.publish_image") as mock_pub,
-            patch("app.mcp_server.settings") as mock_settings,
+            patch("app.services.instagram.publish_image") as mock_pub,
+            patch("app.mcp_server.tools.social.settings") as mock_settings,
         ):
             mock_settings.frontend_url = "https://madeforseconds.com"
             mock_pub.return_value = {"id": "ig-123", "permalink": ""}
@@ -594,7 +771,7 @@ class TestPublishRecipeToInstagram:
 
     def test_explicit_caption_overrides_auto_caption(self, db):
         db.stream.return_value = iter([_doc()])
-        with patch("app.mcp_server.instagram.publish_image") as mock_pub:
+        with patch("app.services.instagram.publish_image") as mock_pub:
             mock_pub.return_value = {"id": "ig-123", "permalink": ""}
             mcp_server.publish_recipe_to_instagram(
                 slug="test-recipe", caption="My custom caption"
@@ -647,7 +824,7 @@ def _pages_doc(exists=True, **data):
 class TestSocialKit:
     def test_defaults_apply_when_no_social_page_exists(self, db):
         db.get.side_effect = [_doc(id="r1", published=True, categories=["Mains"], labels=["Chicken Rice"]), _pages_doc(exists=False)]
-        with patch("app.mcp_server.settings") as s:
+        with patch("app.mcp_server.tools.social.settings") as s:
             s.frontend_url = "https://madeforseconds.com/"
             kit = mcp_server.get_social_kit(recipe_id="r1")
         assert kit["recipe"]["url"] == "https://madeforseconds.com/recipes/test-recipe/"
@@ -664,7 +841,7 @@ class TestSocialKit:
             _doc(id="r1", published=True),
             _pages_doc(tone="Cheeky and warm", hashtags_brand="MadeForSeconds, #Home Cooking, madeforseconds, ", do=""),
         ]
-        with patch("app.mcp_server.settings") as s:
+        with patch("app.mcp_server.tools.social.settings") as s:
             s.frontend_url = "https://madeforseconds.com"
             kit = mcp_server.get_social_kit(slug="test-recipe") if False else mcp_server.get_social_kit(recipe_id="r1")
         assert kit["brand_voice"]["tone"] == "Cheeky and warm"
@@ -677,7 +854,272 @@ class TestSocialKit:
         assert "error" in result
 
     def test_social_status_passes_through_the_refresh_record(self, db):
-        with patch("app.mcp_server.social.status", return_value={"instagram": {"configured": True, "expires_at": "2026-11-01T00:00:00+00:00"}}):
+        with patch("app.services.social.status", return_value={"instagram": {"configured": True, "expires_at": "2026-11-01T00:00:00+00:00"}}):
             result = mcp_server.social_status()
         assert result["platforms"]["instagram"]["expires_at"].startswith("2026-11-01")
         assert "1st and the 15th" in result["refresh_schedule"]
+
+
+# ── Ingredient knowledge tools ──────────────────────────────────────────────
+
+def _profile_doc(slug, name, exists=True, **over):
+    doc = MagicMock()
+    doc.id = slug
+    doc.exists = exists
+    data = {
+        "name": name, "aliases": [], "what_it_is": "x", "role": "", "substitutions": "",
+        "buying": "", "storage": "", "mistakes": "", "allergens": "",
+    }
+    data.update(over)
+    doc.to_dict.return_value = data
+    return doc
+
+
+def _published_recipe_doc(slug, title, ingredient_items):
+    doc = MagicMock()
+    doc.id = slug
+    doc.to_dict.return_value = {
+        "slug": slug, "title": title, "published": True,
+        "ingredients": [{"item": item} for item in ingredient_items],
+        "components": [], "secrets": [], "about": "", "sous_chef_notes": "",
+        "created_at": None, "updated_at": None,
+    }
+    return doc
+
+
+class TestIngredientTools:
+    @pytest.mark.parametrize("tool_call", [
+        lambda: mcp_server.get_ingredient(slug="pork/belly"),
+        lambda: mcp_server.upsert_ingredient(name="X", slug="pork/belly", what_it_is="y"),
+        lambda: mcp_server.delete_ingredient("pork/belly"),
+    ], ids=["get_ingredient", "upsert_ingredient", "delete_ingredient"])
+    def test_every_slug_taking_tool_rejects_a_path_injection_shaped_slug(self, db, tool_call):
+        """services/ingredients.py's _require_safe_slug guard (PR #128) fires
+        before any Firestore call — proving it protects these tools too,
+        not just direct service callers, since a slug here comes straight
+        from the MCP caller's own arguments."""
+        result = tool_call()
+        assert result["error"] == "invalid_request"
+        db.set.assert_not_called()
+        db.delete.assert_not_called()
+
+    def test_list_ingredients_missing_by_default(self, db):
+        recipe_docs = [_published_recipe_doc("ramen", "Tonkotsu Ramen", ["pork belly, skin-on", "garlic cloves"])]
+        profile_docs = [_profile_doc("garlic", "Garlic")]
+        # list_ingredients streams recipes (get_all_published_docs) first,
+        # then profiles (list_profiles) — see its own comment on the order.
+        db.stream.side_effect = [iter(recipe_docs), iter(profile_docs)]
+
+        result = mcp_server.list_ingredients()
+
+        keys = {row["key"] for row in result["ingredients"]}
+        assert keys == {"pork belly"}  # garlic is covered, excluded from "missing"
+        assert result["total_count"] == 2
+        assert result["covered_count"] == 1
+
+    def test_list_ingredients_all_shows_covered_and_via(self, db):
+        recipe_docs = [_published_recipe_doc("ramen", "Tonkotsu Ramen", ["garlic"])]
+        profile_docs = [_profile_doc("garlic", "Garlic")]
+        db.stream.side_effect = [iter(recipe_docs), iter(profile_docs)]
+
+        result = mcp_server.list_ingredients(coverage="all")
+
+        assert result["ingredients"][0]["covered"] is True
+        assert result["ingredients"][0]["via"] == "exact"
+
+    def test_list_ingredients_search_filters_by_key(self, db):
+        recipe_docs = [_published_recipe_doc("ramen", "Tonkotsu Ramen", ["garlic", "salt"])]
+        db.stream.side_effect = [iter(recipe_docs), iter([])]
+
+        result = mcp_server.list_ingredients(coverage="all", search="gar")
+
+        assert [row["key"] for row in result["ingredients"]] == ["garlic"]
+
+    def test_list_ingredients_rejects_a_bad_coverage_value(self, db):
+        result = mcp_server.list_ingredients(coverage="whatever")
+        assert result["error"] == "invalid_request"
+
+    def test_get_ingredient_by_slug(self, db):
+        db.get.return_value = _profile_doc("garlic", "Garlic")
+        result = mcp_server.get_ingredient(slug="garlic")
+        assert result["name"] == "Garlic"
+
+    def test_get_ingredient_by_slug_not_found(self, db):
+        db.get.return_value = _profile_doc("ghost", "Ghost", exists=False)
+        result = mcp_server.get_ingredient(slug="ghost")
+        assert result["error"] == "not_found"
+
+    def test_get_ingredient_resolves_by_alias(self, db):
+        db.stream.return_value = iter([_profile_doc("garlic", "Garlic", aliases=["garlic cloves"])])
+        result = mcp_server.get_ingredient(name="garlic cloves")
+        assert result["name"] == "Garlic"
+
+    def test_get_ingredient_unresolved_name_is_not_found(self, db):
+        db.stream.return_value = iter([_profile_doc("garlic", "Garlic")])
+        result = mcp_server.get_ingredient(name="dragonfruit")
+        assert result["error"] == "not_found"
+
+    def test_get_ingredient_requires_slug_or_name(self, db):
+        result = mcp_server.get_ingredient()
+        assert result["error"] == "invalid_request"
+
+    def test_upsert_ingredient_creates(self, db):
+        db.stream.return_value = iter([])  # no existing profiles for the conflict check
+        db.get.return_value = _profile_doc("pork-belly", "Pork Belly", exists=False)
+
+        result = mcp_server.upsert_ingredient(name="Pork Belly", what_it_is="A fatty cut.")
+
+        assert result["created"] is True
+        assert result["slug"] == "pork-belly"
+        written = db.set.call_args[0][0]
+        assert written["name"] == "Pork Belly"
+        assert written["what_it_is"] == "A fatty cut."
+
+    def test_upsert_ingredient_merges_only_provided_fields(self, db):
+        existing = _profile_doc("pork-belly", "Pork Belly", what_it_is="A fatty cut.", role="fat")
+        db.stream.return_value = iter([existing])
+        db.get.return_value = existing
+
+        result = mcp_server.upsert_ingredient(name="Pork Belly", storage="Fridge 3 days.")
+
+        # name is a required parameter (unlike update_recipe's optional title),
+        # so it is always part of the write, whatever value the caller passes.
+        assert result["updated_fields"] == ["name", "storage"]
+        written = db.set.call_args[0][0]
+        assert written["role"] == "fat"  # untouched field preserved
+        assert written["storage"] == "Fridge 3 days."
+
+    def test_upsert_ingredient_over_cap_is_a_validation_error(self, db):
+        db.stream.return_value = iter([])
+        db.get.return_value = _profile_doc("garlic", "Garlic", exists=False)
+
+        result = mcp_server.upsert_ingredient(
+            name="Garlic", what_it_is="x" * 300, role="x" * 200, substitutions="x" * 400, buying="x" * 101,
+        )
+
+        assert result["error"] == "validation_error"
+        db.set.assert_not_called()
+
+    def test_upsert_ingredient_alias_conflict(self, db):
+        db.stream.return_value = iter([_profile_doc("garlic", "Garlic")])
+        db.get.return_value = _profile_doc("garlic-powder", "Garlic Powder", exists=False)
+
+        result = mcp_server.upsert_ingredient(name="Garlic Powder", aliases=["garlic"], what_it_is="Dried, ground.")
+
+        assert result["error"] == "alias_conflict"
+        assert result["existing_slug"] == "garlic"
+        db.set.assert_not_called()
+
+    def test_delete_ingredient(self, db):
+        db.get.return_value = _profile_doc("garlic", "Garlic")
+        result = mcp_server.delete_ingredient("garlic")
+        assert result == {"deleted": True, "slug": "garlic"}
+        db.delete.assert_called_once()
+
+    def test_delete_ingredient_not_found(self, db):
+        db.get.return_value = _profile_doc("ghost", "Ghost", exists=False)
+        result = mcp_server.delete_ingredient("ghost")
+        assert result["error"] == "not_found"
+        db.delete.assert_not_called()
+
+
+# ── S14: publish history ──────────────────────────────────────────────────────
+
+class TestPublishHistory:
+    """Both publishers record every attempt, including the ones that fail.
+
+    The failure path is the point: a post that Instagram rejected is exactly
+    what the operator wants to see later, and it is also the path most likely
+    to be skipped by an implementation that only records on success.
+    """
+
+    def test_successful_post_is_recorded_with_the_media_id(self, db):
+        with patch("app.mcp_server.tools.social.social.record_post") as record:
+            mcp_server.publish_instagram_post("https://storage.googleapis.com/b/img.jpg", "Caption")
+        entry = record.call_args.args[2]
+        assert entry["ok"] is True
+        assert entry["media_id"] == "dev-ig-media"
+        assert entry["caption"] == "Caption"
+
+    def test_failed_post_is_recorded_and_the_error_still_reaches_the_caller(self, db):
+        """Recording must not swallow or reshape the error: wrapper.py still
+        has to map it to an "instagram" dict and fire MCP_TOOL_FAILED."""
+        with patch("app.services.instagram.publish_image", side_effect=instagram.InstagramError("API failure")), \
+             patch("app.mcp_server.tools.social.social.record_post") as record:
+            result = mcp_server.publish_instagram_post("https://example.com/img.jpg", "Caption")
+        entry = record.call_args.args[2]
+        assert entry["ok"] is False
+        assert "API failure" in entry["error"]
+        assert result["error"] == "instagram"
+
+    def test_recipe_post_records_the_slug(self, db):
+        db.stream.return_value = iter([_doc()])
+        with patch("app.mcp_server.tools.social.social.record_post") as record:
+            mcp_server.publish_recipe_to_instagram(slug="test-recipe")
+        entry = record.call_args.args[2]
+        assert entry["ok"] is True and entry["slug"] == "test-recipe"
+
+    def test_failed_recipe_post_records_the_slug_too(self, db):
+        db.stream.return_value = iter([_doc()])
+        with patch("app.services.instagram.publish_image", side_effect=instagram.InstagramError("nope")), \
+             patch("app.mcp_server.tools.social.social.record_post") as record:
+            result = mcp_server.publish_recipe_to_instagram(slug="test-recipe")
+        entry = record.call_args.args[2]
+        assert entry["ok"] is False and entry["slug"] == "test-recipe"
+        assert result["error"] == "instagram"
+
+    def test_a_recording_failure_does_not_fail_the_post(self, db):
+        """The post already reached Instagram, so a history failure must not
+        report a failure that did not happen.
+
+        The first version of this test asserted result["error"] == "internal",
+        which contradicted its own name and encoded the bug as correct: the
+        publish really did fail. CI caught it, because the three
+        TestPublishInstagramPost tests take no db fixture and so hit a real
+        get_db() with no credentials on a runner.
+        """
+        with patch("app.mcp_server.tools.social.social.record_post", side_effect=RuntimeError("boom")):
+            result = mcp_server.publish_instagram_post("https://storage.googleapis.com/b/img.jpg")
+        assert "error" not in result
+        assert result["id"] == "dev-ig-media"
+
+    def test_an_unreachable_firestore_does_not_fail_the_post(self):
+        """Deliberately no db fixture: this is CI's condition, where get_db()
+        itself raises. record_post guards its own writes, but get_db() is
+        resolved by the caller — so the guard has to wrap both."""
+        with patch("app.mcp_server.tools.social.get_db", side_effect=RuntimeError("no credentials")):
+            result = mcp_server.publish_instagram_post("https://storage.googleapis.com/b/img.jpg", "Caption")
+        assert "error" not in result
+        assert result["id"] == "dev-ig-media"
+
+    def test_social_status_carries_recent_posts(self, db):
+        with patch("app.mcp_server.tools.social.social.recent_posts", return_value=[{"ok": True, "media_id": "m1"}]):
+            result = mcp_server.social_status()
+        assert result["recent_posts"] == [{"ok": True, "media_id": "m1"}]
+        # History is a sibling of the platform mapping, not an entry in it.
+        assert "recent_posts" not in result["platforms"]
+
+
+    def test_a_replayed_idempotency_key_does_not_record_a_second_post(self, db):
+        """S15 short-circuits before the function body, so a retry after a
+        timeout returns the stored result without touching Instagram — and
+        must not append a second history row for a post that happened once.
+        This is the interaction between the two stories, so assert it rather
+        than assume the ordering holds.
+        """
+        from tests.test_mcp_wrapper import _caller, _fake_idempotency_db
+
+        with (
+            patch("app.mcp_server.idempotency.get_db", return_value=_fake_idempotency_db()),
+            patch("app.mcp_server.wrapper.get_access_token", return_value=_caller("client-ig")),
+            patch("app.mcp_server.tools.social.social.record_post") as record,
+        ):
+            first = mcp_server.publish_instagram_post(
+                "https://storage.googleapis.com/b/img.jpg", "Caption", idempotency_key="key-1"
+            )
+            second = mcp_server.publish_instagram_post(
+                "https://storage.googleapis.com/b/img.jpg", "Caption", idempotency_key="key-1"
+            )
+
+        assert first == second
+        assert record.call_count == 1

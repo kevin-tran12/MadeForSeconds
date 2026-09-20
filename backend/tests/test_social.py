@@ -12,9 +12,17 @@ NOW = datetime(2026, 9, 2, 4, 0, tzinfo=timezone.utc)
 
 
 def _chain_db():
+    """A Firestore mock whose builder calls all return the same object.
+
+    order_by/limit are chained too: without them a query mock returns a fresh
+    MagicMock whose .stream() is not the iterator the test queued, and the
+    caller silently sees no documents rather than a failure it can read.
+    """
     db = MagicMock()
     db.collection.return_value = db
     db.document.return_value = db
+    db.order_by.return_value = db
+    db.limit.return_value = db
     return db
 
 
@@ -113,3 +121,84 @@ def test_route_is_oidc_gated_in_production(client, mock_db):
         mock_settings.instagram_refresh_invoker_email = "mfs-backend@project.iam.gserviceaccount.com"
         mock_settings.social_refresh_audience = "https://backend.example.run.app/api/internal/social/refresh-tokens"
         assert client.post(REFRESH_URL).status_code == 401
+
+
+# ── record_post / recent_posts (S14 publish history) ──────────────────────────
+
+def test_record_post_stores_a_caption_preview_and_length_never_the_caption():
+    """The caption is the operator's own copy. History needs enough to
+    recognise a post, not the whole text — same reasoning as _MAX_ERROR_CHARS."""
+    db = _chain_db()
+    caption = "A" * 300
+
+    social.record_post(db, "instagram", {"ok": True, "media_id": "m1", "caption": caption}, now=NOW)
+
+    written = db.set.call_args_list[0].args[0]
+    assert written["caption_chars"] == 300
+    assert written["caption_preview"] == "A" * 80
+    assert "caption" not in written
+    assert written["platform"] == "instagram" and written["at"] == NOW
+
+
+def test_record_post_updates_last_post_fields_on_success():
+    db = _chain_db()
+    social.record_post(
+        db, "instagram", {"ok": True, "media_id": "m1", "permalink": "https://ig/p/1"}, now=NOW
+    )
+    merged = [c for c in db.set.call_args_list if c.kwargs.get("merge")]
+    assert merged, "a successful post must merge last_post_* onto config/social"
+    entry = merged[0].args[0]["instagram"]
+    assert entry["last_post_media_id"] == "m1"
+    assert entry["last_post_permalink"] == "https://ig/p/1"
+    assert entry["last_post_at"] == NOW
+
+
+def test_record_post_does_not_touch_last_post_fields_on_failure():
+    """A failed attempt belongs in the history, but must not overwrite the
+    record of the last post that actually went out."""
+    db = _chain_db()
+    social.record_post(db, "instagram", {"ok": False, "error": "rate limited"}, now=NOW)
+    assert db.set.call_count == 1
+    assert not [c for c in db.set.call_args_list if c.kwargs.get("merge")]
+
+
+def test_record_post_survives_a_firestore_failure(caplog):
+    """An unrecorded post is a gap in the log; an exception here would be a lie
+    about what happened, since the post already reached Instagram."""
+    db = _chain_db()
+    db.set.side_effect = RuntimeError("firestore down")
+    social.record_post(db, "instagram", {"ok": True, "media_id": "m1"}, now=NOW)
+    assert "could not record" in caplog.text
+
+
+def test_recent_posts_returns_newest_first_and_is_json_safe():
+    db = _chain_db()
+    doc = MagicMock()
+    doc.to_dict.return_value = {"ok": True, "media_id": "m1", "at": NOW}
+    db.stream.return_value = iter([doc])
+
+    posts = social.recent_posts(db, limit=5)
+
+    assert posts == [{"ok": True, "media_id": "m1", "at": NOW.isoformat()}]
+    db.order_by.assert_called_once_with("at", direction="DESCENDING")
+    db.limit.assert_called_once_with(5)
+
+
+def test_recent_posts_returns_empty_rather_than_breaking_status():
+    """social_status must still report token health when the history is
+    unreadable — the history is the least important thing it carries."""
+    db = _chain_db()
+    db.stream.side_effect = RuntimeError("no index")
+    assert social.recent_posts(db) == []
+
+
+def test_status_still_returns_only_platform_keys():
+    """Publish history is a sibling of the platform mapping, not an entry in
+    it: a "recent_posts" key here would read like another platform."""
+    db = _chain_db()
+    snap = MagicMock()
+    snap.exists = True
+    snap.to_dict.return_value = {"instagram": {"last_error": None}}
+    db.get.return_value = snap
+    with patch("app.services.social.settings", _configured(True)):
+        assert set(social.status(db)) == {"instagram"}

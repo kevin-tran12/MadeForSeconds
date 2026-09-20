@@ -201,6 +201,8 @@ async def sitemap():
         f"<url><loc>{SITE_URL}/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>",
         f"<url><loc>{SITE_URL}/recipes/</loc><changefreq>daily</changefreq><priority>0.9</priority></url>",
         f"<url><loc>{SITE_URL}/about/</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>",
+        f"<url><loc>{SITE_URL}/privacy/</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>",
+        f"<url><loc>{SITE_URL}/disclaimer/</loc><changefreq>yearly</changefreq><priority>0.3</priority></url>",
     ]
 
     recipe_urls = []

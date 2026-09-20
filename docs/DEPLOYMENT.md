@@ -51,6 +51,7 @@ Edit `terraform/terraform.tfvars` and fill in every value:
 | `stripe_product_id` | (Optional) Legacy Stripe Product ID (`prod_…`) |
 | `subscriber_jwt_secret` | 32+ character secret for cancel link JWTs |
 | `resend_api_key` | Resend API key for cancellation emails |
+| `resend_from` | (Optional) From: address for transactional email. Must be on a domain verified in Resend. Defaults to Resend's sandbox sender, which only delivers to the Resend account owner's own address — enough for the weekly usage report and ops alerts, but supporter mail will 403 until a domain is verified |
 | `anthropic_federation_rule_id`, `anthropic_organization_id`, `anthropic_service_account_id` | (Optional) The Sous Chef assistant's Anthropic Workload Identity Federation ids — plain values, not secrets. All blank keeps the feature off; set together, and only alongside `redis_url` (see [Sous Chef assistant](#sous-chef-assistant)). `anthropic_workspace_id` only when the rule spans more than one workspace |
 | `frontend_url` | Your production frontend URL (used in email links) |
 | `redis_url` | Upstash Redis URL (optional — leave blank to use in-memory cache) |
@@ -738,7 +739,7 @@ The association record names the object; finding it still means knowing where
 to look. Receipts live in two places, not one: recipe receipts sit at the
 bucket root (`admin_upload_recipe_receipt` in `backend/app/routes/admin.py`),
 expense receipts sit under `receipts/` (`backend/app/routes/expenses.py`,
-`backend/app/mcp_server.py`). Listing only `receipts/` misses every recipe
+`backend/app/mcp_server/tools/expenses.py`). Listing only `receipts/` misses every recipe
 receipt, so check both:
 
 ```bash
@@ -1259,6 +1260,7 @@ Set `VITE_API_URL` under **Settings → Environment variables → Preview** in C
 | `STRIPE_PRODUCT_ID` | GCP Secret Manager | Stripe Product ID (`prod_…`) |
 | `SUBSCRIBER_JWT_SECRET` | GCP Secret Manager | Secret for signing cancel link JWTs (32+ chars) |
 | `RESEND_API_KEY` | GCP Secret Manager | Resend API key for cancellation emails |
+| `RESEND_FROM` | `terraform.tfvars → resend_from` | From: address for transactional email (not a secret — just the visible sender) |
 | `ANTHROPIC_FEDERATION_RULE_ID` | Plain env (Terraform, optional) | Anthropic federation rule the Sous Chef assistant exchanges Cloud Run's identity token under; blank keeps the feature off |
 | `ANTHROPIC_ORGANIZATION_ID` | Plain env (Terraform, optional) | Anthropic organization UUID (with the rule and service-account ids) |
 | `ANTHROPIC_SERVICE_ACCOUNT_ID` | Plain env (Terraform, optional) | Anthropic service account the minted token acts as |
@@ -1348,20 +1350,113 @@ then run `/mcp` to authenticate via the browser. No static token needed.
 
 Set `MCP_TIMEOUT=30000` in the client environment — the backend scales to
 zero, so the first call after idle takes ~10s while Cloud Run cold-starts.
-If a call times out, retry once.
+If a read times out, retry once. For a timed-out write, pass an
+`idempotency_key` on the original call and repeat it verbatim on the retry —
+see "Retries and idempotency" below. Without one, check whether the write
+landed (`list_recipes` / `social_status`) before retrying, because a blind
+retry duplicates it.
+
+Built on the `mcp` Python SDK 2.x (`MCPServer`); clients on the older
+`initialize` handshake still connect.
 
 Local dev (`docker compose up`) runs the MCP server **unauthenticated** (no
 WorkOS dependency), matching the `require_admin` dev bypass.
+
+**Traces.** The `mcp` SDK instruments every `tools/call`, `tools/list` and
+`initialize` request with an OpenTelemetry span out of the box; `app/tracing.py`
+exports those spans to **Cloud Trace** in production (dev always skips this,
+regardless of `TRACE_ENABLED`). Find them under Trace Explorer filtered to
+`service.name=mfs-backend`; a `tools/call` from Claude typically shows up
+within a minute. `TRACE_ENABLED=false` turns the exporter off without a
+redeploy — useful while diagnosing an exporter-side issue — and
+`TRACE_SAMPLE_RATIO` (default `1.0`, every request) is the cost knob if volume
+ever outgrows the free tier. Spans export synchronously
+(`SimpleSpanProcessor`, not a batching processor) because Cloud Run only
+schedules CPU while a request is in flight — a background batch flush could
+simply never run and silently drop every span an instance ever produced. At
+this app's traffic, one call's worth of export latency is a better trade than
+that. Free tier: 2.5M spans/month, hundreds actually used — see
+[GCP free tier summary](#gcp-free-tier-summary).
+
+**Rate budgets.** Every tool is tagged `read`, `write`, or `publish_social`
+(the annotations sentence below) and the tag is enforced —
+`app/mcp_server/rate_budgets.py` — per authenticated caller: `read` 120/min,
+`write` 30/min, `publish_social` 5/hour **and** 20/day (both must hold). A
+budget is shared across every tool in its category, not tracked separately
+per tool name — 30 calls to any mix of `create_recipe`/`update_recipe`/etc.
+in a minute exhausts the `write` budget for all of them. A breach returns
+`{"error": "rate_limited", "retry_after_seconds": N}` without the tool
+running at all, and logs one `MCP_RATE_LIMITED` line. Enforcement is a no-op
+without an OAuth `client_id` — dev's MCP server runs fully unauthenticated
+and trusted to a single operator, so there is no "many callers" scenario to
+budget against there; production is the only place this has any effect.
+
+**Audit trail.** Every mutating tool call (`read_only=False`; reads are
+never audited) writes one append-only doc to Firestore's `mcp_audit`
+collection — `app/mcp_server/audit.py` — success, a translated domain
+error, or a rate-limit rejection alike: `{tool, at, ok, error, client_id,
+subject, target, arg_keys}`. `target` names what was touched (`recipe_id`,
+`slug`, `expense_id`, `media_id`, or `ingredient_slug`, whichever apply);
+`arg_keys` is the sorted list of argument *names* the call was made with,
+never the values — this is a record of what was attempted, not a second
+copy of the mutation's payload. `subject` is reserved for the caller's
+WorkOS `sub` claim but is always `None` today — `WorkOSTokenVerifier`
+(`app/mcp_auth.py`) does not populate `AccessToken.subject` yet. Best-effort
+like the rate limiter's fallback counter: an audit write failure only logs
+a warning, never fails the mutation itself. No Terraform, no TTL — a
+personal site's mutation volume through this surface keeps this collection
+trivially inside the Firestore free tier indefinitely.
+
+**Retries and idempotency.** `create_recipe`, `create_expense`,
+`publish_instagram_post` and `publish_recipe_to_instagram` accept an
+optional `idempotency_key` (≤128 chars) — `app/mcp_server/idempotency.py`.
+A repeat call with the same `(client_id, key)` pair returns the *first*
+call's result (success or failure alike) without the underlying mutation —
+a second Firestore write, a second Instagram post — happening again;
+cached under `sha256(client_id + key)` in Firestore's `mcp_idempotency`
+collection with a 24-hour TTL (`terraform/modules/storage/firestore.tf`).
+The four tools without a key, and every other mutating tool, keep today's
+behavior: check whether the write landed (`list_recipes` / `social_status`)
+before blindly retrying — see the MCP server's own instructions text,
+which tells the model exactly this. No client_id (dev mode) means no
+idempotency, same as the rate budgets above — there is no "did my earlier
+call from another session already land" ambiguity to resolve there, since
+dev is a single trusted operator working synchronously.
+
+**Second factor.** `create_expense` via MCP does not require the admin-UI
+expense route's TOTP second factor (`require_totp_session`) — a deliberate
+decision (`app/mcp_auth.py`'s docstring, point 4), not an oversight. It is
+create-only: no MCP tool updates or deletes an existing expense. The
+audience + owner-subject binding already checked on every MCP token proves
+both "this came from a WorkOS-authenticated session" and "that session
+belongs to the site owner specifically" — the two things TOTP adds on top
+of a bare credential elsewhere. Every expense created via MCP carries an
+`actor` attribution (`"mcp:<client_id>"`, `app/mcp_server/wrapper.py`'s
+`current_actor()`) into both its own revision history's `changed_by` field
+and the audit trail above, so the gap is auditable rather than invisible.
+**Recommended if this needs hardening further:** turn on WorkOS AuthKit's
+own MFA enrollment for the owner's account — that covers the WorkOS login
+itself, rather than bolting a second, separate factor onto this one path.
 
 **Tools**: `list_recipes`, `get_recipe`, `list_categories`, `create_recipe`,
 `update_recipe`, `publish_recipe`, `unpublish_recipe`, `delete_recipe`,
 `request_image_upload`, `upload_image_from_url`, `create_expense`,
 `publish_instagram_post`, `publish_recipe_to_instagram`, `get_social_kit`,
-`social_status`.
+`social_status`, `list_ingredients`, `get_ingredient`, `upsert_ingredient`,
+`delete_ingredient`.
 
 **Recipe workflow**: `create_recipe` saves an unpublished draft (duplicate
 titles return a `slug_conflict` pointer instead of writing a second copy) →
 iterate with `update_recipe` → attach a photo → `publish_recipe`.
+
+**Ingredient knowledge**: `list_ingredients(coverage="missing")` lists the
+site's ingredients with no owner-authored profile yet, sorted by how many
+recipes use them. Claude drafts a batch of profiles in the owner's voice —
+what it is, its role, substitutions, buying, storage, mistakes, allergens —
+the operator reviews and corrects them in chat, and only the approved ones
+are saved with `upsert_ingredient` (no server-side model call anywhere in
+this flow). `upsert_ingredient` is idempotent on its slug, so re-running it
+with the same name converges rather than duplicating.
 
 **Image/receipt uploads** go directly to GCS via short-lived signed PUT URLs:
 `request_image_upload(filename, content_type, kind)` returns `upload_url` +
@@ -1550,6 +1645,21 @@ the tool at all, but every reader gets the Weee! shop links, which cost
 nothing — `WEEE_AFFILIATE_QUERY` stays blank until the affiliate programme
 accepts the site, and plain links work in the meantime.
 
+**Ingredient knowledge base.** `backend/app/services/knowledge.py` and
+`services/ingredients.py` ground the assistant in owner-authored ingredient
+profiles (a plain Firestore `ingredients` collection — no Terraform, no
+index, no TTL) plus every published recipe's own Chef's Secrets, `about`,
+and `sous_chef_notes`, retrievable from any page, not just the one on
+screen. Retrieval is lexical and in-process (no embeddings, no vector
+service); the whole corpus is cached under the versioned `assistant:knowledge`
+key and rebuilt on the next request after any recipe or profile write, the
+same invalidation `get_published_doc`/`get_catalogue_index` already use.
+Profiles are authored and approved by the owner (MCP tools and an admin tab
+land in follow-up PRs) — never a server-side model call. If the corpus ever
+passes roughly a thousand entries, Firestore vector search (`find_nearest`)
+is the documented upgrade path; `KnowledgeBase.retrieve` in `knowledge.py`
+is the only seam that would need to change.
+
 **Cost.** No Secret Manager secret and no new Cloud Scheduler job. The only
 infrastructure addition is the `assistant_feedback` collection's 180-day
 Firestore TTL policy (`google_firestore_field.assistant_feedback_ttl`), with
@@ -1570,6 +1680,7 @@ the same billed-delete caveat as `processed_events`.
 | Cloud Logging | 50 GiB/mo ingestion | Minimal log volume |
 | Secret Manager | 6 active *versions* free (aggregated per billing account, not per secret) · 10K access/mo | Weekly pruning (see [Secret version pruning](#secret-version-pruning)) keeps this near the free allowance instead of growing unbounded |
 | Cloud Scheduler | 3 free jobs per billing account | 3 jobs in use (weekly usage report, secret pruning, budget-breaker reset) — all free. With Instagram publishing enabled, `social-token-refresh` is a genuine 4th job at ~$0.10/month — accepted; see [Secret version pruning § Cost](#secret-version-pruning) |
+| Cloud Trace | 2.5M spans/mo | MCP tool-call spans only (see [MCP server § Traces](#mcp-server-recipeexpense-automation)) — hundreds/month at this app's call volume, far under the allowance |
 
 ### Artifact Registry: gcf-artifacts has no cleanup policy
 

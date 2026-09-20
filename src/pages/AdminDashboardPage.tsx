@@ -5,10 +5,11 @@ import type { Recipe } from '../lib/types'
 import { RecipeTable } from '../components/admin/RecipeTable'
 import { SupporterModerationPanel } from '../components/admin/SupporterModerationPanel'
 import { SousChefFeedbackPanel } from '../components/admin/SousChefFeedbackPanel'
+import { IngredientProfilesPanel } from '../components/admin/IngredientProfilesPanel'
 import { Button } from '../components/ui/Button'
 import { RecipePreviewPanel } from '../components/admin/RecipePreviewPanel'
 
-type Tab = 'recipes' | 'supporters' | 'sous-chef' | 'expenses' | 'categories' | 'pages'
+type Tab = 'recipes' | 'supporters' | 'sous-chef' | 'ingredients' | 'expenses' | 'categories' | 'pages'
 
 export function AdminDashboardPage() {
   const navigate = useNavigate()
@@ -89,6 +90,9 @@ export function AdminDashboardPage() {
           <button className={tabClass('sous-chef')} onClick={() => setTab('sous-chef')}>
             Sous Chef
           </button>
+          <button className={tabClass('ingredients')} onClick={() => setTab('ingredients')}>
+            Ingredients
+          </button>
           <button className={tabClass('expenses')} onClick={() => setTab('expenses')}>
             Expenses
           </button>
@@ -127,6 +131,8 @@ export function AdminDashboardPage() {
       {tab === 'supporters' && <SupporterModerationPanel />}
 
       {tab === 'sous-chef' && <SousChefFeedbackPanel />}
+
+      {tab === 'ingredients' && <IngredientProfilesPanel />}
 
       {tab === 'expenses' && (
         <div className="rounded-xl border border-surface-darker bg-white p-8 text-center">

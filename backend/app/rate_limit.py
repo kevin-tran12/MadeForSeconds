@@ -53,6 +53,25 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def count_hit(key: str, window_seconds: int) -> int:
+    """Atomically increment `key`'s hit count within `window_seconds` and
+    return the new count.
+
+    Shared primitive behind every rate limit in this app, HTTP (`rate_limit`
+    below) and MCP (`mcp_server/rate_budgets.py`) alike — one place owns the
+    "primary cache, fall back to a local counter on backend error" behavior
+    rather than each caller reimplementing it.
+    """
+    count = cache.incr_with_ttl(key, window_seconds)
+    if count <= 0:
+        # incr_with_ttl returns -1 when the backend errored. Falling back to
+        # a local counter keeps abuse protection in place during a Redis
+        # outage instead of disabling it entirely.
+        logger.warning("count_hit(%s): backend unavailable, using local fallback counter", key)
+        count = _fallback.incr_with_ttl(key, window_seconds)
+    return count
+
+
 def rate_limit(name: str, limit: int, window_seconds: int):
     """FastAPI dependency factory: `limit` requests per `window_seconds` per client IP.
 
@@ -62,14 +81,7 @@ def rate_limit(name: str, limit: int, window_seconds: int):
     async def _dependency(request: Request) -> None:
         ip = _client_ip(request)
         key = f"{name}:{ip}"
-        count = cache.incr_with_ttl(key, window_seconds)
-        if count <= 0:
-            # incr_with_ttl returns -1 when the backend errored. Falling back
-            # to a local counter keeps brute-force/abuse protection (e.g. on
-            # TOTP verify) in place during a Redis outage instead of
-            # disabling it entirely.
-            logger.warning("rate_limit(%s): backend unavailable, using local fallback counter", name)
-            count = _fallback.incr_with_ttl(key, window_seconds)
+        count = count_hit(key, window_seconds)
         if count > limit:
             raise HTTPException(
                 status_code=429,

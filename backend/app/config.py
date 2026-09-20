@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     mcp_owner_subject: str = ""
     # Comma-separated OAuth scopes every MCP access token must carry,
     # enforced by the SDK itself (AuthSettings.required_scopes in
-    # mcp_server.py). Blank means no scope beyond a valid, owned token is
+    # mcp_server/server.py). Blank means no scope beyond a valid, owned token is
     # required.
     mcp_required_scopes: str = ""
     redis_url: str | None = None  # e.g. rediss://default:TOKEN@host.upstash.io:6379
@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     stripe_product_id: str = ""  # Stripe Product ID for support subscription
     subscriber_jwt_secret: str = "dev-subscriber-secret-change-in-prod"
     resend_api_key: str = ""  # Resend API key for sending cancellation emails
+    # Sender for every outbound transactional email. Resend only accepts a
+    # `from` on a domain verified in the account; the default is Resend's
+    # always-verified sandbox sender, which can ONLY deliver to the account
+    # owner's own address. That is enough for owner-directed mail (the weekly
+    # usage report and ops alerts, both sent to alert_email) but NOT for mail
+    # to supporters — set this to an address on a verified domain before
+    # relying on the cancellation/donation-link flows.
+    resend_from: str = "MadeForSeconds <onboarding@resend.dev>"
     frontend_url: str = "http://localhost:5173"  # Frontend URL for building links in emails
     # Instagram (Meta Graph API, "Instagram API with Instagram Login" path).
     instagram_user_id: str = ""  # IG Business/Creator account numeric id
@@ -84,6 +92,16 @@ class Settings(BaseSettings):
     # signed up for (e.g. a network's tracking parameter); blank means plain
     # links, which is what ships today.
     weee_affiliate_query: str = ""
+    # Exports the mcp SDK's built-in OpenTelemetry spans (every tools/call,
+    # tools/list, initialize) to Cloud Trace — see app/tracing.py. Dev always
+    # skips it regardless of this flag (configure_tracing() checks is_dev
+    # first); set false in production only to turn the exporter off without a
+    # redeploy of code, e.g. while diagnosing an exporter-related issue.
+    trace_enabled: bool = True
+    # Fraction of traces sampled, (0.0, 1.0]. 1.0 (every request) is well
+    # inside Cloud Trace's free tier (2.5M spans/month) at this app's volume;
+    # lower it only if that changes.
+    trace_sample_ratio: float = 1.0
 
     @property
     def assistant_search_domain_list(self) -> list[str]:
@@ -173,8 +191,8 @@ def validate_production_settings(s: "Settings") -> None:
     # applied manually and separately. Crashing here on a missing bucket name
     # is what stops a revision deployed ahead of Terraform from silently
     # reporting fake upload success instead — see routes/admin.py and
-    # mcp_server.py's request_image_upload/upload_image_from_url, which used
-    # to fall back to a placeholder response whenever a bucket was unset,
+    # mcp_server/tools/images.py's request_image_upload/upload_image_from_url,
+    # which used to fall back to a placeholder response whenever a bucket was unset,
     # in production as much as in dev. Crashing at import time is also the
     # SAFE failure mode: cloudbuild.yaml deploys with --no-traffic, smoke-tests
     # the tagged candidate revision, and only then promotes that exact tag. A

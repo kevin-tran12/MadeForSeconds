@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import type { NutritionEntry } from '../../lib/types'
 
 // Labels that are considered "primary" (displayed bold at full width)
@@ -119,16 +120,24 @@ export function NutritionCard({ nutrition, scale = 1 }: NutritionCardProps) {
         })}
       </div>
 
-      {/* Footer */}
-      {rest.some((e) => dailyPct(e.label.toLowerCase(), e.value) !== null) && (
-        <div className="border-t-4 border-content px-5 py-2">
+      {/* Footer — the estimate note always shows; the %DV explainer only when
+          at least one value actually has a daily percentage beside it. */}
+      <div className="border-t-4 border-content px-5 py-2 space-y-1">
+        {rest.some((e) => dailyPct(e.label.toLowerCase(), e.value) !== null) && (
           <p className="text-xs text-content-muted">
             * The % Daily Value tells you how much a nutrient in a serving of food
             contributes to a daily diet. 2,000 calories a day is used for general
             nutrition advice.
           </p>
-        </div>
-      )}
+        )}
+        <p className="text-xs text-content-muted">
+          Values are estimates and vary with brands and substitutions. See the{' '}
+          <Link to="/disclaimer/" className="underline hover:text-content-body">
+            disclaimer
+          </Link>
+          .
+        </p>
+      </div>
     </section>
   )
 }

@@ -19,6 +19,21 @@ the anti-injection rule stay in CORE_RULES, shared by every spoke. A
 misrouted doneness question must still meet the USDA figure, and a
 misrouted substitution question must still carry the allergen line.
 
+The owner's own words — `secrets` (the Chef's Secrets) and `chef_guidance`
+(sous_chef_notes) — go to every spoke that sees the recipe at all, whatever
+the question. They are short, and they are the most opinionated content on
+the page: a substitution warning, a doneness checklist, a "don't double
+this" all get written wherever they fit rather than filed by spoke. Slicing
+them out is how an answer ends up contradicting the recipe it is quoting.
+
+The same rule extends to the ingredient knowledge base (services/knowledge.py):
+`include_ingredients` puts the owner's authored profile for every ingredient
+in the current recipe inside the cached recipe block, on every spoke where an
+ingredient's fat content, substitution, or storage advice could plausibly
+matter to the question — not just the ingredients spoke itself. catalogue and
+offtopic are the only spokes that never see a recipe's ingredients at all, so
+they are the only ones this stays off for.
+
 Caching: CORE_RULES is the same bytes for every reader, recipe, and spoke,
 so the largest cache entry survives a spoke switch. The spoke's rules and
 the recipe slice sit behind their own breakpoints and are rewritten when a
@@ -54,6 +69,9 @@ class Spoke:
     # the server-side web search that makes a sourcing answer worth reading.
     include_stores: bool = False
     web_search: bool = False
+    # The owner's ingredient-profile knowledge base, for this recipe's own
+    # ingredients (see the module docstring above).
+    include_ingredients: bool = False
     # A searched answer is several round-trips inside one API call; Cloud Run
     # allows 120s for the whole request.
     timeout_seconds: float | None = None
@@ -63,6 +81,7 @@ TECHNIQUE = Spoke(
     name="technique",
     keep=("about", "difficulty", "prep_time_minutes", "cook_time_minutes",
           "prep_steps", "instructions", "components", "secrets", "chef_guidance"),
+    include_ingredients=True,
     # Method questions are where thinking earns its keep: the answer has to
     # hold the order of operations and the failure mode at once.
     effort="medium",
@@ -79,7 +98,8 @@ TECHNIQUE = Spoke(
 
 INGREDIENTS = Spoke(
     name="ingredients",
-    keep=("categories", "labels", "ingredients", "components", "chef_guidance"),
+    keep=("categories", "labels", "ingredients", "components", "secrets", "chef_guidance"),
+    include_ingredients=True,
     sentinel="A substitution answer says what changes",
     rules="""YOUR BEAT: ingredients — what is in the dish, what each thing does, and what can stand in for it.
 
@@ -93,7 +113,8 @@ INGREDIENTS = Spoke(
 SAFETY = Spoke(
     name="safety",
     keep=("prep_time_minutes", "cook_time_minutes", "ingredients", "instructions",
-          "components", "chef_guidance"),
+          "components", "secrets", "chef_guidance"),
+    include_ingredients=True,
     sentinel="Give the temperature, not a question back",
     rules="""YOUR BEAT: food safety — doneness, temperatures, storage, and reheating.
 
@@ -106,7 +127,9 @@ SAFETY = Spoke(
 
 SCALING = Spoke(
     name="scaling",
-    keep=("servings", "prep_time_minutes", "cook_time_minutes", "ingredients", "components"),
+    keep=("servings", "prep_time_minutes", "cook_time_minutes", "ingredients", "components",
+          "secrets", "chef_guidance"),
+    include_ingredients=True,
     sentinel="what does not scale with the ingredients",
     rules="""YOUR BEAT: scaling and timing — cooking this for a different number of people.
 
@@ -118,8 +141,9 @@ SCALING = Spoke(
 
 SOURCING = Spoke(
     name="sourcing",
-    keep=("categories", "labels", "ingredients", "components", "chef_guidance"),
+    keep=("categories", "labels", "ingredients", "components", "secrets", "chef_guidance"),
     include_stores=True,
+    include_ingredients=True,
     web_search=True,
     timeout_seconds=90.0,
     sentinel="Price, stock, and delivery vary by area",
@@ -150,6 +174,7 @@ GENERAL = Spoke(
     name="general",
     keep=None,  # the whole recipe: this is where anything unclassifiable lands
     include_catalogue=True,
+    include_ingredients=True,
     sentinel="Answer what they actually asked",
     rules="""YOUR BEAT: anything about this dish that the other specialists do not cover.
 

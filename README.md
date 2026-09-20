@@ -99,7 +99,7 @@ The browser never touches Firestore. Every read and write goes through FastAPI, 
 
 ### Sous Chef (reader assistant)
 - Ask questions about the recipe on the page: substitutions, timing, technique, scaling, and what else on the site uses an ingredient
-- Grounded in the recipe, the owner's private per-recipe notes, and a compact catalogue index; a professional-chef persona that pitches each answer to the reader's saved cooking experience
+- Grounded in the recipe, the owner's private per-recipe notes, a compact catalogue index, and an owner-authored ingredient knowledge base retrievable across every recipe's notes (not just the page open); a professional-chef persona that pitches each answer to the reader's saved cooking experience
 - Hard-coded food-safety temperatures, refusals for canning/curing/infant food, an allergen disclaimer, a Haiku topic gate that refuses anything off-topic before the main model runs, and a rules-leak check
 - Google sign-in required; 5 questions/day free, 50/day + 400/month for supporters; a $10/month spend cap that fails closed without Redis
 - Thumbs up/down feedback (hashed reader, 180-day TTL) surfaces in the admin dashboard
@@ -112,7 +112,7 @@ The browser never touches Firestore. Every read and write goes through FastAPI, 
 
 ## MCP server
 
-The backend doubles as a remote [Model Context Protocol](https://modelcontextprotocol.io) server mounted at `/mcp`, so recipes can be written and published from a Claude conversation.
+The backend doubles as a remote [Model Context Protocol](https://modelcontextprotocol.io) server mounted at `/mcp`, so recipes can be written and published from a Claude conversation. Built on the `mcp` Python SDK 2.x (`MCPServer`); clients on the older `initialize` handshake still connect.
 
 ### Auth model
 
@@ -129,20 +129,22 @@ Claude ──── 2. discover + register + PKCE ──────►  WorkOS 
 Claude ──── 4. GET /mcp + Bearer token ─────────►  FastAPI
                                                    ├─ fetch JWKS (cached)
                                                    ├─ verify RS256 signature
-                                                   ├─ check issuer, exp
-                                                   └─ email ∈ ADMIN_EMAILS
+                                                   ├─ check issuer, exp, audience
+                                                   └─ owner identity (sub or email)
 ```
 
-Verification lives in [`backend/app/mcp_auth.py`](backend/app/mcp_auth.py). It pins `algorithms=["RS256"]`, so `alg: none` and symmetric-key confusion attacks are both rejected, and gates on `ADMIN_EMAILS` as defense-in-depth on top of the WorkOS-side sign-in restriction.
+Verification lives in [`backend/app/mcp_auth.py`](backend/app/mcp_auth.py). It pins `algorithms=["RS256"]`, so `alg: none` and symmetric-key confusion attacks are both rejected, then binds the token to this resource and this owner with three checks beyond signature and issuer: **audience** (`MCP_ENFORCE_AUDIENCE`, on by default, checked against `MCP_RESOURCE_URL`), **owner identity** (an admin email in `ADMIN_EMAILS` or an immutable WorkOS `sub` in `MCP_OWNER_SUBJECT` — no fallback), and **scopes** (optional, `MCP_REQUIRED_SCOPES`, enforced by the SDK itself).
 
 Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev bypass — there is no WorkOS dependency to stand up just to work on tools.
 
 ### Tools
 
+Structured fields (ingredients, instructions, nutrition, recipe secrets/components, expense line items) are typed pydantic models, not opaque `dict`s — a client introspecting the tool schemas sees the exact shape and length limits (`models.py`'s own caps), and a value outside them is a `validation_error`, not a value silently truncated or ignored.
+
 | Tool | Purpose |
 |------|---------|
 | `list_categories` | Allowed category list |
-| `list_recipes` | Search/filter existing recipes before creating |
+| `list_recipes` | Search/filter existing recipes before creating; cursor-paginated (`next_cursor`, `exhausted`) rather than one unbounded fetch |
 | `get_recipe` | Full recipe by id or slug |
 | `create_recipe` | Save a draft — duplicate titles return a pointer to the existing recipe instead of writing a second one |
 | `update_recipe` | Revise a draft (array fields are replaced whole) |
@@ -151,12 +153,44 @@ Local dev runs the MCP server unauthenticated, mirroring the `require_admin` dev
 | `publish_recipe` / `unpublish_recipe` | Toggle visibility; publish refuses incomplete recipes |
 | `delete_recipe` | Requires the title as confirmation |
 | `create_expense` | Add a ledger entry with an attached receipt |
+| `publish_instagram_post` | Post an already-hosted public HTTPS image to Instagram, with a caption |
+| `publish_recipe_to_instagram` | Post a recipe's own image, auto-building a caption from its title/description/link/hashtags |
 | `get_social_kit` | Recipe summary + brand voice + hashtag tiers + platform limits so the MCP client drafts Instagram/TikTok posts consistently (no server-side LLM) |
-| `social_status` | Per-platform token health from the twice-monthly refresh job |
+| `social_status` | Per-platform token health from the twice-monthly refresh job, plus `recent_posts`: the last few publish attempts (successes and failures), newest first |
+| `list_ingredients` | Every distinct ingredient across the catalogue, with recipe counts and profile coverage — start here for an authoring session |
+| `get_ingredient` | Fetch a profile by slug or by resolving a name/alias |
+| `upsert_ingredient` | Create or update a profile (safe to retry — the slug is the key) |
+| `delete_ingredient` | Remove a profile from the knowledge base |
 
-Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` to iterate → `request_image_upload` + `update_recipe(image_url=…)` → `publish_recipe`.
+Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` to iterate → `request_image_upload` + `update_recipe(image_url=…)` → `publish_recipe`. Ingredient knowledge: `list_ingredients(coverage="missing")` → draft profiles in the owner's voice → `upsert_ingredient` once approved.
+
+Every tool carries MCP annotations (read-only/destructive/idempotent/open-world hints, advisory for clients) via a shared `mcp_tool(...)` decorator, which also emits one structured outcome log line per call.
+
+`create_recipe`, `create_expense`, `publish_instagram_post`, and `publish_recipe_to_instagram` accept an optional `idempotency_key` — pass the same value on a retry after a timeout to get back the original result instead of a duplicate write or post.
 
 > The backend scales to zero, so the first call after an idle period takes ~10s.
+
+### Resources and prompts
+
+Alongside the tools, the server exposes the same read data as **resources** (fetched by URI, so a client can attach one to a conversation or cache it instead of calling a tool) and three **prompts** (workflows the operator starts deliberately).
+
+| Resource | What it serves |
+|----------|----------------|
+| `recipe://{slug}` | A full recipe, drafts included — the owner's view, with `sous_chef_notes` |
+| `ingredient://{slug}` | One ingredient profile |
+| `social-kit://{slug}` | Brand voice, hashtag tiers, platform limits and drafting workflow for a recipe |
+| `categories://list` | The category allowlist |
+| `social://status` | Per-platform publishing health |
+
+Resources are reads only: no rate budget, no audit row, no idempotency key, because none of them writes. Every mutating path is still a tool, so the audit trail stays complete. A missing URI fails the read rather than returning a success whose body describes a failure — the opposite of the tools' deliberate `{"error": …}` convention, which exists so a model gets structured, in-band failure it can reason about.
+
+| Prompt | What it starts |
+|--------|----------------|
+| `draft_social_post` | Draft Instagram and TikTok posts for a recipe, in the site's voice |
+| `review_before_publish` | Check a draft for what blocks publishing versus what merely weakens it |
+| `draft_ingredient_profiles` | Draft profiles for the most-used ingredients that lack one |
+
+Each prompt that can lead to a public or persisted write repeats the approval rule itself, since a prompt may be the first thing in a conversation. MCP sends prompt arguments as strings, so `draft_ingredient_profiles(limit)` coerces rather than receiving an int.
 
 ---
 
@@ -175,20 +209,38 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 │   │   ├── models_expense.py   Pydantic schemas (Expense, ExpenseItem…)
 │   │   ├── totp.py             TOTP 2FA logic and session JWT
 │   │   ├── validation.py       Shared validators (admin routes + MCP)
-│   │   ├── mcp_server.py       MCP server + tool definitions
+│   │   ├── tracing.py          Cloud Trace export for the MCP SDK's built-in spans
+│   │   ├── mcp_server/         MCP server package
+│   │   │   ├── server.py       MCPServer construction, auth/transport settings, instructions
+│   │   │   ├── tools/          One module per tool domain — recipes, ingredients, images, social, expenses —
+│   │   │   │                   each exposing a TOOLS tuple and a register(mcp) function
+│   │   │   ├── wrapper.py      mcp_tool: domain errors → structured dicts, annotations, outcome log,
+│   │   │   │                   and the call into the three modules below
+│   │   │   ├── rate_budgets.py Per-category rate limits (read / write / publish_social)
+│   │   │   ├── audit.py        Append-only record of every mutating call
+│   │   │   ├── idempotency.py  Replay cache for idempotency_key, so a retry is not a second write
+│   │   │   ├── schemas.py      Typed tool inputs that don't already live in models.py
+│   │   │   ├── resources.py    URI-addressed reads (recipe://, ingredient://, social-kit://, categories://, social://)
+│   │   │   └── prompts.py      Operator-chosen workflows (draft posts, review before publish, draft profiles)
 │   │   ├── mcp_auth.py         WorkOS OAuth token verification (resource server)
 │   │   ├── services/
 │   │   │   ├── recipes.py      Recipe domain logic shared by routes and MCP
+│   │   │   ├── assistant.py    Sous Chef prompt assembly, grounding, cache breakpoints
+│   │   │   ├── spokes.py       Per-question specialist rules the router picks between
+│   │   │   ├── ingredients.py  Ingredient profiles: normalisation, alias index, coverage, CRUD
+│   │   │   ├── knowledge.py    The retrievable corpus (profiles + every recipe's notes) and its cache
 │   │   │   └── uploads.py      GCS upload, signed URLs, content sniffing
 │   │   └── routes/
 │   │       ├── public.py       GET /api/recipes, /categories, /sitemap.xml, /feed.xml
 │   │       ├── admin.py        Admin recipe CRUD, image upload, supporter moderation
+│   │       ├── assistant.py    Sous Chef ask/feedback endpoints (streamed, metered)
+│   │       ├── me.py           Reader profile and entitlements
 │   │       ├── subscriptions.py Stripe checkout, webhooks, cancel flow
 │   │       ├── internal.py     Scheduler-invoked jobs (Google OIDC gated)
 │   │       ├── expenses.py     Expense CRUD + receipt upload (TOTP-gated)
 │   │       ├── reports.py      Expense summaries, CSV/PDF export (TOTP-gated)
 │   │       └── totp.py         TOTP setup, verify, session endpoints
-│   ├── tests/                  Pytest suite (827 tests across 36 files)
+│   ├── tests/                  Pytest suite (1123 tests across 49 files)
 │   ├── seed.py                 Load sample recipes into Firestore emulator
 │   ├── Dockerfile              Production container
 │   └── requirements.txt
@@ -237,7 +289,7 @@ Typical flow: `list_categories` → `create_recipe` (draft) → `update_recipe` 
 
 **1. Clone and enter the repo**
 ```bash
-git clone https://github.com/YOUR_USERNAME/MadeForSeconds.git
+git clone https://github.com/kevin-tran12/MadeForSeconds.git
 cd MadeForSeconds
 ```
 
@@ -291,7 +343,7 @@ docker compose down                     # Stop everything
 
 npm run build                           # TypeScript check + Vite build
 npm run test:unit                       # Vitest unit tests
-npm run test:backend                    # Pytest (827 tests)
+npm run test:backend                    # Pytest (1123 tests)
 npm run test:e2e                        # Playwright E2E (requires running stack)
 npm run test:e2e:ui                     # Playwright with interactive UI
 ```
@@ -358,6 +410,11 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/admin/assistant/feedback` | Newest reader feedback, thumbs-down first (`?limit=`) |
+| GET | `/api/admin/ingredients/coverage` | Ingredients used across published recipes, with profile coverage, sorted by recipe count |
+| GET | `/api/admin/ingredients` | Every ingredient profile |
+| GET | `/api/admin/ingredients/{slug}` | One ingredient profile |
+| PUT | `/api/admin/ingredients/{slug}` | Create (201) or update (200) an ingredient profile |
+| DELETE | `/api/admin/ingredients/{slug}` | Delete an ingredient profile |
 
 ### Admin — expenses (requires auth + TOTP session)
 
@@ -424,18 +481,18 @@ stripe listen --forward-to localhost:8000/api/subscribe/webhook
 
 The project has three test layers.
 
-### Backend — pytest (827 tests, 36 files)
+### Backend — pytest (1123 tests, 49 files)
 ```bash
 npm run test:backend
 # or: cd backend && pytest --cov=app --cov-report=term-missing
 ```
-Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, social token rotation, log redaction.
+Covers: auth, MCP token verification, models, cache, public routes, admin routes, upload sniffing and sanitisation, supporter moderation, subscriptions, expenses, reports, TOTP, internal OIDC-gated routes, social token rotation, log redaction, Cloud Trace export, MCP rate budgets, audit trail, and idempotency keys.
 
-### Frontend unit — vitest (137 tests, 21 files)
+### Frontend unit — vitest (147 tests, 23 files)
 ```bash
 npm run test:unit
 ```
-Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components, support and donation-link pages, auth context and admin route gating, the Sous Chef drawer, hook, clarifying-question form, SSE parser, and streaming client.
+Covers: API client, expense math, hooks (useRecipes, useRecipe, useCategories), UI components, support and donation-link pages, auth context and admin route gating, the Sous Chef drawer, hook, clarifying-question form, SSE parser, streaming client, and the admin ingredient-profiles panel.
 
 ### E2E — Playwright (6 spec files)
 ```bash
@@ -532,7 +589,7 @@ gcloud logging read 'resource.labels.service_name="mfs-backend" AND textPayload:
 
 | Branch | Deployment |
 |--------|-----------|
-| `main` | Production — your custom domain |
+| `main` | Production — `madeforseconds.pages.dev` |
 | Any other branch | Preview — `<branch-name>.madeforseconds.pages.dev` |
 
 All `*.madeforseconds.pages.dev` preview URLs are pre-approved in the backend CORS config.

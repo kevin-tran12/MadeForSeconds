@@ -202,3 +202,22 @@ resource "google_firestore_field" "assistant_feedback_ttl" {
 
   depends_on = [google_firestore_database.default]
 }
+
+# MCP idempotency-key cache (backend/app/mcp_server/idempotency.py) — one doc
+# per (client_id, key) pair for create_recipe/create_expense/the Instagram
+# publishers, kept only long enough for a client to safely retry a call that
+# timed out. The backend stamps `ttl` = created_at + 24 hours (the same
+# window idempotency.py's TTL_HOURS constant uses — keep the two in sync,
+# same convention as processed_events_ttl's own comment). Same billed-TTL-
+# delete caveat and index_config {} reasoning as processed_events above.
+resource "google_firestore_field" "mcp_idempotency_ttl" {
+  project    = var.gcp_project_id
+  database   = google_firestore_database.default.name
+  collection = "mcp_idempotency"
+  field      = "ttl"
+
+  ttl_config {}
+  index_config {}
+
+  depends_on = [google_firestore_database.default]
+}

@@ -69,6 +69,21 @@ async def update_experience(
     return {"cooking_experience": result}
 
 
+@router.get("/me/data", dependencies=[Depends(rate_limit("me_export", 5, 3600))])
+async def export_my_data(user: UserIdentity = Depends(require_user)) -> dict:
+    """Subject-access export: everything stored about the caller, as JSON.
+
+    Only ever returns the caller's own records — the lookup keys are the
+    caller's uid and the hash of their own email, both taken from the verified
+    token, never from the request.
+    """
+    db = get_db()
+    data = await anyio.to_thread.run_sync(
+        users.export_user_data, db, user.uid, keyed_hash(user.email)
+    )
+    return {"email": user.email, **data}
+
+
 @router.delete("/me/data", dependencies=[Depends(rate_limit("me_delete", 5, 3600))])
 async def delete_my_data(user: UserIdentity = Depends(require_user)) -> dict:
     """Delete-my-data: the users record, feedback, and supporter uid links."""

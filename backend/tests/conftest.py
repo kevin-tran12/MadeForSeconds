@@ -52,10 +52,74 @@ def mock_db():
         yield mock
 
 
+def _chain_db():
+    """A Firestore-client MagicMock whose chainable query methods
+    (collection/document/where/order_by/limit/select/start_after) all return
+    itself, so a test can set .stream.side_effect / .get.return_value on one
+    object regardless of how deep the tool under test chains the query.
+
+    start_after was added for S7's cursor pagination (list_recipes) — an
+    unconfigured MagicMock method returns a fresh, unrelated child mock by
+    default, which silently breaks the chain: a cursor-carrying call's
+    .limit(...).stream() then runs against that unrelated mock instead of
+    this one, its default (empty) iteration, not whatever .stream.side_effect
+    was actually configured for. Caught this exact way once, not by
+    inspection — the first pagination test written against a fixture missing
+    this line failed with an empty second page for no visible reason.
+    """
+    mock = MagicMock()
+    mock.collection.return_value = mock
+    mock.document.return_value = mock
+    mock.where.return_value = mock
+    mock.order_by.return_value = mock
+    mock.limit.return_value = mock
+    mock.select.return_value = mock
+    mock.start_after.return_value = mock
+    return mock
+
+
+@pytest.fixture
+def mcp_db():
+    """A mocked Firestore client for the MCP tool suite.
+
+    Each app.mcp_server.tools.<domain> module binds its own `get_db` name
+    (the package has no single shared import to patch since the mcp_server
+    split), so this patches the four that call it — recipes, ingredients,
+    social, expenses; images.py never touches Firestore — plus the recipe
+    and ingredient services' own cache bindings (each imports its own
+    `cache` reference, so both need patching independently), the same
+    combination test_mcp_tools.py's own `db` fixture used to provide via a
+    single `app.mcp_server.get_db` patch. Also patches
+    app.mcp_server.audit.get_db (S13's audit trail, called from every
+    read_only=False tool via wrapper.py) — without it, every mutating-tool
+    test here would additionally attempt a real Firestore write and log a
+    WARNING on the (swallowed, but noisy) failure. Uses its own separate
+    mock rather than reusing `mock`: several existing tests assert exact
+    call counts on `mock` itself (e.g. `db.set.assert_not_called()`), and
+    audit's own unrelated `.set()` call would silently break those.
+    Also patches app.mcp_server.resources.get_db (S12): resources.py binds
+    its own `get_db` for the reads it serves directly, so without it a
+    resource read would reach real Firestore even though every tool here is
+    mocked.
+    """
+    mock = _chain_db()
+    with (
+        patch("app.mcp_server.tools.recipes.get_db", return_value=mock),
+        patch("app.mcp_server.tools.ingredients.get_db", return_value=mock),
+        patch("app.mcp_server.tools.social.get_db", return_value=mock),
+        patch("app.mcp_server.tools.expenses.get_db", return_value=mock),
+        patch("app.mcp_server.resources.get_db", return_value=mock),
+        patch("app.mcp_server.audit.get_db", return_value=_chain_db()),
+        patch("app.services.recipes.cache"),
+        patch("app.services.ingredients.cache"),
+    ):
+        yield mock
+
+
 @pytest.fixture
 def mock_admin():
     """Returns a mock admin email."""
-    return "admin@madeforseconds.com"
+    return "admin@example.com"
 
 
 @pytest.fixture

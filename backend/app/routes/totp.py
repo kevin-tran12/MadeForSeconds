@@ -43,7 +43,7 @@ async def totp_setup(request: Request):
     if config and config.get("enabled"):
         raise HTTPException(status_code=400, detail="TOTP is already configured. Reset before reconfiguring.")
 
-    admin_email = getattr(request.state, "admin_email", "admin@madeforseconds.com")
+    admin_email = request.state.admin_email  # always set by require_admin
     secret = generate_secret()
     qr_code = generate_qr_data_uri(secret, admin_email)
 
@@ -58,7 +58,7 @@ async def totp_confirm_setup(body: ConfirmSetupRequest, request: Request):
 
     save_totp_config(body.secret)
 
-    admin_email = getattr(request.state, "admin_email", "admin@madeforseconds.com")
+    admin_email = request.state.admin_email  # always set by require_admin
     token = create_session_token(admin_email)
 
     return {"enabled": True, "token": token}
@@ -74,7 +74,7 @@ async def totp_verify(body: VerifyRequest, request: Request):
     if not verify_code(config["secret"], body.code):
         raise HTTPException(status_code=400, detail="Invalid code")
 
-    admin_email = getattr(request.state, "admin_email", "admin@madeforseconds.com")
+    admin_email = request.state.admin_email  # always set by require_admin
     token = create_session_token(admin_email)
 
     return {"token": token}

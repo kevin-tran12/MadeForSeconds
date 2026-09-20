@@ -16,7 +16,15 @@ test.describe('Recipe Detail', () => {
     // Check key elements
     await expect(page.locator('h1')).toBeVisible();
     await expect(page.locator('h2:has-text("Grocery List")')).toBeVisible();
-    await expect(page.locator('h2:has-text("Instructions")')).toBeVisible();
+    // A single-component recipe renders one <h2>Instructions</h2>; a
+    // multi-component one (Hainanese chicken rice) renders an <h3>Instructions</h3>
+    // per component and no top-level heading at all. Seed data now spaces
+    // recipes a second apart, so which one sorts first is deterministic — but
+    // this deliberately still holds for either layout, so the test does not
+    // silently depend on seed ordering to stay green.
+    await expect(
+      page.locator('h2:has-text("Instructions"), h3:has-text("Instructions")').first()
+    ).toBeVisible();
   });
 
   test('cooking mode toggle', async ({ page }) => {

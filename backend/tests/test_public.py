@@ -149,6 +149,8 @@ def test_sitemap_urls_use_frontend_host_and_trailing_slashes(client, mock_db):
     body = response.text
     assert "<loc>http://localhost:5173/recipes/</loc>" in body
     assert "<loc>http://localhost:5173/recipes/tom-yum/</loc>" in body
+    assert "<loc>http://localhost:5173/privacy/</loc>" in body
+    assert "<loc>http://localhost:5173/disclaimer/</loc>" in body
     assert "<lastmod>2026-01-02</lastmod>" in body
 
 def test_feed_self_link_points_at_api_host(client, mock_db, sample_recipe_doc):

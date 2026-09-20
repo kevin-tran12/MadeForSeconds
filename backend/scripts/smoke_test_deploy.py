@@ -58,6 +58,67 @@ def _get_tolerating_cold_start(url: str, attempts: int = 4, timeout: float = 20.
     raise last_exc
 
 
+def _post_json(url: str, payload: dict, timeout: float = 15.0):
+    """Like _get, but a POST with a JSON body, returning response headers
+    too — the MCP auth-challenge check below needs to read
+    WWW-Authenticate, which no other check in this script has needed.
+
+    Returns the headers as the http.client.HTTPMessage urllib itself
+    already hands back (an email.message.Message subclass), NOT a plain
+    dict — .get() on that object is natively case-insensitive per RFC 9110
+    (HTTP header names are case-insensitive), which a bare dict(...)
+    conversion silently throws away. Caught this for real: Cloud Run's
+    front end returned a lowercased `www-authenticate` header against a
+    live candidate revision, and an earlier version of this function that
+    did `dict(resp.headers)` then looked it up as `headers.get(
+    "WWW-Authenticate")` — exact-case only — always found nothing,
+    failing every deploy at this check regardless of whether the
+    challenge was actually correct."""
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json, text/event-stream"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310 - url is always this script's own --url argument
+            return resp.status, resp.read(), resp.headers
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read(), exc.headers
+
+
+_MCP_INITIALIZE_BODY = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "smoke-test", "version": "0"},
+    },
+}
+
+
+def _check_mcp_requires_auth(base: str) -> None:
+    """S9: a bare POST /mcp (no bearer token) must be rejected with a 401
+    whose WWW-Authenticate challenge points at the protected-resource
+    metadata endpoint — the OAuth discovery step every real MCP client
+    depends on to find WorkOS AuthKit (see docs/DEPLOYMENT.md's MCP token
+    binding section). Factored out of run() as its own function, the same
+    reason _get_tolerating_cold_start is: so this exact assertion can be
+    unit-tested (test_smoke_test_deploy.py) without a live Cloud Run
+    revision, by patching _post_json the way existing tests patch _get."""
+    status, _, headers = _post_json(f"{base}/mcp", _MCP_INITIALIZE_BODY)
+    _check("POST /mcp without a token returns 401", status == 401, f"HTTP {status}")
+    www_authenticate = headers.get("WWW-Authenticate", "")
+    _check(
+        "401 challenge points at protected-resource metadata",
+        "resource_metadata" in www_authenticate,
+        f"WWW-Authenticate: {www_authenticate!r}",
+    )
+
+
 def _check(label: str, condition: bool, detail: str = "") -> None:
     status = "PASS" if condition else "FAIL"
     print(f"  [{status}] {label}" + (f" — {detail}" if detail and not condition else ""))
@@ -91,6 +152,9 @@ def run(args: argparse.Namespace) -> int:
         print("\n[3] Public categories list")
         status, body = _get(f"{base}/api/categories")
         _check("GET /api/categories returns 200", status == 200, f"HTTP {status}")
+
+        print("\n[4] MCP endpoint requires auth")
+        _check_mcp_requires_auth(base)
 
         print("\nAll checks passed.")
         return 0

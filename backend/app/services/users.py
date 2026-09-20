@@ -114,6 +114,64 @@ def increment_answers(db, uid: str, now: datetime | None = None) -> None:
     )
 
 
+def _jsonable(value):
+    """Firestore datetimes -> ISO strings, recursively. Everything the export
+    returns has to survive JSON encoding."""
+    if isinstance(value, datetime):
+        return (_as_utc(value) or value).isoformat()
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return value
+
+
+def export_user_data(db, uid: str, user_hash: str) -> dict:
+    """Subject-access export: everything stored about a reader, read-only.
+
+    Deliberately mirrors ``delete_user_data`` source for source, so the two can
+    never disagree about what "your data" means. The one addition is
+    ``donation_transactions`` — deletion keeps those (they are financial
+    records) but the reader is still entitled to see them, and they are
+    reachable because the ledger hashes the email with the same ``keyed_hash``
+    (services/donation_ledger.py:30).
+
+    Stripe ids are included: they are the reader's own payment references, and
+    the export is only ever served to the authenticated owner of the uid.
+    """
+    snap = db.collection("users").document(uid).get()
+    profile = _jsonable(snap.to_dict() or {}) if snap.exists else None
+
+    feedback = [
+        _jsonable(doc.to_dict() or {})
+        for doc in db.collection("assistant_feedback")
+        .where(filter=FieldFilter("user_hash", "==", user_hash))
+        .stream()
+    ]
+
+    supporter_records: dict[str, list] = {}
+    for collection in ("subscribers", "donations"):
+        supporter_records[collection] = [
+            _jsonable(doc.to_dict() or {})
+            for doc in db.collection(collection).where(filter=FieldFilter("uid", "==", uid)).stream()
+        ]
+
+    payments = [
+        _jsonable(doc.to_dict() or {})
+        for doc in db.collection("donation_transactions")
+        .where(filter=FieldFilter("email_hash", "==", user_hash))
+        .stream()
+    ]
+
+    return {
+        "profile": profile,
+        "assistant_feedback": feedback,
+        "subscribers": supporter_records["subscribers"],
+        "donations": supporter_records["donations"],
+        "donation_transactions": payments,
+    }
+
+
 def delete_user_data(db, uid: str, user_hash: str) -> dict:
     """Erase what the assistant stored about a reader: the users doc, their
     feedback (found by hashed email), and the uid link on any supporter
