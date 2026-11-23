@@ -1,7 +1,8 @@
 """Remote MCP server for managing recipes and expenses from Claude conversations.
 
-Claude clients (Claude Code, claude.ai Projects) connect via Streamable HTTP.
-The full workflow happens without the admin web UI:
+MCP clients — Claude (Claude Code, claude.ai connectors) and ChatGPT
+(custom connectors / apps) — connect via Streamable HTTP. The full workflow
+happens without the admin web UI:
 
 1. ``list_categories`` / ``list_recipes`` to discover existing content
 2. ``create_recipe`` to save a draft (slug conflicts return a pointer to the
@@ -17,7 +18,8 @@ PUT the file, then pass the returned ``final_url`` to ``create_expense``.
 
 This is the only module in the package that imports the ``mcp`` SDK — every
 tool lives in its own module under ``tools/`` (one per domain: recipes,
-images, social, expenses), each exposing a ``TOOLS`` tuple and a
+ingredients, images, social, expenses, plus ``discovery`` — the
+``search``/``fetch`` pair ChatGPT's chat and deep-research modes call), each exposing a ``TOOLS`` tuple and a
 ``register(mcp)`` function. ``TOOL_MODULES`` below lists them in the order
 their workflow paragraph appears above.
 
@@ -38,7 +40,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from ..config import settings
 from ..mcp_auth import WorkOSTokenVerifier
 from . import prompts, resources
-from .tools import expenses, images, ingredients, recipes, social
+from .tools import discovery, expenses, images, ingredients, recipes, social
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +76,18 @@ publish_instagram_post and publish_recipe_to_instagram take an
 idempotency_key — pass the same value again on a retry after a timeout to
 get back the original result instead of duplicating the write or the post.
 For a timed-out write to any other tool, first call list_recipes or
-social_status to see whether it landed — a blind retry duplicates it."""
+social_status to see whether it landed — a blind retry duplicates it.
+
+Discovery: search(query) finds recipes and ingredient profiles by free text
+and fetch(id) returns one as readable text — the pair ChatGPT's chat and
+deep-research modes use. Both are read-only; the authoring tools above are
+still the way to change anything."""
 
 # One tools/*.py module per domain, in the order its workflow paragraph
 # appears in INSTRUCTIONS above. Each exposes TOOLS (a tuple, source order)
 # and register(mcp) — the tool surface is exactly the union of those tuples,
 # nothing registers by side effect.
-TOOL_MODULES = (recipes, ingredients, images, social, expenses)
+TOOL_MODULES = (recipes, ingredients, images, social, expenses, discovery)
 
 # Resources (read-only, URI-addressed) and prompts (operator-chosen starting
 # points). Same explicit register(mcp) contract as the tool modules, and

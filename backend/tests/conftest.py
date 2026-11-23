@@ -100,7 +100,8 @@ def mcp_db():
     Also patches app.mcp_server.resources.get_db (S12): resources.py binds
     its own `get_db` for the reads it serves directly, so without it a
     resource read would reach real Firestore even though every tool here is
-    mocked.
+    mocked. tools/discovery.py (the ChatGPT search/fetch pair) binds its own
+    get_db for the same reason.
     """
     mock = _chain_db()
     with (
@@ -108,6 +109,7 @@ def mcp_db():
         patch("app.mcp_server.tools.ingredients.get_db", return_value=mock),
         patch("app.mcp_server.tools.social.get_db", return_value=mock),
         patch("app.mcp_server.tools.expenses.get_db", return_value=mock),
+        patch("app.mcp_server.tools.discovery.get_db", return_value=mock),
         patch("app.mcp_server.resources.get_db", return_value=mock),
         patch("app.mcp_server.audit.get_db", return_value=_chain_db()),
         patch("app.services.recipes.cache"),

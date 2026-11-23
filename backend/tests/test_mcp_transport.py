@@ -24,7 +24,15 @@ DOCUMENTED_TOOLS = {
     "publish_instagram_post", "publish_recipe_to_instagram", "get_social_kit",
     "social_status",
     "list_ingredients", "get_ingredient", "upsert_ingredient", "delete_ingredient",
+    "search", "fetch",
 }
+
+# The ChatGPT discovery pair (tools/discovery.py) is the one exception to the
+# "no output schema" rule below: ChatGPT reads search/fetch results from
+# structuredContent, which the SDK only emits for a tool with an output
+# schema. Theirs is the open `dict[str, Any]` object schema, so the
+# `{"error": ...}` dicts still validate — the rule's actual reason.
+STRUCTURED_OUTPUT_TOOLS = {"search", "fetch"}
 
 INITIALIZE_BODY = {
     "jsonrpc": "2.0",
@@ -99,7 +107,10 @@ class TestInMemoryClient:
         components_variants = schema["properties"]["components"]["anyOf"]
         components_array = next(v for v in components_variants if v.get("type") == "array")
         assert components_array["maxItems"] == 5
-        assert all(t.output_schema is None for t in result.tools)
+        assert all(t.output_schema is None for t in result.tools if t.name not in STRUCTURED_OUTPUT_TOOLS)
+        for name in STRUCTURED_OUTPUT_TOOLS:
+            assert by_name[name].output_schema["type"] == "object"
+            assert "required" not in by_name[name].output_schema
 
         def hints(name):
             a = by_name[name].annotations
@@ -125,6 +136,8 @@ class TestInMemoryClient:
         assert hints("get_ingredient") == (True, False, False, False)
         assert hints("upsert_ingredient") == (False, False, True, False)
         assert hints("delete_ingredient") == (False, True, False, False)
+        assert hints("search") == (True, False, False, False)
+        assert hints("fetch") == (True, False, False, False)
 
     @pytest.mark.asyncio
     async def test_snapshot_typed_enum_schemas(self):

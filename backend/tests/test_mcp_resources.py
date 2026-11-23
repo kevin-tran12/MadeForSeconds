@@ -136,7 +136,8 @@ class TestResourceSurface:
         renames a tool, that is a regression this file should catch."""
         async with Client(mcp_server.mcp) as c:
             names = {t.name for t in (await c.list_tools()).tools}
-        assert len(names) == 19
+        # 19 authoring/social tools + the ChatGPT search/fetch pair (tools/discovery.py).
+        assert len(names) == 21
         assert "get_social_kit" in names
 
 
