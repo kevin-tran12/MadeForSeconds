@@ -21,10 +21,14 @@ qrcode[pil]>=8.2,<9.0.0
 # qrcode[pil], which is fragile: a future qrcode release dropping or
 # re-scoping its [pil] extra would silently remove a dependency this module
 # actually imports.
-Pillow>=12.3.0,<13.0.0
+# 13.x: bound raised 2026-11-23 — pip-audit flagged 42 CVEs in 12.3.0 whose only
+# fix is 13.0.0; the suite's PIL coverage (services/uploads.py tests) passed on it.
+Pillow>=13.0.0,<14.0.0
 # mcp 2.x (2026-07-28 spec; stateless core, built-in OpenTelemetry spans). v1 is
 # maintenance-only. Do not pin mcp-types separately; the SDK owns that version.
-mcp[cli]>=2.1.1,<3.0.0
+# Floor raised 2.1.1 -> 2.2.0 (2026-11-23): 2.1.1 carries five pip-audit CVEs
+# (CVE-2026-59951, -115563, -116684/5/6) all fixed in 2.2.0.
+mcp[cli]>=2.2.0,<3.0.0
 # Exports mcp's built-in spans to Cloud Trace (app/tracing.py). opentelemetry-api
 # is already pulled in transitively by mcp; the sdk package must be compatible
 # with whichever api version that resolves to, so let pip pick the matching
