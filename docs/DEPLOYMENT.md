@@ -1341,11 +1341,48 @@ variables in the pipeline (see
 settings with safe defaults; add them as Cloud Run env vars if you ever need
 them.
 
-**claude.ai custom connector:** add the URL `https://<cloud-run-url>/mcp/`,
-leave the OAuth Client ID/Secret **blank** (DCR handles registration), then
-complete the WorkOS login as the admin.
+**claude.ai custom connector:** add the URL `https://<cloud-run-url>/mcp`
+(no trailing slash — `/mcp/` answers with a 307 to `/mcp`, and a client
+that does not replay its POST across a redirect never connects), leave the
+OAuth Client ID/Secret **blank** (DCR handles registration), then complete
+the WorkOS login as the admin.
 
-**Claude Code:** `claude mcp add --transport http madeforseconds https://<cloud-run-url>/mcp/`,
+**ChatGPT connector / app:** nothing server-side is ChatGPT-specific — it
+speaks the same OAuth 2.1 flow (RFC 9728 protected-resource metadata →
+WorkOS discovery → Dynamic Client Registration → PKCE) and registers its own
+redirect URI through DCR, so there is no allowlist to edit in WorkOS. In
+ChatGPT, per OpenAI's "Building MCP servers" guide: open **Plugins**
+(chatgpt.com/plugins), press **+**, choose **Add custom MCP server**, enter
+URL `https://<cloud-run-url>/mcp` (no trailing slash, as above) with
+authentication **OAuth** and the client id/secret blank, accept the risk
+notice, **Create as a plugin**, then complete the WorkOS login as the
+admin. Older ChatGPT builds put the same flow under *Settings → Connectors
+→ Advanced → Developer mode → Create*. Two things to know:
+
+- *Which tools ChatGPT calls depends on the mode.* Developer mode and the
+  Apps SDK expose every tool, writes included — ChatGPT asks for
+  confirmation before each write. Ordinary chat and deep research only call
+  the read-only `search(query)` / `fetch(id)` pair
+  (`backend/app/mcp_server/tools/discovery.py`), which exists for exactly
+  this: `search` covers recipes (drafts included) and ingredient profiles,
+  `fetch` returns one as readable text with a `url` ChatGPT cites — the
+  public recipe page for a published recipe, empty for drafts. Both return
+  `structuredContent` plus the same JSON as text, the shape OpenAI's MCP
+  guide asks for.
+- *Plan gating is ChatGPT's, not ours.* OpenAI has moved the custom-server
+  controls between plans and settings pages more than once; if the create
+  button is missing, check OpenAI's current "Building MCP servers" guide
+  rather than the backend. Write tools in particular have been limited to
+  Business/Enterprise/Edu at times, with Plus/Pro read-only.
+
+If the connector reports an auth failure, the diagnosis is the same as for
+claude.ai: look for `MCP token rejected` in the backend log (owner-subject
+or audience mismatch, see token binding above). ChatGPT registers a
+separate DCR client, so its calls show up under their own `client_id` in
+`MCP_TOOL` log lines, the `mcp_audit` collection, and the per-client rate
+budgets.
+
+**Claude Code:** `claude mcp add --transport http madeforseconds https://<cloud-run-url>/mcp`,
 then run `/mcp` to authenticate via the browser. No static token needed.
 
 Set `MCP_TIMEOUT=30000` in the client environment — the backend scales to

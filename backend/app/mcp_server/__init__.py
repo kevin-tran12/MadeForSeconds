@@ -28,6 +28,7 @@ single-module version this replaced.
 """
 
 from .server import INSTRUCTIONS, TOOL_MODULES, build_app, build_server, create_mcp_app, mcp
+from .tools.discovery import fetch, search
 from .tools.expenses import create_expense
 from .tools.images import request_image_upload, upload_image_from_url
 from .tools.ingredients import delete_ingredient, get_ingredient, list_ingredients, upsert_ingredient
@@ -53,6 +54,7 @@ __all__ = [
     "create_recipe",
     "delete_ingredient",
     "delete_recipe",
+    "fetch",
     "get_ingredient",
     "get_recipe",
     "get_social_kit",
@@ -64,6 +66,7 @@ __all__ = [
     "publish_recipe",
     "publish_recipe_to_instagram",
     "request_image_upload",
+    "search",
     "social_status",
     "unpublish_recipe",
     "update_recipe",
