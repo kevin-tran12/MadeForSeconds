@@ -55,8 +55,11 @@ _SEARCH_FIELDS = (
     "slug", "title", "description", "published", "created_at", "updated_at", "categories", "labels",
 )
 # Hard cap on how many recipes one search call scans, so a single call can
-# never walk an unbounded collection. 300 is several times the catalogue.
-_MAX_SCANNED_RECIPES = 300
+# never walk an unbounded collection. 1000 is an order of magnitude above
+# the catalogue; if a scan ever fills it, recipes older than the cap become
+# unsearchable, so _search_recipes logs MCP_SEARCH_TRUNCATED when that
+# happens rather than failing silently.
+_MAX_SCANNED_RECIPES = 1000
 _MAX_RESULTS = 50
 
 
@@ -87,7 +90,9 @@ def _recipe_search_query():
 def _search_recipes(terms: list[str]) -> list[tuple[int, dict]]:
     """(rank, result) pairs — rank 0 for a title hit, 1 for anything else."""
     hits: list[tuple[int, dict]] = []
+    scanned = 0
     for doc in _recipe_search_query().stream():
+        scanned += 1
         data = doc.to_dict() or {}
         title = data.get("title", "")
         rest = " ".join(
@@ -109,6 +114,12 @@ def _search_recipes(terms: list[str]) -> list[tuple[int, dict]]:
                 "url": _public_recipe_url(slug, data.get("published", False)),
             },
         ))
+    if scanned >= _MAX_SCANNED_RECIPES:
+        logger.warning(
+            "MCP_SEARCH_TRUNCATED scanned=%d cap=%d — recipes older than the cap are not searchable",
+            scanned,
+            _MAX_SCANNED_RECIPES,
+        )
     return hits
 
 
@@ -153,14 +164,21 @@ def search(query: str) -> dict[str, Any]:
 
 
 def _lines_for_ingredients(items: list[dict]) -> list[str]:
+    """One "- amount unit item" line per ingredient, under a "Group:" heading
+    whenever the group changes — including back to none, so an ungrouped
+    ingredient after a grouped block is never listed under that group."""
     lines = []
     group = None
-    for ing in items:
-        if ing.get("group") and ing["group"] != group:
-            group = ing["group"]
-            lines.append(f"\n{group}:")
-        amount = " ".join(p for p in (ing.get("amount", ""), ing.get("unit", "")) if p)
-        lines.append(f"- {amount} {ing.get('item', '')}".rstrip())
+    for i, ing in enumerate(items):
+        this_group = ing.get("group") or None
+        if this_group != group:
+            group = this_group
+            if group:
+                lines.append(f"\n{group}:")
+            elif i:
+                lines.append("\nOther:")
+        parts = [p for p in (ing.get("amount", ""), ing.get("unit", ""), ing.get("item", "")) if p]
+        lines.append("- " + " ".join(parts))
     return lines
 
 

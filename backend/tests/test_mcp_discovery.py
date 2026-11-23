@@ -93,7 +93,12 @@ class TestSearch:
                 _doc(id="b", title="Fish Sauce Wings", slug="fish-sauce-wings"),
                 _doc(id="c", title="Banh Mi", slug="banh-mi", description="Sandwich", categories=["lunch"]),
             ]),
-            iter([_profile_doc()]),
+            iter([
+                _profile_doc(),
+                # Matches only in its body text, so it ranks below even a
+                # recipe description hit.
+                _profile_doc(slug="salt", name="Salt", aliases=[], what_it_is="Season fish sauce dishes lightly."),
+            ]),
         ]
 
         result = mcp_server.search(query="fish sauce")
@@ -102,6 +107,7 @@ class TestSearch:
             "recipe:fish-sauce-wings",   # title hit
             "ingredient:fish-sauce",     # ingredient name hit
             "recipe:tom-yum",            # description hit
+            "ingredient:salt",           # ingredient body-only hit
         ]
         assert set(result["results"][0]) == {"id", "title", "url"}
 
@@ -136,6 +142,22 @@ class TestSearch:
         mcp_server.search(query="x")
         db.limit.assert_any_call(discovery._MAX_SCANNED_RECIPES)
 
+    def test_a_full_scan_logs_truncation(self, db, caplog):
+        """Recipes older than the cap are unsearchable; that must be visible
+        in the log (MCP_SEARCH_TRUNCATED), not silent."""
+        docs = [_doc(id=f"r{i}", slug=f"r-{i}", title=f"Recipe {i}") for i in range(discovery._MAX_SCANNED_RECIPES)]
+        db.stream.side_effect = [iter(docs), iter([])]
+        with caplog.at_level("WARNING", logger="app.mcp_server.tools.discovery"):
+            result = mcp_server.search(query="recipe")
+        assert result["results"], "the scan itself still returns hits"
+        assert any("MCP_SEARCH_TRUNCATED" in r.message for r in caplog.records)
+
+    def test_a_partial_scan_does_not_log_truncation(self, db, caplog):
+        db.stream.side_effect = [iter([_doc(id="a")]), iter([])]
+        with caplog.at_level("WARNING", logger="app.mcp_server.tools.discovery"):
+            mcp_server.search(query="pho")
+        assert not any("MCP_SEARCH_TRUNCATED" in r.message for r in caplog.records)
+
 
 # ── fetch ───────────────────────────────────────────────────────────────────
 
@@ -163,6 +185,18 @@ class TestFetch:
         # model_dump(mode="json") already serialised the datetime (RFC 3339, "Z").
         assert result["metadata"]["updated_at"] == "2026-01-02T00:00:00Z"
 
+    def test_ingredient_groups_close_and_blank_amounts_do_not_double_space(self, db):
+        db.stream.return_value = iter([_doc(id="r1", ingredients=[
+            {"item": "chicken", "amount": "2", "unit": "lb"},
+            {"item": "fish sauce", "amount": "2", "unit": "tbsp", "group": "Broth"},
+            {"item": "star anise", "amount": "", "unit": "", "group": "Broth"},
+            {"item": "lime", "amount": "1", "unit": "", "group": None},
+        ])])
+        text = mcp_server.fetch(id="recipe:pho-ga")["text"]
+        assert (
+            "## Ingredients\n- 2 lb chicken\n\nBroth:\n- 2 tbsp fish sauce\n- star anise\n\nOther:\n- 1 lime\n"
+        ) in text
+
     def test_bare_slug_is_treated_as_a_recipe(self, db):
         db.stream.return_value = iter([_doc(id="r1")])
         assert mcp_server.fetch(id="pho-ga")["id"] == "recipe:pho-ga"
@@ -183,15 +217,20 @@ class TestFetch:
             id="r1",
             components=[{
                 "title": "Nuoc cham",
+                "description": "The dipping sauce.",
                 "yield_description": "About 1 cup",
                 "ingredients": [{"item": "lime juice", "amount": "3", "unit": "tbsp"}],
+                "prep_steps": [{"step": 1, "text": "Juice the limes."}],
                 "instructions": [{"step": 1, "text": "Stir."}],
             }],
             nutrition=[{"label": "Calories", "value": 420.5, "unit": "kcal"}],
             secrets=[{"title": "The trick", "body": "Char the onion too."}],
         )])
         text = mcp_server.fetch(id="recipe:pho-ga")["text"]
-        assert "## Nuoc cham\nYield: About 1 cup\nIngredients:\n- 3 tbsp lime juice\nSteps:\n1. Stir." in text
+        assert (
+            "## Nuoc cham\nThe dipping sauce.\nYield: About 1 cup\nIngredients:\n- 3 tbsp lime juice\n"
+            "Prep:\n1. Juice the limes.\nSteps:\n1. Stir."
+        ) in text
         assert "## Nutrition\n- Calories: 420.5 kcal" in text
         assert "## The trick\nChar the onion too." in text
 
